@@ -13,7 +13,7 @@
 		<span class="text-gray-800 dark:text-gray-200">青柠写</span>
 	</h1>
 	<p class="mt-4 text-base text-gray-600 dark:text-gray-400 md:text-xl">
-		轻量简洁的云端同步Markdown编辑器，为随心流动的创意而生
+		轻量简洁的云端同步Markdown编辑器，<br>为随心流动的创意而生
 	</p>
 	<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
 		<button
