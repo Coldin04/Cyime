@@ -45,3 +45,5 @@ Thumbs.db
 # AI generated code
 agent.md
 GEMINI.md
+.gemini/
+.geminiignore
