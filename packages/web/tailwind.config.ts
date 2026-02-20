@@ -1,24 +1,26 @@
 import type { Config } from "tailwindcss";
 
 export default {
+  darkMode: "media",
   content: ["./src/**/*.{html,js,svelte,ts}"],
 
   theme: {
     extend: {
       colors: {
-        "spring-green": {
-          "50": "#edfff7",
-          "100": "#d5ffef",
-          "200": "#aeffdf",
-          "300": "#70ffc7",
-          "400": "#2bfda8",
-          "500": "#00ec8d",
-          "600": "#00c06e",
-          "700": "#009659",
-          "800": "#067549",
-          "900": "#07603e",
-          "950": "#003722"
-        }
+        'riptide': {
+            '50': '#f0fdfb',
+            '100': '#cbfcf4',
+            '200': '#77f6e3',
+            '300': '#5beddc',
+            '400': '#29d8ca',
+            '500': '#10bcb1',
+            '600': '#0a9791',
+            '700': '#0d7875',
+            '800': '#0f605f',
+            '900': '#124f4e',
+            '950': '#032f30',
+        },
+
       }
     }
   },
