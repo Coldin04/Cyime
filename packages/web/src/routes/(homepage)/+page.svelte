@@ -16,14 +16,14 @@
 		轻量简洁的云端同步Markdown编辑器，<br>为随心流动的创意而生
 	</p>
 	<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
-		<button
-			class="rounded-lg bg-riptide-500 py-3 px-6 font-semibold shadow-lg transition-shadow hover:shadow-xl text-riptide-50"
+		<a href="/workspace"
+			class="rounded-xl bg-riptide-500 py-3 px-6 font-semibold shadow-lg transition-shadow hover:shadow-xl text-riptide-50"
 		>
 			开始写作
-		</button>
+		</a>
 		<a
             href="#features"
-			class="rounded-lg bg-white py-3 px-6 font-semibold text-gray-600 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
+			class="rounded-xl bg-white py-3 px-6 font-semibold text-gray-600 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
 		>
 			了解更多
 		</a>
