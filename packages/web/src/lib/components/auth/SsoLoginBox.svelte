@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import * as m from '$paraglide/messages';
 
   type AuthProvider = {
     name: string;
@@ -15,7 +16,7 @@
     try {
       const response = await fetch('/api/v1/auth/config');
       if (!response.ok) {
-        throw new Error('无法获取认证配置');
+        throw new Error(m.sso_login_box_error_fetch_config());
       }
       const data = await response.json();
       authProviders = data.providers || [];
@@ -29,14 +30,14 @@
 </script>
 
 <div class="w-full rounded-2xl border-2 p-8 min-h-48">
-  <h1 class="text-3xl font-semibold mb-4 py-2 text-gray-700 dark:text-gray-300">SSO 登录</h1>
+  <h1 class="text-3xl font-semibold mb-4 py-2 text-gray-700 dark:text-gray-300">{m.sso_login_box_title()}</h1>
   {#if isLoading}
     <div class="flex w-full h-full items-center justify-center rounded-xl">
-      <p class="text-gray-500 dark:text-gray-400 py-4 h-24">正在加载登录选项...</p>
+      <p class="text-gray-500 dark:text-gray-400 py-4 h-24">{m.sso_login_box_loading_options()}</p>
     </div>
   {:else if error}
     <div class="text-center text-red-500">
-      <p>加载登录选项时发生错误:</p>
+      <p>{m.sso_login_box_error_loading_options()}</p>
       <p class="font-mono text-sm">{error}</p>
     </div>
   {:else if authProviders.length > 0}
@@ -50,14 +51,14 @@
             ? 'bg-riptide-500 text-riptide-50'
             : 'bg-white text-gray-600 dark:bg-slate-700 dark:text-gray-300'}"
         >
-          使用 {provider.name} 登录
+          {m.sso_login_box_login_with_provider({ providerName: provider.name })}
         </a>
       {/each}
     </div>
   {:else}
     <div class="text-center text-gray-500 dark:text-gray-400">
-      <p>当前没有可用的 SSO 登录选项。</p>
-      <p class="mt-2 text-sm">请联系您的管理员进行配置。</p>
+      <p>{m.sso_login_box_no_sso_options()}</p>
+      <p class="mt-2 text-sm">{m.sso_login_box_contact_admin_for_config()}</p>
     </div>
   {/if}
 </div>
