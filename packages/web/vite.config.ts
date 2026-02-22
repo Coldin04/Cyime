@@ -4,8 +4,12 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [
-		paraglideVitePlugin({ project: './project.inlang', outdir: './src/paraglide' }),
-		sveltekit()
+		sveltekit(),
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/paraglide',
+			strategy: ['url', 'cookie', 'baseLocale']
+		})
 	],
 	server: {
 		proxy: {
