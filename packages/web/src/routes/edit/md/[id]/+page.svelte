@@ -5,12 +5,13 @@
 -->
 <script lang="ts">
   import { page } from '$app/stores';
+  import * as m from '$paraglide/messages';
 </script>
 
 <div class="p-8">
-  <h1 class="text-4xl font-bold">编辑文档</h1>
+  <h1 class="text-4xl font-bold">{m.edit_document_title()}</h1>
   <p class="mt-4">
-    正在编辑文档 ID: {$page.params.id}
+    {m.edit_document_id_prefix()}: {$page.params.id}
   </p>
-  <p>文档编辑器正在建设中...</p>
+  <p>{m.edit_document_editor_under_construction()}</p>
 </div>
