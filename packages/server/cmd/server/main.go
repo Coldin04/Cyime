@@ -7,6 +7,8 @@ import (
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/middleware"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
@@ -37,12 +39,21 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Setup routing
+	// --- ROUTING ---
 	api := app.Group("/api/v1")
+
+	// Auth routes
 	authRoutes := api.Group("/auth")
-	authRoutes.Get("/config", auth.GetAuthConfig)
-	authRoutes.Get("/login/:provider", auth.AuthLogin)
-	authRoutes.Get("/callback/:provider", auth.AuthCallback)
+		authRoutes.Get("/config", auth.GetAuthConfig)
+		authRoutes.Get("/login/:provider", auth.AuthLogin)
+		authRoutes.Get("/callback/:provider", auth.AuthCallback)
+		authRoutes.Post("/refresh", auth.HandleRefresh)
+	
+		// User routes (protected)
+		userRoutes := api.Group("/user", middleware.Protected())
+		userRoutes.Get("/me", user.GetMe)
+	
+
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

@@ -73,6 +73,24 @@ type UserIdentityProvider struct {
 	// _      struct{} `gorm:"uniqueIndex:idx_provider_user,columns:provider_name,provider_user_id"`
 }
 
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (urt *UserRefreshToken) BeforeCreate(tx *gorm.DB) (err error) {
+	if urt.ID == uuid.Nil {
+		urt.ID = uuid.New()
+	}
+	return
+}
+
+// UserRefreshToken stores a user's long-lived refresh token.
+type UserRefreshToken struct {
+	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID `gorm:"not null"`
+	User      User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	TokenHash string    `gorm:"type:varchar(255);not null;uniqueIndex"`
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time
+}
+
 // Set GORM table names to use snake_case
 func (User) TableName() string {
 	return "users"
@@ -84,4 +102,8 @@ func (AuthProvider) TableName() string {
 
 func (UserIdentityProvider) TableName() string {
 	return "user_identity_providers"
+}
+
+func (UserRefreshToken) TableName() string {
+	return "user_refresh_tokens"
 }

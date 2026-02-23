@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -14,7 +15,19 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
+	"gorm.io/gorm"
 )
+
+var tokenService *TokenService
+
+func init() {
+	var err error
+	tokenService, err = NewTokenService()
+	if err != nil {
+		// Using log.Fatalf will stop the application if the token service can't be initialized.
+		log.Fatalf("Failed to initialize TokenService: %v", err)
+	}
+}
 
 // Shared struct to store user info from any provider
 type UserProfile struct {
@@ -96,7 +109,7 @@ func AuthCallback(c *fiber.Ctx) error {
 	if err := database.DB.Where("name = ? AND is_active = ?", providerName, true).First(&dbProvider).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "提供的认证商不存在或未激活"})
 	}
-	
+
 	endpoint, err := getEndpointFromProvider(ctx, &dbProvider)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -120,18 +133,86 @@ func AuthCallback(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
-	// --- User lookup/creation logic would go here ---
-	
-	return c.JSON(fiber.Map{
-		"message": "登录成功！",
-		"email":   userProfile.Email,
-		"name":    userProfile.Name,
-		"subject": userProfile.Subject,
+
+	// --- Transactional User & Token Handling ---
+	var accessToken, refreshToken string
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		// Step 1: Find or create the user.
+		user, txErr := findOrCreateUser(tx, providerName, userProfile)
+		if txErr != nil {
+			return txErr
+		}
+
+		// Step 2: Generate and persist tokens for the user.
+		accessToken, refreshToken, txErr = tokenService.GenerateAndPersistTokens(tx, user)
+		if txErr != nil {
+			return txErr
+		}
+
+		return nil
 	})
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Step 3: Deliver tokens to the client and redirect.
+	return tokenService.DeliverTokensAndRedirect(c, accessToken, refreshToken)
+}
+
+// HandleRefresh handles the token refresh endpoint by delegating to the token service.
+func HandleRefresh(c *fiber.Ctx) error {
+	return tokenService.HandleRefresh(c)
 }
 
 // --- Helper Functions ---
+
+// findOrCreateUser finds an existing user based on provider info or creates a new one.
+// It must be run within a transaction.
+func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile) (*models.User, error) {
+	var identity models.UserIdentityProvider
+
+	// 1. Find identity by provider and provider's user ID
+	err := tx.Preload("User").Where("provider_name = ? AND provider_user_id = ?", providerName, userProfile.Subject).First(&identity).Error
+
+	if err == nil {
+		// Identity found, return the associated user
+		return &identity.User, nil
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		// A different database error occurred
+		return nil, fmt.Errorf("查询身份提供商信息失败: %w", err)
+	}
+
+	// 2. Identity not found, so we create a new user and a new identity.
+	newUser := models.User{
+		Email:       &userProfile.Email,
+		DisplayName: &userProfile.Name,
+		AvatarURL:   &userProfile.Picture,
+	}
+	if err := tx.Create(&newUser).Error; err != nil {
+		return nil, fmt.Errorf("创建新用户失败: %w", err)
+	}
+
+	newIdentity := models.UserIdentityProvider{
+		UserID:         newUser.ID,
+		ProviderName:   providerName,
+		ProviderUserID: userProfile.Subject,
+	}
+	if err := tx.Create(&newIdentity).Error; err != nil {
+		return nil, fmt.Errorf("关联新身份提供商失败: %w", err)
+	}
+
+	// We need to return the user that was just created.
+	// To be safe and ensure all default values (like CreatedAt) are loaded, we can reload it.
+	var createdUser models.User
+	if err := tx.First(&createdUser, newUser.ID).Error; err != nil {
+		return nil, fmt.Errorf("无法重新加载创建的用户: %w", err)
+	}
+
+	return &createdUser, nil
+}
 
 func getEndpointFromProvider(ctx context.Context, provider *models.AuthProvider) (oauth2.Endpoint, error) {
 	switch provider.ProtocolType {
