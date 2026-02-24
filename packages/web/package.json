@@ -9,13 +9,21 @@
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"machine-translate": "inlang machine translate --project project.inlang",
+		"lint": "eslint . --ext .ts,.svelte",
+		"lint:fix": "eslint . --ext .ts,.svelte --fix",
+		"paraglide": "pnpm paraglide-js compile --project ./project.inlang",
+    "paraglide:preview": "cp src/locales/en.json src/locales/en.json.bak && cp src/locales/zh.json src/locales/en.json && pnpm paraglide && mv src/locales/en.json.bak src/locales/en.json"	
 	},
 	"devDependencies": {
+		"@inlang/cli": "^3.0.0",
+		"@inlang/paraglide-js": "^2.12.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@tailwindcss/typography": "^0.5.14",
+		"@types/node": "^25.3.0",
 		"autoprefixer": "^10.4.20",
 		"svelte": "^5.51.0",
 		"svelte-check": "^4.3.6",

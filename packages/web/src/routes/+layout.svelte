@@ -1,4 +1,5 @@
-<script>import "../app.css";
+<script>import '$lib/paraglide-strategy.ts';
+import "../app.css";
 import favicon from '$lib/assets/favicon.svg';
 
 let { children } = $props();</script>
