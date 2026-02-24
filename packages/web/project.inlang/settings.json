@@ -1,9 +1,9 @@
 {
   "$schema": "https://inlang.com/schema/project-settings",
-  "baseLocale": "zh",
+  "baseLocale": "en",
   "locales": [
-    "zh",
-    "en"
+    "en",
+    "zh"
   ],
   "modules": [
     "https://cdn.jsdelivr.net/npm/@inlang/plugin-message-format@4/dist/index.js",
