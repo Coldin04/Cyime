@@ -1,4 +1,5 @@
 <script lang="ts">
+    import * as m from '$paraglide/messages';    
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -23,7 +24,7 @@
 
 <div class="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-gray-900">
 	<div class="text-center">
-		<h1 class="text-xl font-semibold text-gray-700 dark:text-gray-200">正在完成登录...</h1>
-		<p class="mt-2 text-sm text-gray-500">请稍候，我们将带您前往工作区。</p>
+		<h1 class="text-xl font-semibold text-gray-700 dark:text-gray-200">{m.auth_callback_finish_title()}</h1>
+		<p class="mt-2 text-sm text-gray-500">{m.auth_callback_finish_description()}</p>
 	</div>
 </div>

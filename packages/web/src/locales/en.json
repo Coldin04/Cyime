@@ -10,6 +10,8 @@
   "sso_login_box_contact_admin_for_config": "Please contact your administrator for configuration.",
   "login_page_tagline_part1": "Lightweight and concise cloud-synced Markdown editor,",
   "login_page_tagline_part2": "born for freely flowing creativity",
+  "auth_callback_finish_title": "Finishing Login...",
+  "auth_callback_finish_description": "Please wait, we are finishing the login and returning to your workspace.",
   "homepage_brand_name_chinese": "",
   "homepage_tagline_part1": "Lightweight and concise cloud-synced Markdown editor,",
   "homepage_tagline_part2": "born for freely flowing creativity",
@@ -29,5 +31,6 @@
   "edit_document_id_prefix": "Editing document ID:",
   "edit_document_editor_under_construction": "Document editor under construction...",
   "workspace_title": "Workspace",
-  "workspace_document_list_under_construction": "Document list page under construction..."
+  "workspace_document_list_under_construction": "Document list page under construction...",
+  "workspace_loading": "Loading workspace..."
 }
