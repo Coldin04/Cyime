@@ -165,6 +165,27 @@ func HandleRefresh(c *fiber.Ctx) error {
 	return tokenService.HandleRefresh(c)
 }
 
+// HandleLogout handles the user logout process.
+func HandleLogout(c *fiber.Ctx) error {
+	// Get the refresh token from the secure cookie.
+	rawRefreshToken := c.Cookies("cyime_refresh_token")
+
+	// If the cookie is not present, there's nothing to do.
+	// The user is already effectively logged out from the server's perspective.
+	if rawRefreshToken != "" {
+		// We don't need to block on the result.
+		// Fire-and-forget the revocation. The most important part is clearing the client-side cookie.
+		_ = tokenService.RevokeRefreshToken(rawRefreshToken)
+	}
+
+	// Instruct the browser to clear the refresh token cookie.
+	// This is the most critical step for the client-side.
+	// We only need to provide the path that the cookie was set with.
+	c.ClearCookie("cyime_refresh_token", "/api/v1/auth")
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 // --- Helper Functions ---
 
 // findOrCreateUser finds an existing user based on provider info or creates a new one.
@@ -255,7 +276,6 @@ func generateState(c *fiber.Ctx) string {
 func verifyState(c *fiber.Ctx) error {
 	stateFromCookie := c.Cookies("oidc_state")
 	stateFromQuery := c.Query("state")
-	c.ClearCookie("oidc_state")
 	if stateFromCookie == "" || stateFromQuery == "" || stateFromCookie != stateFromQuery {
 		return fmt.Errorf("无效的 state 参数")
 	}

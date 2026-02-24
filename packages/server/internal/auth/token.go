@@ -93,6 +93,7 @@ func (s *TokenService) GenerateAndPersistTokens(tx *gorm.DB, user *models.User) 
 
 // DeliverTokensAndRedirect sets the refresh token in a secure cookie and redirects the user.
 func (s *TokenService) DeliverTokensAndRedirect(c *fiber.Ctx, accessToken, refreshToken string) error {
+	// Set the refresh token cookie
 	c.Cookie(&fiber.Cookie{
 		Name:     "cyime_refresh_token",
 		Value:    refreshToken,
@@ -101,6 +102,17 @@ func (s *TokenService) DeliverTokensAndRedirect(c *fiber.Ctx, accessToken, refre
 		Secure:   c.Protocol() == "https", // Only set secure flag if on HTTPS
 		SameSite: "Lax",
 		Path:     "/api/v1/auth", // Important: Scope cookie to the auth path to prevent it being sent on every request
+	})
+
+	// 通过将过期时间设置为过去来清除 oidc_state cookie。
+	c.Cookie(&fiber.Cookie{
+		Name:     "oidc_state",
+		Value:    "",
+		Expires:  time.Now().Add(-time.Hour), // 设置为一小时前，使其立即过期
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+		Path:     "/",
 	})
 
 	frontendCallbackURL := os.Getenv("FRONTEND_CALLBACK_URL")
@@ -133,6 +145,23 @@ func (s *TokenService) generateRefreshToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// RevokeRefreshToken deletes a refresh token from the database.
+func (s *TokenService) RevokeRefreshToken(rawRefreshToken string) error {
+	// Hash the incoming token to look it up in the database.
+	tokenHash := sha256.Sum256([]byte(rawRefreshToken))
+	tokenHashStr := hex.EncodeToString(tokenHash[:])
+
+	// Delete the token from the database.
+	// We use Unscoped() to ensure a hard delete, not a soft delete.
+	result := database.DB.Unscoped().Where("token_hash = ?", tokenHashStr).Delete(&models.UserRefreshToken{})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	return nil
 }
 
 // HandleRefresh processes a refresh token request, implementing token rotation for security.

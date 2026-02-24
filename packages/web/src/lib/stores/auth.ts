@@ -108,12 +108,28 @@ function createAuthStore() {
 		}
 	}
 
-	function logout() {
+	async function logout() {
 		if (refreshTimerId) {
 			clearTimeout(refreshTimerId);
 			refreshTimerId = null;
 		}
-		set({ token: null, user: null, loading: false });
+
+		try {
+			// Inform the backend to revoke the refresh token.
+			const response = await fetch('/api/v1/auth/logout', {
+				method: 'POST'
+			});
+			if (!response.ok) {
+				// We can log this error, but we still want to clear the local state.
+				console.error('Backend logout failed:', response.statusText);
+			}
+		} catch (error) {
+			// Also log network errors etc.
+			console.error('Error during logout API call:', error);
+		} finally {
+			// Always clear the local state to log the user out on the frontend.
+			set({ token: null, user: null, loading: false });
+		}
 	}
 
 	return {

@@ -48,6 +48,7 @@ func main() {
 		authRoutes.Get("/login/:provider", auth.AuthLogin)
 		authRoutes.Get("/callback/:provider", auth.AuthCallback)
 		authRoutes.Post("/refresh", auth.HandleRefresh)
+		authRoutes.Post("/logout", auth.HandleLogout)
 	
 		// User routes (protected)
 		userRoutes := api.Group("/user", middleware.Protected())
