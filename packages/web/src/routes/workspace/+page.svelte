@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$paraglide/messages';
 	import { auth } from '$lib/stores/auth';
+	import SignOut from '~icons/ph/sign-out';
 
 	function handleLogout() {
 		auth.logout();
@@ -14,8 +15,9 @@
 		<h1 class="text-4xl font-bold">{m.workspace_title()}</h1>
 		<button
 			on:click={handleLogout}
-			class="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+			class="flex items-center gap-2 rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
 		>
+			<SignOut />
 			Logout
 		</button>
 	</div>

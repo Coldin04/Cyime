@@ -14,9 +14,10 @@
 		"lint": "eslint . --ext .ts,.svelte",
 		"lint:fix": "eslint . --ext .ts,.svelte --fix",
 		"paraglide": "pnpm paraglide-js compile --project ./project.inlang",
-    "paraglide:preview": "cp src/locales/en.json src/locales/en.json.bak && cp src/locales/zh.json src/locales/en.json && pnpm paraglide && mv src/locales/en.json.bak src/locales/en.json"	
+		"paraglide:preview": "cp src/locales/en.json src/locales/en.json.bak && cp src/locales/zh.json src/locales/en.json && pnpm paraglide && mv src/locales/en.json.bak src/locales/en.json"
 	},
 	"devDependencies": {
+		"@iconify-json/ph": "^1.2.2",
 		"@inlang/cli": "^3.0.0",
 		"@inlang/paraglide-js": "^2.12.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
@@ -29,6 +30,10 @@
 		"svelte-check": "^4.3.6",
 		"tailwindcss": "^3.4.9",
 		"typescript": "^5.9.3",
+		"unplugin-icons": "^23.0.1",
 		"vite": "^7.3.1"
+	},
+	"dependencies": {
+		"phosphor-svelte": "^3.1.0"
 	}
 }
