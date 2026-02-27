@@ -1,7 +1,8 @@
 <div class="flex animate-pulse items-center border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
 	<!-- Name Column -->
 	<div class="flex flex-1 items-center gap-3">
-		<div class="h-6 w-6 rounded bg-zinc-300 dark:bg-zinc-700"></div>
+		<div class="h-4 w-4 rounded"></div>
+		<div class="h-6 w-6 rounded bg-blue-200 dark:bg-blue-900"></div>
 		<div class="h-4 w-40 rounded bg-zinc-300 dark:bg-zinc-700"></div>
 	</div>
 
