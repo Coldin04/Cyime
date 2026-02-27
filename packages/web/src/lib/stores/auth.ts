@@ -81,7 +81,29 @@ function createAuthStore() {
 			update((state) => ({ ...state, loading: false }));
 			return;
 		}
-		// In a future step with persistence, we would check localStorage for a token here.
+
+		// Try to restore session from the backend using the refresh token cookie.
+		try {
+			const response = await fetch('/api/v1/auth/refresh', {
+				method: 'POST'
+			});
+			
+			if (response.ok) {
+				const { accessToken } = await response.json();
+				
+				// Session is valid, restore the token only
+				// User info will be fetched on-demand by components that need it
+				update(state => ({ ...state, token: accessToken, loading: false }));
+				scheduleRefresh(accessToken);
+				console.log('Session restored successfully.');
+				return;
+			}
+		} catch (error) {
+			// Session restoration failed, user is not logged in
+			console.log('No active session found.');
+		}
+
+		// No active session, just set loading to false
 		update((state) => ({ ...state, loading: false }));
 	}
 

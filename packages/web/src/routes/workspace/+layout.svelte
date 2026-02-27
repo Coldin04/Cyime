@@ -10,28 +10,24 @@
 		// We only run this logic in the browser.
 		if (browser) {
 			// We wait for the auth store's loading process to complete.
-			// This prevents a premature redirect before the app has had a chance
-			// to establish a session (e.g., in future versions with localStorage).
-			if (!$auth.loading && !$auth.user) {
-				// If authentication is NOT loading, and we have NO user,
-				// it means the user is definitively logged out. Redirect them.
+			if (!$auth.loading && !$auth.token) {
+				// If loading is complete and there's no token, redirect to login.
 				goto('/login', { replaceState: true });
 			}
 		}
 	}
 </script>
 
-<!-- 
+<!--
   This conditional rendering ensures a good user experience:
   1. If the auth state is loading, show a loading message.
-  2. If loading is complete AND there is a user, show the actual page content.
-  The case where loading is complete and there is no user is handled by the redirect above,
-  so the user will never see a blank page.
+  2. If loading is complete AND there is a token, show the actual page content.
+  User info will be fetched on-demand by components that need it.
 -->
 {#if $auth.loading}
 	<div class="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-gray-900">
 		<p class="text-lg text-gray-600 dark:text-gray-300">{m.workspace_loading()}</p>
 	</div>
-{:else if $auth.user}
+{:else if $auth.token}
 	<slot />
 {/if}
