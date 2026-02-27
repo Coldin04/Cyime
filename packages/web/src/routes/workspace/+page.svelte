@@ -1,25 +1,46 @@
 <script lang="ts">
-	import * as m from '$paraglide/messages';
-	import { auth } from '$lib/stores/auth';
-	import SignOut from '~icons/ph/sign-out';
+	import TopBar from '$lib/components/workspace/TopBar.svelte';
+	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
+	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
+	import FolderListItem from '$lib/components/workspace/FolderListItem.svelte';
+	import MarkdownListItem from '$lib/components/workspace/MarkdownListItem.svelte';
+	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
+	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
+	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
+	import type { ComponentType } from 'svelte';
 
-	function handleLogout() {
-		auth.logout();
-		// No need to call goto('/login') here.
-		// The +layout.svelte guard will react to the store change and handle the redirect.
-	}
+	// 1. Component Mapping for dynamic rendering
+	const componentMap: Record<string, ComponentType> = {
+		folder: FolderListItem,
+		markdown: MarkdownListItem
+	};
+
+	// 2. Placeholder data simulating a backend response
+	const items = [
+		{ id: 1, type: 'folder', name: 'Project Documents' },
+		{ id: 2, type: 'folder', name: 'Meeting Notes' },
+		{ id: 3, type: 'markdown', name: 'Q1 Roadmap.md' },
+		{ id: 4, type: 'markdown', name: 'Component Design Ideas.md' }
+	];
 </script>
 
-<div class="p-8 text-gray-800 dark:text-gray-50">
-	<div class="flex items-center justify-between">
-		<h1 class="text-4xl font-bold">{m.workspace_title()}</h1>
-		<button
-			on:click={handleLogout}
-			class="flex items-center gap-2 rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-		>
-			<SignOut />
-			Logout
-		</button>
+<TopBar />
+
+<main class="container mx-auto px-4 pt-16">
+	<GreetingHeader />
+	<Toolbar />
+
+	<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800/20">
+		<ListHeader />
+		<div class="border-t border-zinc-200 dark:border-zinc-700">
+			<!-- 3. Dynamic rendering using <svelte:component> -->
+			{#each items as item (item.id)}
+				<svelte:component this={componentMap[item.type]} {item} />
+			{/each}
+
+			<!-- Skeleton loaders for loading state -->
+			<FolderListItemSkeleton />
+			<MarkdownListItemSkeleton />
+		</div>
 	</div>
-	<p class="mt-4">{m.workspace_document_list_under_construction()}</p>
-</div>
+</main>
