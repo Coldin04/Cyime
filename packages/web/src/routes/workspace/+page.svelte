@@ -7,10 +7,10 @@
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
-	import type { ComponentType } from 'svelte';
+	import type { Component } from 'svelte';
 
 	// 1. Component Mapping for dynamic rendering
-	const componentMap: Record<string, ComponentType> = {
+	const componentMap: Record<string, Component<any>> = {
 		folder: FolderListItem,
 		markdown: MarkdownListItem
 	};

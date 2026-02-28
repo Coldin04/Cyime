@@ -13,6 +13,7 @@ export default defineConfig({
 		}),
 		Icons({
 			compiler: 'svelte',
+			autoInstall: true,
 		}),
 	],
 	server: {
