@@ -1,0 +1,143 @@
+import { apiFetch } from '$lib/api';
+
+export type FileItem = {
+	id: string;
+	type: 'folder' | 'markdown';
+	name: string;
+	description?: string | null;
+	parentId?: string | null;
+	folderId?: string | null;
+	title?: string | null;
+	excerpt?: string | null;
+	createdAt: string;
+	updatedAt: string;
+	creator: {
+		id: string;
+		displayName: string | null;
+	};
+};
+
+export type FileListResponse = {
+	items: FileItem[];
+	hasMore: boolean;
+	total: number;
+};
+
+export type CreateFolderRequest = {
+	name: string;
+	description?: string | null;
+	parentId?: string | null;
+};
+
+export type CreateFolderResponse = FileItem;
+
+export type CreateMarkdownRequest = {
+	title: string;
+	content: string;
+	folderId?: string | null;
+};
+
+export type CreateMarkdownResponse = FileItem;
+
+export type DeleteResponse = {
+	success: boolean;
+	message: string;
+};
+
+/**
+ * Fetches the file list from the workspace
+ */
+export async function getFiles(params: {
+	parent_id?: string | null;
+	limit?: number;
+	offset?: number;
+	sort_by?: string;
+	order?: string;
+	type?: 'all' | 'folders' | 'markdowns';
+}): Promise<FileListResponse> {
+	const queryParams = new URLSearchParams();
+
+	if (params.parent_id !== undefined && params.parent_id !== null) {
+		queryParams.set('parent_id', params.parent_id);
+	}
+	if (params.limit !== undefined) {
+		queryParams.set('limit', params.limit.toString());
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', params.offset.toString());
+	}
+	if (params.sort_by !== undefined) {
+		queryParams.set('sort_by', params.sort_by);
+	}
+	if (params.order !== undefined) {
+		queryParams.set('order', params.order);
+	}
+	if (params.type !== undefined) {
+		queryParams.set('type', params.type);
+	}
+
+	const response = await apiFetch(`/api/v1/workspace/files?${queryParams.toString()}`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch files');
+	}
+
+	return response.json();
+}
+
+/**
+ * Creates a new folder
+ */
+export async function createFolder(request: CreateFolderRequest): Promise<CreateFolderResponse> {
+	const response = await apiFetch('/api/v1/workspace/folders', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(request)
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to create folder');
+	}
+
+	return response.json();
+}
+
+/**
+ * Creates a new markdown document
+ */
+export async function createMarkdown(request: CreateMarkdownRequest): Promise<CreateMarkdownResponse> {
+	const response = await apiFetch('/api/v1/workspace/markdowns', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(request)
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to create markdown');
+	}
+
+	return response.json();
+}
+
+/**
+ * Deletes a file (soft delete)
+ */
+export async function deleteFile(id: string, type: 'folder' | 'markdown'): Promise<DeleteResponse> {
+	const response = await apiFetch(`/api/v1/workspace/files/${id}?type=${type}`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to delete file');
+	}
+
+	return response.json();
+}
