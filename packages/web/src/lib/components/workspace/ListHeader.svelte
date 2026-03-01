@@ -25,9 +25,9 @@
 
 <div class="group border-b border-zinc-200 dark:border-zinc-700">
 	<div
-		class="container mx-auto flex items-center px-4 py-2 text-sm font-semibold text-zinc-500"
+		class="container mx-auto flex items-center justify-between px-4 py-2 text-sm font-semibold text-zinc-500"
 	>
-		<div class="flex flex-1 items-center gap-3">
+		<div class="flex items-center gap-3">
 			<input
 				bind:this={inputElement}
 				type="checkbox"
@@ -37,7 +37,10 @@
 			/>
 			<span>名称</span>
 		</div>
-		<div class="w-48 hidden sm:block">上次修改</div>
-		<div class="w-32 hidden md:block">创建者</div>
+		<div class="flex items-center justify-end gap-x-4 sm:gap-x-6">
+			<div class="hidden w-28 text-right sm:block">上次修改</div>
+			<div class="hidden w-24 text-right md:block">创建者</div>
+			<div class="w-10" />
+		</div>
 	</div>
 </div>

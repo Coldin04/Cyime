@@ -1,6 +1,7 @@
 <script lang="ts">
 	import FileMd from '~icons/ph/file-md';
 	import type { FileItem } from '$lib/api/workspace';
+	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 
 	let {
 		item,
@@ -54,7 +55,7 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {selectedItems.has(
+	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {selectedItems.has(
 		item.id
 	)
 		? 'bg-blue-50 dark:bg-blue-900/30'
@@ -62,9 +63,8 @@
 	onclick={toggleSelection}
 	onkeydown={handleKeyDown}
 >
-	<!-- Name Column -->
-	<div class="flex flex-1 items-center gap-3">
-		<!-- Checkbox -->
+	<!-- Left Side: Name -->
+	<div class="flex min-w-0 items-center gap-3 pr-4">
 		<input
 			type="checkbox"
 			class="h-4 w-4 rounded border-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
@@ -72,23 +72,35 @@
 			onclick={(e) => e.stopPropagation()}
 			onchange={toggleSelection}
 		/>
-		<FileMd class="h-5 w-5 text-blue-500 dark:text-blue-400" />
+		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
 		<a
 			href="/edit/md/{item.id}"
-			class="font-normal text-zinc-800 dark:text-zinc-200"
+			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
 			onclick={(e) => e.stopPropagation()}
 		>
 			{item.title}
 		</a>
 	</div>
 
-	<!-- Last Modified Column -->
-	<div class="w-48 hidden text-sm text-zinc-600 dark:text-zinc-400 sm:block">
-		{formatRelativeTime(item.updatedAt)}
-	</div>
-
-	<!-- Owner Column -->
-	<div class="w-32 hidden text-sm text-zinc-600 dark:text-zinc-400 md:block">
-		{item.creator.displayName || 'You'}
+	<!-- Right Side: Metadata -->
+	<div class="flex flex-shrink-0 items-center justify-end gap-x-4 sm:gap-x-6">
+		<div class="hidden w-28 text-right text-sm text-zinc-600 dark:text-zinc-400 sm:block">
+			{formatRelativeTime(item.updatedAt)}
+		</div>
+		<div class="hidden w-24 text-right text-sm text-zinc-600 dark:text-zinc-400 md:block pr-0.5">
+			{item.creator.displayName || 'You'}
+		</div>
+		<div class="w-10 flex justify-center">
+			<button
+				class="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
+				onclick={(e) => {
+					e.stopPropagation();
+					// eslint-disable-next-line no-console
+					console.log('More options for', item.id);
+				}}
+			>
+				<DotsThreeVertical class="h-5 w-5" />
+			</button>
+		</div>
 	</div>
 </div>

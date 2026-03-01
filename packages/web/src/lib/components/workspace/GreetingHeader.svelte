@@ -24,7 +24,7 @@
 	}
 </script>
 
-<section class="my-8 flex items-center gap-4">
+<section class="mb-6 flex items-center gap-4">
 	<div
 		class="grid h-16 w-16 flex-shrink-0 place-content-center rounded-full bg-riptide-100 dark:bg-riptide-900"
 	>

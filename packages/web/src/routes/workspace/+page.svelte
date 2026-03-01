@@ -74,11 +74,11 @@
 
 <TopBar />
 
-<main class="container mx-auto px-4 pt-16">
+<main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 	<GreetingHeader />
 	<Toolbar on:createfolder={() => (isCreatingFolder = true)} />
 
-	<div class="mt-8 border-t border-zinc-200 dark:border-zinc-700">
+	<div class="my-6 border-t border-zinc-200 dark:border-zinc-700">
 		<ListHeader
 			{allSelected}
 			{someSelected}

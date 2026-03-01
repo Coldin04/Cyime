@@ -12,6 +12,14 @@
 	let showMenu = $state(false);
 	let menuElement: HTMLElement;
 
+	// A simple representation of the breadcrumb path.
+	// In a real app, this would be derived from the current route or a store.
+	const breadcrumbPath = $state([
+		{ name: 'Workspace', href: '/workspace' },
+		{ name: 'Learning', href: '/workspace' },
+		{ name: 'Svelte', href: null }
+	]);
+
 	const dispatch = createEventDispatcher();
 
 	function toggleMenu() {
@@ -52,28 +60,39 @@
 	}
 </script>
 
-<div class="flex items-center justify-between pt-4 pb-8">
+<div class="flex items-center justify-between">
 	<!-- Breadcrumbs -->
-	<nav aria-label="Breadcrumb" class="flex items-center text-zinc-500 dark:text-zinc-400">
-		<a href="/workspace" class="hover:underline">Workspace</a>
-		<CaretRight class="mx-1 h-4 w-4" />
-		<a href="/workspace" class="hover:underline">Learning</a>
-		<CaretRight class="mx-1 h-4 w-4" />
-		<span class="font-medium text-zinc-800 dark:text-zinc-200">Svelte</span>
+	<nav
+		aria-label="Breadcrumb"
+		class="flex min-w-0 items-center text-zinc-500 dark:text-zinc-400"
+	>
+		{#each breadcrumbPath as segment, i}
+			{#if segment.href}
+				<a href={segment.href} class="truncate hover:underline">
+					{segment.name}
+				</a>
+			{:else}
+				<span class="truncate font-medium text-zinc-800 dark:text-zinc-200">{segment.name}</span>
+			{/if}
+
+			{#if i < breadcrumbPath.length - 1}
+				<CaretRight class="mx-1 h-4 w-4 flex-shrink-0" />
+			{/if}
+		{/each}
 	</nav>
 
 	<!-- Action Buttons -->
-	<div class="relative flex items-center" bind:this={menuElement}>
+	<div class="relative ml-4 flex flex-shrink-0 items-center" bind:this={menuElement}>
 		<button
 			onclick={handleCreateDocument}
-			class="inline-flex items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50"
+			class="inline-flex h-10 items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4"
 		>
 			<Plus class="h-4 w-4" />
-			<span>新建文档</span>
+			<span class="hidden sm:inline">新建文档</span>
 		</button>
 		<button
 			onclick={toggleMenu}
-			class="rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
+			class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
 			aria-label="更多选项"
 		>
 			<DotsThreeVertical class="h-5 w-5" />
@@ -98,3 +117,4 @@
 		{/if}
 	</div>
 </div>
+

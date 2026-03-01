@@ -4,7 +4,7 @@
 </script>
 
 <nav
-	class="fixed top-0 left-0 right-0 z-30 flex h-16 items-center justify-between border-b border-black/10 bg-white/80 px-4 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
+	class="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-black/10 bg-white/80 px-4 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
 >
 	<div class="flex items-center gap-2">
 		<span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text font-bold text-transparent text-lg">CyimeWrite</span>
