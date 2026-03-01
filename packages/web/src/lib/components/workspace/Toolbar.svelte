@@ -3,17 +3,25 @@
 	import Plus from '~icons/ph/plus';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import FolderPlus from '~icons/ph/folder-plus';
+	import Trash from '~icons/ph/trash';
+	import X from '~icons/ph/x';
 	import { createEventDispatcher } from 'svelte';
 	import { createMarkdown } from '$lib/api/workspace';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 
+	let {
+		bulkMode = false,
+		selectedItemsCount = 0
+	}: {
+		bulkMode?: boolean;
+		selectedItemsCount?: number;
+	} = $props();
+
 	let currentFolderId: string | null = null;
 	let showMenu = $state(false);
 	let menuElement: HTMLElement;
 
-	// A simple representation of the breadcrumb path.
-	// In a real app, this would be derived from the current route or a store.
 	const breadcrumbPath = $state([
 		{ name: 'Workspace', href: '/workspace' },
 		{ name: 'Learning', href: '/workspace' },
@@ -24,6 +32,16 @@
 
 	function toggleMenu() {
 		showMenu = !showMenu;
+	}
+
+	function toggleBulkMode() {
+		dispatch('togglebulk');
+		showMenu = false;
+	}
+
+	function handleBulkDelete() {
+		dispatch('bulkdelete');
+		showMenu = false;
 	}
 
 	function handleCreateFolder() {
@@ -52,7 +70,6 @@
 				content: '',
 				folderId: currentFolderId
 			});
-			// 创建成功后跳转到编辑器
 			goto(`/edit/md/${newDoc.id}`);
 		} catch (error) {
 			console.error('创建文档失败:', error);
@@ -83,37 +100,70 @@
 
 	<!-- Action Buttons -->
 	<div class="relative ml-4 flex flex-shrink-0 items-center" bind:this={menuElement}>
-		<button
-			onclick={handleCreateDocument}
-			class="inline-flex h-10 items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4"
-		>
-			<Plus class="h-4 w-4" />
-			<span class="hidden sm:inline">新建文档</span>
-		</button>
-		<button
-			onclick={toggleMenu}
-			class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
-			aria-label="更多选项"
-		>
-			<DotsThreeVertical class="h-5 w-5" />
-		</button>
-
-		{#if showMenu}
-			<div
-				class="absolute top-full right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
-				role="menu"
-				aria-orientation="vertical"
-				aria-labelledby="menu-button"
-			>
+		{#if bulkMode}
+			<!-- Bulk Mode Actions -->
+			<div class="flex items-center gap-2">
+				<span class="text-sm text-zinc-600 dark:text-zinc-400">
+					已选 {selectedItemsCount} 项
+				</span>
 				<button
-					onclick={handleCreateFolder}
-					class="flex w-full items-center gap-3 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
-					role="menuitem"
+					onclick={handleBulkDelete}
+					class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600"
 				>
-					<FolderPlus class="h-4 w-4" />
-					<span>新建文件夹</span>
+					<Trash class="h-4 w-4" />
+					<span class="hidden sm:inline">删除</span>
+				</button>
+				<button
+					onclick={toggleBulkMode}
+					class="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+				>
+					<X class="h-4 w-4" />
 				</button>
 			</div>
+		{:else}
+			<!-- Normal Mode -->
+			<button
+				onclick={handleCreateDocument}
+				class="inline-flex h-10 items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4"
+			>
+				<Plus class="h-4 w-4" />
+				<span class="hidden sm:inline">新建文档</span>
+			</button>
+			<button
+				onclick={toggleMenu}
+				class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
+				aria-label="更多选项"
+			>
+				<DotsThreeVertical class="h-5 w-5" />
+			</button>
+
+			{#if showMenu}
+				<div
+					class="absolute top-full right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
+					role="menu"
+					aria-orientation="vertical"
+					aria-labelledby="menu-button"
+				>
+					<button
+						onclick={toggleBulkMode}
+						class="flex w-full items-center gap-3 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+						role="menuitem"
+					>
+						<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+						</svg>
+						<span>多选</span>
+					</button>
+					<button
+						onclick={handleCreateFolder}
+						class="flex w-full items-center gap-3 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+						role="menuitem"
+					>
+						<FolderPlus class="h-4 w-4" />
+						<span>新建文件夹</span>
+					</button>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

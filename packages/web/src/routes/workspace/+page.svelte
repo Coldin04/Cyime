@@ -12,7 +12,7 @@
 	import { getFiles, type FileItem } from '$lib/api/workspace';
 
 	let items = $state<FileItem[]>([]);
-	let selectedItems = $state(new Set<string>());
+	let selectedItems = $state<{ [key: string]: boolean }>({});
 	let hasMore = $state(false);
 	let sortBy = $state('updated_at');
 	let order = $state('desc');
@@ -20,9 +20,11 @@
 	let isLoading = $state(false);
 	let currentFolderId = $state<string | null>(null);
 	let isCreatingFolder = $state(false);
+	let bulkMode = $state(false);
 
-	const allSelected = $derived(items.length > 0 && selectedItems.size === items.length);
-	const someSelected = $derived(selectedItems.size > 0 && !allSelected);
+	const selectedItemsCount = $derived(Object.keys(selectedItems).length);
+	const allSelected = $derived(items.length > 0 && selectedItemsCount === items.length);
+	const someSelected = $derived(selectedItemsCount > 0 && !allSelected);
 
 	async function loadFiles(reset = false) {
 		if (isLoading) return;
@@ -40,7 +42,7 @@
 
 			if (reset) {
 				items = data.items;
-				selectedItems.clear();
+				selectedItems = {};
 			} else {
 				items = [...items, ...data.items];
 			}
@@ -57,14 +59,41 @@
 		loadFiles(true);
 	}
 
+	function toggleBulkMode() {
+		bulkMode = !bulkMode;
+		if (!bulkMode) {
+			selectedItems = {};
+		}
+	}
+
 	function toggleSelectAll() {
 		if (allSelected) {
-			selectedItems.clear();
+			selectedItems = {};
 		} else {
-			items.forEach((item) => selectedItems.add(item.id));
+			const newSelected: { [key: string]: boolean } = {};
+			for (const item of items) {
+				newSelected[item.id] = true;
+			}
+			selectedItems = newSelected;
+			// 全选时自动进入批量模式
+			if (!bulkMode) {
+				bulkMode = true;
+			}
 		}
-		// Force reactivity since we are mutating a set
-		selectedItems = selectedItems;
+	}
+
+	function handleBulkDelete() {
+		console.log('Delete selected items:', Object.keys(selectedItems));
+		selectedItems = {};
+		bulkMode = false;
+	}
+
+	function toggleItem(id: string) {
+		if (selectedItems[id]) {
+			delete selectedItems[id];
+		} else {
+			selectedItems[id] = true;
+		}
 	}
 
 	onMount(() => {
@@ -76,13 +105,22 @@
 
 <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 	<GreetingHeader />
-	<Toolbar on:createfolder={() => (isCreatingFolder = true)} />
+	<Toolbar
+		{bulkMode}
+		selectedItemsCount={selectedItemsCount}
+		on:createfolder={() => (isCreatingFolder = true)}
+		on:togglebulk={toggleBulkMode}
+		on:bulkdelete={handleBulkDelete}
+	/>
 
 	<div class="my-6 border-t border-zinc-200 dark:border-zinc-700">
 		<ListHeader
 			{allSelected}
 			{someSelected}
+			{bulkMode}
+			selectedItemsCount={selectedItemsCount}
 			on:toggleAll={toggleSelectAll}
+			on:bulkdelete={handleBulkDelete}
 		/>
 
 		<!-- 新建文件夹组件 -->
@@ -97,9 +135,9 @@
 		<!-- 文件列表 -->
 		{#each items as item (item.id)}
 			{#if item.type === 'folder'}
-				<FolderListItem {item} {selectedItems} />
+				<FolderListItem {item} {selectedItems} {bulkMode} onToggle={() => toggleItem(item.id)} />
 			{:else if item.type === 'markdown'}
-				<MarkdownListItem {item} {selectedItems} />
+				<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={() => toggleItem(item.id)} />
 			{/if}
 		{/each}
 

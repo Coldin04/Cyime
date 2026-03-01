@@ -5,11 +5,22 @@
 
 	let {
 		item,
-		selectedItems
+		selectedItems,
+		bulkMode = false,
+		onToggle
 	}: {
 		item: FileItem;
-		selectedItems: Set<string>;
+		selectedItems: { [key: string]: boolean };
+		bulkMode?: boolean;
+		onToggle: () => void;
 	} = $props();
+
+	const isSelected = $derived(!!selectedItems[item.id]);
+	const checkboxClasses = $derived(
+		`h-4 w-4 rounded border-zinc-400 transition-opacity dark:border-zinc-600 ${
+			bulkMode || isSelected ? 'opacity-100' : 'opacity-0'
+		}`
+	);
 
 	function formatRelativeTime(dateString: string): string {
 		const date = new Date(dateString);
@@ -36,18 +47,10 @@
 		}
 	}
 
-	function toggleSelection() {
-		if (selectedItems.has(item.id)) {
-			selectedItems.delete(item.id);
-		} else {
-			selectedItems.add(item.id);
-		}
-	}
-
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === ' ' || event.key === 'Enter') {
 			event.preventDefault();
-			toggleSelection();
+			onToggle();
 		}
 	}
 </script>
@@ -55,31 +58,37 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {selectedItems.has(
+	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {!!selectedItems[
 		item.id
-	)
+	]
 		? 'bg-blue-50 dark:bg-blue-900/30'
 		: ''}"
-	onclick={toggleSelection}
-	onkeydown={handleKeyDown}
+	onclick={bulkMode ? onToggle : undefined}
+	onkeydown={bulkMode ? handleKeyDown : undefined}
 >
 	<!-- Left Side: Name -->
 	<div class="flex min-w-0 items-center gap-3 pr-4">
 		<input
 			type="checkbox"
-			class="h-4 w-4 rounded border-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
-			checked={selectedItems.has(item.id)}
-			onclick={(e) => e.stopPropagation()}
-			onchange={toggleSelection}
+			class={checkboxClasses}
+			checked={!!selectedItems[item.id]}
+			onclick={(e) => {
+				e.stopPropagation();
+			}}
+			onchange={onToggle}
 		/>
 		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
-		<a
-			href="/edit/md/{item.id}"
-			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
-			onclick={(e) => e.stopPropagation()}
-		>
-			{item.title}
-		</a>
+		{#if bulkMode}
+			<span class="truncate font-normal text-zinc-800 dark:text-zinc-200">{item.title}</span>
+		{:else}
+			<a
+				href="/edit/md/{item.id}"
+				class="truncate font-normal text-zinc-800 dark:text-zinc-200"
+				onclick={(e) => e.stopPropagation()}
+			>
+				{item.title}
+			</a>
+		{/if}
 	</div>
 
 	<!-- Right Side: Metadata -->

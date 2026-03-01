@@ -1,16 +1,28 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
+	import Trash from '~icons/ph/trash';
 
 	let {
 		allSelected,
-		someSelected
+		someSelected,
+		bulkMode = false,
+		selectedItemsCount = 0
 	}: {
 		allSelected: boolean;
 		someSelected: boolean;
+		bulkMode?: boolean;
+		selectedItemsCount?: number;
 	} = $props();
 
 	let inputElement: HTMLInputElement;
 	const dispatch = createEventDispatcher();
+
+	const hasSelection = $derived(allSelected || someSelected);
+	const checkboxClasses = $derived(
+		`h-4 w-4 rounded border-zinc-300 transition-opacity dark:border-zinc-600 ${
+			bulkMode || hasSelection || selectedItemsCount > 0 ? 'opacity-100' : 'opacity-0'
+		}`
+	);
 
 	$effect(() => {
 		if (inputElement) {
@@ -20,6 +32,10 @@
 
 	function toggle() {
 		dispatch('toggleAll');
+	}
+
+	function handleBulkDelete() {
+		dispatch('bulkdelete');
 	}
 </script>
 
@@ -31,16 +47,19 @@
 			<input
 				bind:this={inputElement}
 				type="checkbox"
-				class="h-4 w-4 rounded border-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:border-zinc-600"
+				class={checkboxClasses}
+				class:cursor-pointer={bulkMode}
 				checked={allSelected}
 				onclick={toggle}
 			/>
 			<span>名称</span>
 		</div>
 		<div class="flex items-center justify-end gap-x-4 sm:gap-x-6">
-			<div class="hidden w-28 text-right sm:block">上次修改</div>
-			<div class="hidden w-24 text-right md:block">创建者</div>
-			<div class="w-10" />
+			{#if !bulkMode}
+				<div class="hidden w-28 text-right sm:block">上次修改</div>
+				<div class="hidden w-24 text-right md:block">创建者</div>
+				<div class="w-10"></div>
+			{/if}
 		</div>
 	</div>
 </div>
