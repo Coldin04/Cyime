@@ -9,6 +9,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/middleware"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/workspace"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
@@ -53,6 +54,13 @@ func main() {
 		// User routes (protected)
 		userRoutes := api.Group("/user", middleware.Protected())
 		userRoutes.Get("/me", user.GetMe)
+
+		// Workspace routes (protected)
+		workspaceRoutes := api.Group("/workspace", middleware.Protected())
+		workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+		workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
+		workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
+		workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
 	
 
 

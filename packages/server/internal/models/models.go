@@ -91,6 +91,49 @@ type UserRefreshToken struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (f *Folder) BeforeCreate(tx *gorm.DB) (err error) {
+	if f.ID == uuid.Nil {
+		f.ID = uuid.New()
+	}
+	return
+}
+
+// Folder represents a folder in the workspace
+type Folder struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primary_key"`
+	UserID      uuid.UUID      `gorm:"not null;index:idx_user_parent"`
+	ParentID    *uuid.UUID     `gorm:"index:idx_user_parent"`
+	Name        string         `gorm:"type:varchar(255);not null"`
+	Description *string        `gorm:"type:text"`
+	CreatedBy   uuid.UUID      `gorm:"not null"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (m *Markdown) BeforeCreate(tx *gorm.DB) (err error) {
+	if m.ID == uuid.Nil {
+		m.ID = uuid.New()
+	}
+	return
+}
+
+// Markdown represents a markdown document in the workspace
+type Markdown struct {
+	ID        uuid.UUID      `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID      `gorm:"not null;index:idx_user_folder"`
+	FolderID  *uuid.UUID     `gorm:"index:idx_user_folder"`
+	Title     string         `gorm:"type:varchar(255);not null"`
+	Excerpt   string         `gorm:"type:text"`
+	Content   string         `gorm:"type:longtext"`
+	CreatedBy uuid.UUID      `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
+
 // Set GORM table names to use snake_case
 func (User) TableName() string {
 	return "users"
@@ -106,4 +149,12 @@ func (UserIdentityProvider) TableName() string {
 
 func (UserRefreshToken) TableName() string {
 	return "user_refresh_tokens"
+}
+
+func (Folder) TableName() string {
+	return "folders"
+}
+
+func (Markdown) TableName() string {
+	return "markdowns"
 }

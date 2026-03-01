@@ -7,40 +7,105 @@
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
-	import type { Component } from 'svelte';
+	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
+	import { onMount } from 'svelte';
+	import { getFiles, type FileItem } from '$lib/api/workspace';
 
-	// 1. Component Mapping for dynamic rendering
-	const componentMap: Record<string, Component<any>> = {
-		folder: FolderListItem,
-		markdown: MarkdownListItem
-	};
+	let items = $state<FileItem[]>([]);
+	let selectedItems = $state(new Set<string>());
+	let hasMore = $state(false);
+	let sortBy = $state('updated_at');
+	let order = $state('desc');
+	let filterType = $state<'all' | 'folders' | 'markdowns'>('all');
+	let isLoading = $state(false);
+	let currentFolderId = $state<string | null>(null);
+	let isCreatingFolder = $state(false);
 
-	// 2. Placeholder data simulating a backend response
-	const items = [
-		{ id: 1, type: 'folder', name: 'Project Documents' },
-		{ id: 2, type: 'folder', name: 'Meeting Notes' },
-		{ id: 3, type: 'markdown', name: 'Q1 Roadmap.md' },
-		{ id: 4, type: 'markdown', name: 'Component Design Ideas.md' }
-	];
+	const allSelected = $derived(items.length > 0 && selectedItems.size === items.length);
+	const someSelected = $derived(selectedItems.size > 0 && !allSelected);
+
+	async function loadFiles(reset = false) {
+		if (isLoading) return;
+
+		isLoading = true;
+		try {
+			const data = await getFiles({
+				parent_id: currentFolderId,
+				limit: 50,
+				offset: reset ? 0 : items.length,
+				sort_by: sortBy,
+				order: order,
+				type: filterType
+			});
+
+			if (reset) {
+				items = data.items;
+				selectedItems.clear();
+			} else {
+				items = [...items, ...data.items];
+			}
+			hasMore = data.hasMore;
+		} catch (error) {
+			console.error('加载失败:', error);
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	function handleFolderCreated() {
+		isCreatingFolder = false;
+		loadFiles(true);
+	}
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedItems.clear();
+		} else {
+			items.forEach((item) => selectedItems.add(item.id));
+		}
+		// Force reactivity since we are mutating a set
+		selectedItems = selectedItems;
+	}
+
+	onMount(() => {
+		loadFiles(true);
+	});
 </script>
 
 <TopBar />
 
 <main class="container mx-auto px-4 pt-16">
 	<GreetingHeader />
-	<Toolbar />
+	<Toolbar on:createfolder={() => (isCreatingFolder = true)} />
 
-	<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800/20">
-		<ListHeader />
-		<div class="border-t border-zinc-200 dark:border-zinc-700">
-			<!-- 3. Dynamic rendering using <svelte:component> -->
-			{#each items as item (item.id)}
-				<svelte:component this={componentMap[item.type]} {item} />
-			{/each}
+	<div class="mt-8 border-t border-zinc-200 dark:border-zinc-700">
+		<ListHeader
+			{allSelected}
+			{someSelected}
+			on:toggleAll={toggleSelectAll}
+		/>
 
-			<!-- Skeleton loaders for loading state -->
+		<!-- 新建文件夹组件 -->
+		{#if isCreatingFolder}
+			<NewFolderItem
+				parentId={currentFolderId}
+				on:create={handleFolderCreated}
+				on:cancel={() => (isCreatingFolder = false)}
+			/>
+		{/if}
+
+		<!-- 文件列表 -->
+		{#each items as item (item.id)}
+			{#if item.type === 'folder'}
+				<FolderListItem {item} {selectedItems} />
+			{:else if item.type === 'markdown'}
+				<MarkdownListItem {item} {selectedItems} />
+			{/if}
+		{/each}
+
+		{#if isLoading}
 			<FolderListItemSkeleton />
 			<MarkdownListItemSkeleton />
-		</div>
+		{/if}
 	</div>
 </main>
