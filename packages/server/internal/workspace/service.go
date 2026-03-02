@@ -1,8 +1,9 @@
 package workspace
-
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -211,13 +212,8 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 	return folder, nil
 }
 
-// CreateMarkdown creates a new markdown document
+// CreateMarkdown creates a new markdown document with unique title handling
 func CreateMarkdown(userID uuid.UUID, title string, content string, folderID *uuid.UUID) (*models.Markdown, error) {
-	// Validate title is not empty
-	if strings.TrimSpace(title) == "" {
-		return nil, errors.New("文档标题不能为空")
-	}
-
 	// Validate title length
 	if len(title) > 255 {
 		return nil, errors.New("文档标题不能超过 255 个字符")
@@ -235,6 +231,42 @@ func CreateMarkdown(userID uuid.UUID, title string, content string, folderID *uu
 		}
 	}
 
+	newTitle := strings.TrimSpace(title)
+	if newTitle == "" || newTitle == "未命名文档" {
+		// Generate a unique title based on date and sequence
+		datePrefix := time.Now().Format("060102")
+		baseTitleWithDate := "未命名文档" + datePrefix
+
+		var count int64
+		query := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND title LIKE ? AND deleted_at IS NULL", userID, baseTitleWithDate+"-%")
+		if folderID != nil {
+			query = query.Where("folder_id = ?", folderID)
+		} else {
+			query = query.Where("folder_id IS NULL")
+		}
+		query.Count(&count)
+
+		newTitle = fmt.Sprintf("%s-%02d", baseTitleWithDate, count+1)
+	} else {
+		// For custom titles, check for duplicates in the same folder
+		var existing models.Markdown
+		query := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND title = ? AND deleted_at IS NULL", userID, newTitle)
+		if folderID != nil {
+			query = query.Where("folder_id = ?", folderID)
+		} else {
+			query = query.Where("folder_id IS NULL")
+		}
+		result := query.First(&existing)
+		if result.Error == nil {
+			// A record was found, so it's a duplicate
+			return nil, errors.New("同名文档已存在")
+		}
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			// A real database error occurred
+			return nil, result.Error
+		}
+	}
+
 	// Generate excerpt from content
 	excerpt := generateExcerpt(content)
 
@@ -243,7 +275,7 @@ func CreateMarkdown(userID uuid.UUID, title string, content string, folderID *uu
 		ID:        uuid.New(),
 		UserID:    userID,
 		FolderID:  folderID,
-		Title:     title,
+		Title:     newTitle,
 		Excerpt:   excerpt,
 		Content:   content,
 		CreatedBy: userID,
