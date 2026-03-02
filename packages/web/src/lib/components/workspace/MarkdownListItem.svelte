@@ -10,9 +10,9 @@
 		onToggle
 	}: {
 		item: FileItem;
-		selectedItems: { [key: string]: boolean };
+		selectedItems: { [key:string]: boolean };
 		bulkMode?: boolean;
-		onToggle: () => void;
+		onToggle: (id: string) => void;
 	} = $props();
 
 	const isSelected = $derived(!!selectedItems[item.id]);
@@ -50,7 +50,7 @@
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === ' ' || event.key === 'Enter') {
 			event.preventDefault();
-			onToggle();
+			onToggle(item.id);
 		}
 	}
 </script>
@@ -58,37 +58,29 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {!!selectedItems[
-		item.id
-	]
+	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {isSelected
 		? 'bg-blue-50 dark:bg-blue-900/30'
 		: ''}"
-	onclick={bulkMode ? onToggle : undefined}
-	onkeydown={bulkMode ? handleKeyDown : undefined}
+	onclick={() => onToggle(item.id)}
+	onkeydown={handleKeyDown}
 >
 	<!-- Left Side: Name -->
 	<div class="flex min-w-0 items-center gap-3 pr-4">
 		<input
 			type="checkbox"
 			class={checkboxClasses}
-			checked={!!selectedItems[item.id]}
-			onclick={(e) => {
-				e.stopPropagation();
-			}}
-			onchange={onToggle}
+			checked={isSelected}
+			onclick={(e) => e.stopPropagation()}
+			onchange={() => onToggle(item.id)}
 		/>
 		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
-		{#if bulkMode}
-			<span class="truncate font-normal text-zinc-800 dark:text-zinc-200">{item.title}</span>
-		{:else}
-			<a
-				href="/edit/md/{item.id}"
-				class="truncate font-normal text-zinc-800 dark:text-zinc-200"
-				onclick={(e) => e.stopPropagation()}
-			>
-				{item.title}
-			</a>
-		{/if}
+		<a
+			href="/edit/md/{item.id}"
+			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
+			onclick={(e) => e.stopPropagation()}
+		>
+			{item.title}
+		</a>
 	</div>
 
 	<!-- Right Side: Metadata -->

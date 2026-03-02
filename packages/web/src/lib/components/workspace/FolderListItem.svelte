@@ -3,16 +3,18 @@
 	import type { FileItem } from '$lib/api/workspace';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 
-	let {
+	const {
 		item,
 		selectedItems,
 		bulkMode = false,
-		onToggle
+		onToggle,
+		onNavigate
 	}: {
 		item: FileItem;
 		selectedItems: { [key: string]: boolean };
 		bulkMode?: boolean;
-		onToggle: () => void;
+		onToggle: (id: string) => void;
+		onNavigate: (id: string) => void;
 	} = $props();
 
 	const isSelected = $derived(!!selectedItems[item.id]);
@@ -47,10 +49,18 @@
 		}
 	}
 
+	function handleClick() {
+		if (bulkMode) {
+			onToggle(item.id);
+		} else {
+			onNavigate(item.id);
+		}
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === ' ' || event.key === 'Enter') {
 			event.preventDefault();
-			onToggle();
+			handleClick();
 		}
 	}
 </script>
@@ -58,34 +68,23 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-none dark:hover:bg-zinc-800/60 {!!selectedItems[
-		item.id
-	]
+	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-none dark:hover:bg-zinc-800/60 {isSelected
 		? 'bg-teal-50 dark:bg-teal-900/30'
 		: ''}"
-	onclick={bulkMode ? onToggle : undefined}
-	onkeydown={bulkMode ? handleKeyDown : undefined}
+	onclick={handleClick}
+	onkeydown={handleKeyDown}
 >
 	<!-- Left Side: Name -->
 	<div class="flex min-w-0 items-center gap-3 pr-4">
 		<input
 			type="checkbox"
 			class={checkboxClasses}
-			checked={!!selectedItems[item.id]}
-			onclick={(e) => {
-				e.stopPropagation();
-			}}
-			onchange={onToggle}
+			checked={isSelected}
+			onclick={(e) => e.stopPropagation()}
+			onchange={() => onToggle(item.id)}
 		/>
-		{#if bulkMode}
-			<Folder class="h-5 w-5 flex-shrink-0 text-teal-500 dark:text-teal-400" />
-			<span class="truncate font-normal text-zinc-800 dark:text-zinc-200">{item.name}</span>
-		{:else}
-			<Folder class="h-5 w-5 flex-shrink-0 text-teal-500 dark:text-teal-400" />
-			<a href="/workspace/folder/{item.id}" class="truncate font-normal text-zinc-800 dark:text-zinc-200">
-				{item.name}
-			</a>
-		{/if}
+		<Folder class="h-5 w-5 flex-shrink-0 text-teal-500 dark:text-teal-400" />
+		<span class="truncate font-normal text-zinc-800 dark:text-zinc-200">{item.name}</span>
 	</div>
 
 	<!-- Right Side: Metadata -->
@@ -101,7 +100,6 @@
 				class="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
 				onclick={(e) => {
 					e.stopPropagation();
-					// eslint-disable-next-line no-console
 					console.log('More options for', item.id);
 				}}
 			>

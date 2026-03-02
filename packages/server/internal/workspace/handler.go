@@ -255,3 +255,45 @@ func DeleteFileHandler(c *fiber.Ctx) error {
 		Message: "文件已移动到回收站",
 	})
 }
+
+// GetFolderAncestorsHandler handles GET /api/v1/workspace/folders/:id/ancestors
+func GetFolderAncestorsHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Get ancestors from service
+	ancestors, err := GetFolderAncestors(userID, folderID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(ancestors)
+}
+

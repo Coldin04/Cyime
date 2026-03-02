@@ -141,3 +141,22 @@ export async function deleteFile(id: string, type: 'folder' | 'markdown'): Promi
 
 	return response.json();
 }
+
+export type AncestorItem = {
+	id: string;
+	name: string;
+};
+
+/**
+ * Fetches the ancestor path for a folder
+ */
+export async function getFolderAncestors(id: string): Promise<AncestorItem[]> {
+	const response = await apiFetch(`/api/v1/workspace/folders/${id}/ancestors`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch folder ancestors');
+	}
+
+	return response.json();
+}

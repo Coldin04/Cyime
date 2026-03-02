@@ -8,8 +8,8 @@
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
-	import { onMount } from 'svelte';
-	import { getFiles, type FileItem } from '$lib/api/workspace';
+	import { getFiles, getFolderAncestors, type FileItem } from '$lib/api/workspace';
+	import { breadcrumbItems } from '$lib/stores/workspace';
 
 	let items = $state<FileItem[]>([]);
 	let selectedItems = $state<{ [key: string]: boolean }>({});
@@ -17,65 +17,99 @@
 	let sortBy = $state('updated_at');
 	let order = $state('desc');
 	let filterType = $state<'all' | 'folders' | 'markdowns'>('all');
-	let isLoading = $state(false);
+	let isLoading = $state(true);
 	let currentFolderId = $state<string | null>(null);
 	let isCreatingFolder = $state(false);
 	let bulkMode = $state(false);
+	let refreshTrigger = $state(0);
 
 	const selectedItemsCount = $derived(Object.keys(selectedItems).length);
 	const allSelected = $derived(items.length > 0 && selectedItemsCount === items.length);
 	const someSelected = $derived(selectedItemsCount > 0 && !allSelected);
 
-	async function loadFiles(reset = false) {
-		if (isLoading) return;
+	// Centralized, cancellable data loading effect
+	$effect(() => {
+		// Add refreshTrigger to the dependencies
+		const trigger = refreshTrigger;
+		let aborted = false;
 
-		isLoading = true;
-		try {
-			const data = await getFiles({
-				parent_id: currentFolderId,
-				limit: 50,
-				offset: reset ? 0 : items.length,
-				sort_by: sortBy,
-				order: order,
-				type: filterType
-			});
+		(async () => {
+			isLoading = true;
+			try {
+				// Fetch files and ancestors in parallel for better performance
+				const filesPromise = getFiles({
+					parent_id: currentFolderId,
+					limit: 50,
+					offset: 0,
+					sort_by: sortBy,
+					order: order,
+					type: filterType
+				});
 
-			if (reset) {
-				items = data.items;
-				selectedItems = {};
-			} else {
-				items = [...items, ...data.items];
+				const ancestorsPromise = currentFolderId
+					? getFolderAncestors(currentFolderId)
+					: Promise.resolve([]); // At root, ancestors are an empty array
+
+				// Await both promises simultaneously
+				const [fileData, ancestorData] = await Promise.all([filesPromise, ancestorsPromise]);
+
+				if (aborted) return; // Don't update state if effect has been re-run
+
+				// Atomically update state after all data is successfully fetched
+				items = fileData.items || []; // Guard against null from API response
+				hasMore = fileData.hasMore;
+				breadcrumbItems.set(ancestorData);
+			} catch (error) {
+				if (aborted) return;
+				console.error('Failed to load workspace data:', error);
+				// On error, reset to a clean empty state
+				items = [];
+				hasMore = false;
+				breadcrumbItems.set([]);
+			} finally {
+				if (aborted) return;
+				// This will always run, ensuring the loading spinner doesn't get stuck
+				isLoading = false;
 			}
-			hasMore = data.hasMore;
-		} catch (error) {
-			console.error('加载失败:', error);
-		} finally {
-			isLoading = false;
+		})();
+
+		return () => {
+			aborted = true;
+		};
+	});
+
+	function handleNavigate(id: string | null) {
+		if (currentFolderId === id) return;
+		currentFolderId = id;
+		bulkMode = false;
+		for (const key in selectedItems) {
+			delete selectedItems[key];
 		}
 	}
 
 	function handleFolderCreated() {
 		isCreatingFolder = false;
-		loadFiles(true);
+		refreshTrigger++; // Trigger the effect to refresh data
 	}
 
 	function toggleBulkMode() {
 		bulkMode = !bulkMode;
 		if (!bulkMode) {
-			selectedItems = {};
+			for (const key in selectedItems) {
+				delete selectedItems[key];
+			}
 		}
 	}
 
 	function toggleSelectAll() {
 		if (allSelected) {
-			selectedItems = {};
-		} else {
-			const newSelected: { [key: string]: boolean } = {};
-			for (const item of items) {
-				newSelected[item.id] = true;
+			for (const key in selectedItems) {
+				delete selectedItems[key];
 			}
-			selectedItems = newSelected;
-			// 全选时自动进入批量模式
+		} else {
+			for (const item of items) {
+				selectedItems[item.id] = true;
+			}
 			if (!bulkMode) {
 				bulkMode = true;
 			}
@@ -84,8 +118,13 @@
 
 	function handleBulkDelete() {
 		console.log('Delete selected items:', Object.keys(selectedItems));
-		selectedItems = {};
+		// Here you would call the delete API
+		for (const key in selectedItems) {
+			delete selectedItems[key];
+		}
 		bulkMode = false;
+		// After deletion, trigger the effect to refresh data
+		refreshTrigger++;
 	}
 
 	function toggleItem(id: string) {
@@ -95,10 +134,6 @@
 			selectedItems[id] = true;
 		}
 	}
-
-	onMount(() => {
-		loadFiles(true);
-	});
 </script>
 
 <TopBar />
@@ -107,10 +142,12 @@
 	<GreetingHeader />
 	<Toolbar
 		{bulkMode}
-		selectedItemsCount={selectedItemsCount}
-		on:createfolder={() => (isCreatingFolder = true)}
-		on:togglebulk={toggleBulkMode}
-		on:bulkdelete={handleBulkDelete}
+		{selectedItemsCount}
+		{currentFolderId}
+		onCreateFolder={() => (isCreatingFolder = true)}
+		onToggleBulk={toggleBulkMode}
+		onBulkDelete={handleBulkDelete}
+		onNavigate={handleNavigate}
 	/>
 
 	<div class="my-6 border-t border-zinc-200 dark:border-zinc-700">
@@ -118,7 +155,7 @@
 			{allSelected}
 			{someSelected}
 			{bulkMode}
-			selectedItemsCount={selectedItemsCount}
+			{selectedItemsCount}
 			on:toggleAll={toggleSelectAll}
 			on:bulkdelete={handleBulkDelete}
 		/>
@@ -133,17 +170,44 @@
 		{/if}
 
 		<!-- 文件列表 -->
-		{#each items as item (item.id)}
-			{#if item.type === 'folder'}
-				<FolderListItem {item} {selectedItems} {bulkMode} onToggle={() => toggleItem(item.id)} />
-			{:else if item.type === 'markdown'}
-				<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={() => toggleItem(item.id)} />
-			{/if}
-		{/each}
-
 		{#if isLoading}
 			<FolderListItemSkeleton />
 			<MarkdownListItemSkeleton />
+		{:else if items.length === 0}
+			<div class="flex flex-col items-center justify-center py-12 text-center">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="48"
+					height="48"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.5"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="mb-4 text-zinc-400 dark:text-zinc-500"
+				>
+					<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+				</svg>
+				<h3 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200">此文件夹为空</h3>
+				<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+					点击“新建文档”或“新建文件夹”来开始创作。
+				</p>
+			</div>
+		{:else}
+			{#each items as item (item.id)}
+				{#if item.type === 'folder'}
+					<FolderListItem
+						{item}
+						{selectedItems}
+						{bulkMode}
+						onToggle={toggleItem}
+						onNavigate={handleNavigate}
+					/>
+				{:else if item.type === 'markdown'}
+					<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={toggleItem} />
+				{/if}
+			{/each}
 		{/if}
 	</div>
 </main>

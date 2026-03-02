@@ -78,6 +78,12 @@ type DeleteResponse struct {
 	Message string `json:"message"`
 }
 
+// AncestorItem represents a single folder in a breadcrumb path
+type AncestorItem struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
 // ErrorResponse represents a standard error response
 type ErrorResponse struct {
 	Error   string `json:"error"`

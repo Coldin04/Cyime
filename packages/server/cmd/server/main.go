@@ -61,6 +61,7 @@ func main() {
 		workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 		workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
 		workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
+		workspaceRoutes.Get("/folders/:id/ancestors", workspace.GetFolderAncestorsHandler)
 	
 
 

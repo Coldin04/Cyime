@@ -394,3 +394,36 @@ func GetCreatorInfo(userID uuid.UUID) (*CreatorInfo, error) {
 		DisplayName: user.DisplayName,
 	}, nil
 }
+
+// GetFolderAncestors retrieves the ancestor path of a folder using an iterative approach.
+func GetFolderAncestors(userID uuid.UUID, folderID uuid.UUID) ([]AncestorItem, error) {
+	var ancestors []AncestorItem
+	currentID := &folderID
+
+	// Loop up to 100 times to prevent infinite loops in case of data cycles
+	for i := 0; i < 100 && currentID != nil; i++ {
+		var folder models.Folder
+		result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", currentID, userID).First(&folder)
+
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				// We've hit a folder that doesn't exist or a parent that is null.
+				// This is a normal termination condition.
+				break
+			}
+			// This is a real database error.
+			return nil, result.Error
+		}
+
+		ancestors = append(ancestors, AncestorItem{ID: folder.ID, Name: folder.Name})
+		currentID = folder.ParentID
+	}
+
+	// The loop gets the path from child -> root, so we must reverse it.
+	for i, j := 0, len(ancestors)-1; i < j; i, j = i+1, j-1 {
+		ancestors[i], ancestors[j] = ancestors[j], ancestors[i]
+	}
+
+	return ancestors, nil
+}
+

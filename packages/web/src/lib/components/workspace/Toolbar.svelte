@@ -1,67 +1,37 @@
 <script lang="ts">
-	import CaretRight from '~icons/ph/caret-right';
 	import Plus from '~icons/ph/plus';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import FolderPlus from '~icons/ph/folder-plus';
 	import Trash from '~icons/ph/trash';
 	import X from '~icons/ph/x';
-	import { createEventDispatcher } from 'svelte';
 	import { createMarkdown } from '$lib/api/workspace';
 	import { goto } from '$app/navigation';
-	import { onMount, onDestroy } from 'svelte';
+	import Breadcrumb from './Breadcrumb.svelte';
+	import { breadcrumbItems } from '$lib/stores/workspace';
 
-	let {
+	const {
 		bulkMode = false,
-		selectedItemsCount = 0
+		selectedItemsCount = 0,
+		currentFolderId,
+		onToggleBulk,
+		onBulkDelete,
+		onCreateFolder,
+		onNavigate
 	}: {
 		bulkMode?: boolean;
 		selectedItemsCount?: number;
+		currentFolderId: string | null;
+		onToggleBulk: () => void;
+		onBulkDelete: () => void;
+		onCreateFolder: () => void;
+		onNavigate: (id: string | null) => void;
 	} = $props();
 
-	let currentFolderId: string | null = null;
 	let showMenu = $state(false);
-	let menuElement: HTMLElement;
-
-	const breadcrumbPath = $state([
-		{ name: 'Workspace', href: '/workspace' },
-		{ name: 'Learning', href: '/workspace' },
-		{ name: 'Svelte', href: null }
-	]);
-
-	const dispatch = createEventDispatcher();
 
 	function toggleMenu() {
 		showMenu = !showMenu;
 	}
-
-	function toggleBulkMode() {
-		dispatch('togglebulk');
-		showMenu = false;
-	}
-
-	function handleBulkDelete() {
-		dispatch('bulkdelete');
-		showMenu = false;
-	}
-
-	function handleCreateFolder() {
-		dispatch('createfolder');
-		showMenu = false;
-	}
-
-	function handleClickOutside(event: MouseEvent) {
-		if (showMenu && menuElement && !menuElement.contains(event.target as Node)) {
-			showMenu = false;
-		}
-	}
-
-	onMount(() => {
-		document.addEventListener('click', handleClickOutside, true);
-	});
-
-	onDestroy(() => {
-		document.removeEventListener('click', handleClickOutside, true);
-	});
 
 	async function handleCreateDocument() {
 		try {
@@ -77,29 +47,13 @@
 	}
 </script>
 
-<div class="flex items-center justify-between">
-	<!-- Breadcrumbs -->
-	<nav
-		aria-label="Breadcrumb"
-		class="flex min-w-0 items-center text-zinc-500 dark:text-zinc-400"
-	>
-		{#each breadcrumbPath as segment, i}
-			{#if segment.href}
-				<a href={segment.href} class="truncate hover:underline">
-					{segment.name}
-				</a>
-			{:else}
-				<span class="truncate font-medium text-zinc-800 dark:text-zinc-200">{segment.name}</span>
-			{/if}
-
-			{#if i < breadcrumbPath.length - 1}
-				<CaretRight class="mx-1 h-4 w-4 flex-shrink-0" />
-			{/if}
-		{/each}
-	</nav>
+<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+	<div class="min-w-0 truncate">
+		<Breadcrumb onNavigate={onNavigate} items={$breadcrumbItems} />
+	</div>
 
 	<!-- Action Buttons -->
-	<div class="relative ml-4 flex flex-shrink-0 items-center" bind:this={menuElement}>
+	<div class="relative flex flex-shrink-0 items-center">
 		{#if bulkMode}
 			<!-- Bulk Mode Actions -->
 			<div class="flex items-center gap-2">
@@ -107,14 +61,14 @@
 					已选 {selectedItemsCount} 项
 				</span>
 				<button
-					onclick={handleBulkDelete}
+					onclick={onBulkDelete}
 					class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600"
 				>
 					<Trash class="h-4 w-4" />
 					<span class="hidden sm:inline">删除</span>
 				</button>
 				<button
-					onclick={toggleBulkMode}
+					onclick={onToggleBulk}
 					class="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
 				>
 					<X class="h-4 w-4" />
@@ -145,17 +99,25 @@
 					aria-labelledby="menu-button"
 				>
 					<button
-						onclick={toggleBulkMode}
+						onclick={onToggleBulk}
 						class="flex w-full items-center gap-3 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
 						role="menuitem"
 					>
 						<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+							/>
 						</svg>
 						<span>多选</span>
 					</button>
 					<button
-						onclick={handleCreateFolder}
+						onclick={() => {
+							onCreateFolder();
+							showMenu = false;
+						}}
 						class="flex w-full items-center gap-3 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
 						role="menuitem"
 					>
