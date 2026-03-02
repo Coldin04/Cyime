@@ -160,3 +160,88 @@ export async function getFolderAncestors(id: string): Promise<AncestorItem[]> {
 
 	return response.json();
 }
+
+// --- Trash API Types and Functions ---
+
+export type TrashItem = {
+	id: string;
+	type: 'folder' | 'markdown';
+	name: string;
+	deletedAt: string;
+};
+
+export type TrashListResponse = {
+	items: TrashItem[];
+	hasMore: boolean;
+	total: number;
+};
+
+/**
+ * Fetches the file list from the trash
+ */
+export async function getTrashedFiles(params: {
+	limit?: number;
+	offset?: number;
+	sort_by?: string;
+	order?: string;
+}): Promise<TrashListResponse> {
+	const queryParams = new URLSearchParams();
+
+	if (params.limit !== undefined) {
+		queryParams.set('limit', params.limit.toString());
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', params.offset.toString());
+	}
+	if (params.sort_by !== undefined) {
+		queryParams.set('sort_by', params.sort_by);
+	}
+	if (params.order !== undefined) {
+		queryParams.set('order', params.order);
+	}
+
+	const response = await apiFetch(`/api/v1/workspace/trash?${queryParams.toString()}`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch trashed files');
+	}
+
+	return response.json();
+}
+
+/**
+ * Restores a list of items from the trash
+ */
+export async function restoreItems(items: { id: string; type: 'folder' | 'markdown' }[]) {
+	const response = await apiFetch('/api/v1/workspace/trash/restore', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ items })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to restore items');
+	}
+
+	return response.json();
+}
+
+/**
+ * Permanently deletes a list of items from the trash
+ */
+export async function permanentDeleteItems(items: { id: string; type: 'folder' | 'markdown' }[]) {
+	const response = await apiFetch('/api/v1/workspace/trash', {
+		method: 'DELETE',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ items })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to permanently delete items');
+	}
+
+	return response.json();
+}

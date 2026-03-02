@@ -297,3 +297,135 @@ func GetFolderAncestorsHandler(c *fiber.Ctx) error {
 	return c.JSON(ancestors)
 }
 
+// GetTrashHandler handles GET /api/v1/workspace/trash
+func GetTrashHandler(c *fiber.Ctx) error {
+	// Get user ID from locals (set by Protected middleware)
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse query parameters
+	limit := c.QueryInt("limit", 50)
+	offset := c.QueryInt("offset", 0)
+	sortBy := c.Query("sort_by", "deleted_at")
+	order := c.Query("order", "desc")
+
+	// Get trashed files
+	response, err := GetTrashedFiles(userID, limit, offset, sortBy, order)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// RestoreTrashRequest defines the shape of the request for restoring items
+type RestoreTrashRequest struct {
+	Items []ItemToRestore `json:"items"`
+}
+
+// RestoreTrashHandler handles POST /api/v1/workspace/trash/restore
+func RestoreTrashHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req RestoreTrashRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Restore items via service
+	response, err := RestoreTrashedItems(userID, req.Items)
+	if err != nil {
+		// Specific error handling can be added here if needed (e.g., for conflicts)
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// PermanentDeleteRequest defines the shape of the request for permanently deleting items
+type PermanentDeleteRequest struct {
+	Items []ItemToRestore `json:"items"`
+}
+
+// PermanentDeleteHandler handles DELETE /api/v1/workspace/trash
+func PermanentDeleteHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req PermanentDeleteRequest
+	// It's a DELETE request, but we might have a body. If not, req will be empty.
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: "Invalid request body",
+			})
+		}
+	}
+
+	// Permanently delete items via service
+	response, err := PermanentDeleteItems(userID, req.Items)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+

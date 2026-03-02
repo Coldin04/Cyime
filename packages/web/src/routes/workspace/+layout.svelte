@@ -3,6 +3,8 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
+	import TopBar from '$lib/components/workspace/TopBar.svelte';
+	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 
 	// This reactive block is the core of our route guard.
 	// It automatically re-runs whenever the value of `$auth` changes.
@@ -29,5 +31,9 @@
 		<p class="text-lg text-gray-600 dark:text-gray-300">{m.workspace_loading()}</p>
 	</div>
 {:else if $auth.token}
-	<slot />
+	<TopBar />
+	<main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+		<GreetingHeader />
+		<slot />
+	</main>
 {/if}

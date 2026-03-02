@@ -1,14 +1,12 @@
 <script lang="ts">
-	import TopBar from '$lib/components/workspace/TopBar.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
 	import FolderListItem from '$lib/components/workspace/FolderListItem.svelte';
 	import MarkdownListItem from '$lib/components/workspace/MarkdownListItem.svelte';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
-	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
-	import { getFiles, getFolderAncestors, type FileItem } from '$lib/api/workspace';
+	import { getFiles, getFolderAncestors, deleteFile, type FileItem } from '$lib/api/workspace';
 	import { breadcrumbItems } from '$lib/stores/workspace';
 
 	let items = $state<FileItem[]>([]);
@@ -116,15 +114,38 @@
 		}
 	}
 
-	function handleBulkDelete() {
-		console.log('Delete selected items:', Object.keys(selectedItems));
-		// Here you would call the delete API
-		for (const key in selectedItems) {
-			delete selectedItems[key];
+	import { toast } from 'svelte-sonner';
+
+	async function handleBulkDelete() {
+		const itemsToDelete = Object.keys(selectedItems);
+		if (itemsToDelete.length === 0) return;
+
+		try {
+			const deletePromises = itemsToDelete.map((id) => {
+				const item = items.find((i) => i.id === id);
+				if (item) {
+					return deleteFile(id, item.type);
+				}
+				return Promise.resolve(); // Should not happen, but as a safeguard
+			});
+
+			await Promise.all(deletePromises);
+			toast.success(
+				itemsToDelete.length > 1
+					? `已成功删除 ${itemsToDelete.length} 个项目`
+					: '已成功删除 1 个项目'
+			);
+		} catch (error) {
+			console.error('Failed to delete items:', error);
+			toast.error(`删除失败: ${error instanceof Error ? error.message : '未知错误'}`);
+		} finally {
+			// Clear selection and refresh the list
+			for (const key in selectedItems) {
+				delete selectedItems[key];
+			}
+			bulkMode = false;
+			refreshTrigger++;
 		}
-		bulkMode = false;
-		// After deletion, trigger the effect to refresh data
-		refreshTrigger++;
 	}
 
 	function toggleItem(id: string) {
@@ -136,10 +157,7 @@
 	}
 </script>
 
-<TopBar />
-
-<main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-	<GreetingHeader />
+<div>
 	<Toolbar
 		{bulkMode}
 		{selectedItemsCount}
@@ -210,4 +228,4 @@
 			{/each}
 		{/if}
 	</div>
-</main>
+</div>
