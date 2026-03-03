@@ -212,14 +212,6 @@ func UpdateContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validate content
-	if req.Content == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Bad Request",
-			Message: "内容不能为空",
-		})
-	}
-
 	// Update content
 	result, err := UpdateContent(userID, markdownID, req.Content)
 	if err != nil {

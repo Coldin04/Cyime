@@ -62,7 +62,7 @@
 			console.log('[Save] Save successful:', result);
 			lastSaved = new Date();
 			hasUnsavedChanges = false;
-			toast.success('已保存');
+			// 自动保存不弹窗
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
 			toast.error('保存失败');
@@ -284,7 +284,7 @@
 
 	<!-- Editor -->
 	<main class="flex-1 overflow-hidden">
-		<div class="h-full w-full px-4 py-4">
+		<div class="h-full w-full">
 			{#if browser && !isLoading}
 				<Editor {content} onContentChange={handleContentChange} />
 			{:else}
