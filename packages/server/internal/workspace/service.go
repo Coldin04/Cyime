@@ -43,6 +43,12 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 	}
 
 	// Validate sort_by field
+	validSorts := map[string]bool{
+		"name": true, "title": true, "created_at": true, "updated_at": true,
+	}
+	if !validSorts[sortBy] {
+		sortBy = "updated_at"
+	}
 	validSortFields := map[string]bool{
 		"name":       true,
 		"updated_at": true,
@@ -441,6 +447,85 @@ func generateExcerpt(content string) string {
 	}
 
 	return plainText
+}
+
+// GetFile retrieves a single file (folder or markdown) by ID
+func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, error) {
+	if fileType == "folder" {
+		var folder models.Folder
+		result := database.DB.Where("id = ? AND user_id = ?", fileID, userID).First(&folder)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return nil, errors.New("文件不存在")
+			}
+			return nil, result.Error
+		}
+		
+		item := folderToFileItem(folder)
+		return &item, nil
+	} else if fileType == "markdown" {
+		var markdown models.Markdown
+		result := database.DB.Where("id = ? AND user_id = ?", fileID, userID).First(&markdown)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return nil, errors.New("文件不存在")
+			}
+			return nil, result.Error
+		}
+		
+		item := markdownToFileItem(markdown)
+		return &item, nil
+	}
+	
+	return nil, errors.New("无效的文件类型")
+}
+
+// UpdateMarkdownTitle updates the title of a markdown document
+func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) error {
+	// Validate title length
+	if len(title) == 0 {
+		return errors.New("文档标题不能为空")
+	}
+	if len(title) > 255 {
+		return errors.New("文档标题不能超过 255 个字符")
+	}
+
+	// Verify the markdown exists and belongs to the user
+	var markdown models.Markdown
+	result := database.DB.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return errors.New("文档不存在")
+		}
+		return result.Error
+	}
+
+	// Update the title
+	return database.DB.Model(&markdown).Update("title", title).Error
+}
+
+// UpdateFolderName updates the name of a folder
+func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
+	// Validate name length
+	if len(name) == 0 {
+		return errors.New("文件夹名称不能为空")
+	}
+	if len(name) > 255 {
+		return errors.New("文件夹名称不能超过 255 个字符")
+	}
+
+	// Verify the folder exists and belongs to the user
+	var folder models.Folder
+	result := database.DB.Where("id = ? AND user_id = ?", folderID, userID).First(&folder)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return errors.New("文件夹不存在")
+		}
+		return result.Error
+	}
+
+	// Update the name
+	return database.DB.Model(&folder).Update("name", name).Error
 }
 
 // Helper function for Go versions without built-in max

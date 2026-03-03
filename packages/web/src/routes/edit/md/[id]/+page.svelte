@@ -10,8 +10,12 @@
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
 	import FileText from '~icons/ph/file-text';
+	import Pencil from '~icons/ph/pencil';
+	import Check from '~icons/ph/check';
+	import X from '~icons/ph/x';
 	import { auth } from '$lib/stores/auth';
 	import { getMarkdownContent, updateMarkdownContent } from '$lib/api/editor';
+	import { getMarkdownDetails, updateMarkdownTitle } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 
 	let showUserMenu = $state(false);
@@ -22,6 +26,11 @@
 	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	
+	// Title editing state
+	let isEditingTitle = $state(false);
+	let editingTitle = $state('');
+	let titleInput: HTMLInputElement | null = null;
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
@@ -76,6 +85,43 @@
 		// TODO: Implement title update API
 	}
 
+	async function startEditingTitle() {
+		editingTitle = title;
+		isEditingTitle = true;
+		// Focus the input after render
+		setTimeout(() => titleInput?.focus(), 0);
+	}
+
+	async function saveTitle() {
+		if (!editingTitle.trim() || editingTitle === title) {
+			isEditingTitle = false;
+			return;
+		}
+
+		try {
+			await updateMarkdownTitle(markdownId!, editingTitle.trim());
+			title = editingTitle.trim();
+			toast.success('标题已更新');
+		} catch (error) {
+			console.error('Failed to update title:', error);
+			toast.error('更新标题失败');
+		} finally {
+			isEditingTitle = false;
+		}
+	}
+
+	function cancelEditingTitle() {
+		isEditingTitle = false;
+	}
+
+	function handleTitleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			saveTitle();
+		} else if (e.key === 'Escape') {
+			cancelEditingTitle();
+		}
+	}
+
 	function toggleUserMenu() {
 		showUserMenu = !showUserMenu;
 	}
@@ -91,20 +137,24 @@
 			isLoading = true;
 			const loadContent = async () => {
 				try {
-					console.log('[Load] Loading markdown content for ID:', markdownId);
-					const data = await getMarkdownContent(markdownId);
+					console.log('[Load] Loading markdown for ID:', markdownId);
+					// Load markdown details (for title) and content in parallel
+					const [details, data] = await Promise.all([
+						getMarkdownDetails(markdownId),
+						getMarkdownContent(markdownId)
+					]);
+					
 					console.log('[Load] Content loaded, length:', data.content?.length);
 					content = data.content;
-					// Title will be extracted from the first line or set to default
-					const firstLine = data.content.split('\n')[0]?.replace(/^#\s*/, '') || '未命名文档';
-					title = firstLine;
-					console.log('[Load] Title extracted:', title);
+					// Use the title from the API
+					title = details.title || '未命名文档';
+					console.log('[Load] Title loaded:', title);
 					// Reset state for the new document
 					hasUnsavedChanges = false;
 					lastSaved = null;
 					console.log('[Load] Content set, hasUnsavedChanges:', hasUnsavedChanges);
 				} catch (error) {
-					console.error('[Load] Failed to load markdown content:', error);
+					console.error('[Load] Failed to load markdown:', error);
 					toast.error('加载文档失败');
 					goto('/workspace');
 				} finally {
@@ -133,13 +183,49 @@
 		<!-- Left: Title -->
 		<div class="flex flex-1 items-center gap-4">
 			<FileText class="h-5 w-5 text-zinc-400" />
-			<input
-				type="text"
-				value={title}
-				oninput={(e) => handleTitleChange(e.currentTarget.value)}
-				class="w-full max-w-xl bg-transparent text-lg font-medium text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
-				placeholder="文档标题"
-			/>
+			{#if isEditingTitle}
+				<input
+					bind:this={titleInput}
+					type="text"
+					value={editingTitle}
+					oninput={(e) => editingTitle = e.currentTarget.value}
+					onkeydown={handleTitleKeydown}
+					onblur={saveTitle}
+					class="w-full max-w-xl bg-transparent text-lg font-medium text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
+					placeholder="文档标题"
+				/>
+				<div class="flex items-center gap-1">
+					<button
+						onclick={saveTitle}
+						class="grid h-8 w-8 place-content-center rounded-full text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+						title="保存标题"
+					>
+						<Check class="h-5 w-5" />
+					</button>
+					<button
+						onclick={cancelEditingTitle}
+						class="grid h-8 w-8 place-content-center rounded-full text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+						title="取消"
+					>
+						<X class="h-5 w-5" />
+					</button>
+				</div>
+			{:else}
+				<button
+					onclick={startEditingTitle}
+					class="flex flex-1 items-center gap-2 group"
+					title="点击编辑标题"
+				>
+					<input
+						type="text"
+						value={title}
+						readonly
+						class="w-full max-w-xl bg-transparent text-lg font-medium text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100 cursor-pointer group-hover:bg-zinc-100 dark:group-hover:bg-zinc-800 rounded px-2 py-1 transition-colors"
+						placeholder="文档标题"
+					/>
+					<Pencil class="h-4 w-4 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+				</button>
+			{/if}
 			{#if hasUnsavedChanges}
 				<span class="text-sm text-zinc-400">未保存</span>
 			{:else if isSaving}

@@ -245,3 +245,67 @@ export async function permanentDeleteItems(items: { id: string; type: 'folder' |
 
 	return response.json();
 }
+
+/**
+ * Get markdown details by ID
+ */
+export async function getMarkdownDetails(id: string): Promise<FileItem> {
+	const response = await apiFetch(`/api/v1/workspace/files/${id}?type=markdown`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch markdown details');
+	}
+
+	return response.json();
+}
+
+/**
+ * Update markdown title
+ */
+export async function updateMarkdownTitle(id: string, title: string): Promise<{ success: boolean }> {
+	const response = await apiFetch(`/api/v1/workspace/markdowns/${id}/title`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ title })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update title');
+	}
+
+	return response.json();
+}
+
+/**
+ * Update folder name
+ */
+export async function updateFolderName(id: string, name: string): Promise<{ success: boolean }> {
+	const response = await apiFetch(`/api/v1/workspace/folders/${id}/name`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ name })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update folder name');
+	}
+
+	return response.json();
+}
+
+/**
+ * Update file name (unified API for both folder and markdown)
+ */
+export async function updateFileName(id: string, type: 'folder' | 'markdown', name: string): Promise<{ success: boolean }> {
+	if (type === 'folder') {
+		return updateFolderName(id, name);
+	}
+	return updateMarkdownTitle(id, name);
+}

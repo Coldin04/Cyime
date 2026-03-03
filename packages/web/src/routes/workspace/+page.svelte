@@ -221,9 +221,10 @@
 						{bulkMode}
 						onToggle={toggleItem}
 						onNavigate={handleNavigate}
+						onRefresh={() => refreshTrigger++}
 					/>
 				{:else if item.type === 'markdown'}
-					<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={toggleItem} />
+					<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={toggleItem} onRefresh={() => refreshTrigger++} />
 				{/if}
 			{/each}
 		{/if}

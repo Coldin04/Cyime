@@ -59,6 +59,7 @@ func main() {
 		// Workspace routes (protected)
 		workspaceRoutes := api.Group("/workspace", middleware.Protected())
 		workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+		workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 		workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 		workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
 		workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
@@ -66,6 +67,10 @@ func main() {
 		workspaceRoutes.Get("/trash", workspace.GetTrashHandler)
 		workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
 		workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
+		// Update markdown title
+		workspaceRoutes.Put("/markdowns/:id/title", workspace.UpdateMarkdownTitleHandler)
+		// Update folder name
+		workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 
 		// Content routes (protected) - for markdown content management
 		contentRoutes := api.Group("/workspace/markdowns", middleware.Protected())

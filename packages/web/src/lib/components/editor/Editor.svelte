@@ -44,17 +44,18 @@
 
 <style>
 	:global(.milkdown-editor .ProseMirror) {
-		height: 100%;
 		width: 100%;
 		max-width: none;
 		min-height: 100%;
 		outline: none;
+		overflow-y: auto;
 	}
 
 	:global(.milkdown-editor) {
 		max-width: none;
 		height: 100%;
 		outline: none;
+		overflow-y: auto;
 	}
 
 	:global(.milkdown-editor > div) {

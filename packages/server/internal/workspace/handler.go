@@ -56,6 +56,71 @@ func GetFilesHandler(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
+// GetFileHandler handles GET /api/v1/workspace/files/:id
+func GetFileHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse file ID from path
+	fileIDStr := c.Params("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid File ID",
+			Message: "File ID must be a valid UUID",
+		})
+	}
+
+	// Get file type from query
+	fileType := c.Query("type", "")
+	if fileType == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "type parameter is required (must be 'folder' or 'markdown')",
+		})
+	}
+
+	if fileType != "folder" && fileType != "markdown" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "type parameter must be either 'folder' or 'markdown'",
+		})
+	}
+
+	// Get file details
+	file, err := GetFile(userID, fileID, fileType)
+	if err != nil {
+		switch err.Error() {
+		case "文件不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(file)
+}
+
 // CreateFolderHandler handles POST /api/v1/workspace/folders
 func CreateFolderHandler(c *fiber.Ctx) error {
 	// Get user ID from locals
@@ -426,6 +491,154 @@ func PermanentDeleteHandler(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(response)
+}
+
+// UpdateMarkdownTitleHandler handles PUT /api/v1/workspace/markdowns/:id/title
+func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse markdown ID from path
+	markdownIDStr := c.Params("id")
+	markdownID, err := uuid.Parse(markdownIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Markdown ID",
+			Message: "Markdown ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if req.Title == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Title cannot be empty",
+		})
+	}
+
+	// Update title
+	err = UpdateMarkdownTitle(userID, markdownID, req.Title)
+	if err != nil {
+		switch err.Error() {
+		case "文档不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "文档标题不能为空", "文档标题不能超过 255 个字符":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+	})
+}
+
+// UpdateFolderNameHandler handles PUT /api/v1/workspace/folders/:id/name
+func UpdateFolderNameHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if req.Name == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Folder name cannot be empty",
+		})
+	}
+
+	// Update name
+	err = UpdateFolderName(userID, folderID, req.Name)
+	if err != nil {
+		switch err.Error() {
+		case "文件夹不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+	})
 }
 
 

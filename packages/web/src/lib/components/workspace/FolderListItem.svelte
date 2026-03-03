@@ -2,19 +2,25 @@
 	import Folder from '~icons/ph/folder';
 	import type { FileItem } from '$lib/api/workspace';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
+	import Pencil from '~icons/ph/pencil';
+	import Trash from '~icons/ph/trash';
+	import { deleteFile, updateFileName } from '$lib/api/workspace';
+	import { toast } from 'svelte-sonner';
 
 	const {
 		item,
 		selectedItems,
 		bulkMode = false,
 		onToggle,
-		onNavigate
+		onNavigate,
+		onRefresh
 	}: {
 		item: FileItem;
 		selectedItems: { [key: string]: boolean };
 		bulkMode?: boolean;
 		onToggle: (id: string) => void;
 		onNavigate: (id: string) => void;
+		onRefresh?: () => void;
 	} = $props();
 
 	const isSelected = $derived(!!selectedItems[item.id]);
@@ -23,6 +29,10 @@
 			bulkMode || isSelected ? 'opacity-100' : 'opacity-0'
 		}`
 	);
+
+	let showMenu = $state(false);
+	let isEditing = $state(false);
+	let editingName = $state('');
 
 	function formatRelativeTime(dateString: string): string {
 		const date = new Date(dateString);
@@ -63,6 +73,66 @@
 			handleClick();
 		}
 	}
+
+	function toggleMenu() {
+		showMenu = !showMenu;
+	}
+
+	function closeMenu() {
+		showMenu = false;
+	}
+
+	function startEditing() {
+		editingName = item.name || '';
+		isEditing = true;
+		showMenu = false;
+	}
+
+	async function saveEditing() {
+		if (!editingName.trim() || editingName === item.name) {
+			isEditing = false;
+			return;
+		}
+
+		try {
+			await updateFileName(item.id, 'folder', editingName.trim());
+			toast.success('重命名成功');
+			onRefresh?.();
+		} catch (error) {
+			console.error('Failed to rename:', error);
+			toast.error('重命名失败');
+		} finally {
+			isEditing = false;
+		}
+	}
+
+	function cancelEditing() {
+		isEditing = false;
+	}
+
+	function handleEditingKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			saveEditing();
+		} else if (e.key === 'Escape') {
+			cancelEditing();
+		}
+	}
+
+	async function handleDelete() {
+		if (!confirm('确定要删除这个文件夹吗？文件夹内的内容也会被删除。')) {
+			return;
+		}
+
+		try {
+			await deleteFile(item.id, 'folder');
+			toast.success('已删除到回收站');
+			onRefresh?.();
+		} catch (error) {
+			console.error('Failed to delete:', error);
+			toast.error('删除失败');
+		}
+		showMenu = false;
+	}
 </script>
 
 <div
@@ -95,16 +165,72 @@
 		<div class="hidden w-24 text-right text-sm text-zinc-600 dark:text-zinc-400 md:block pr-0.5">
 			{item.creator.displayName || 'You'}
 		</div>
-		<div class="w-10 flex justify-center">
+		<div class="relative w-10 flex justify-center">
 			<button
 				class="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
 				onclick={(e) => {
 					e.stopPropagation();
-					console.log('More options for', item.id);
+					toggleMenu();
 				}}
 			>
 				<DotsThreeVertical class="h-5 w-5" />
 			</button>
+			
+			{#if showMenu}
+				<div
+					class="absolute top-full right-0 z-20 mt-1 w-40 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
+					onclick={(e) => e.stopPropagation()}
+				>
+					<button
+						onclick={startEditing}
+						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+					>
+						<Pencil class="h-4 w-4" />
+						<span>重命名</span>
+					</button>
+					<button
+						onclick={handleDelete}
+						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
+					>
+						<Trash class="h-4 w-4" />
+						<span>删除</span>
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
+
+{#if isEditing}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={cancelEditing}>
+		<div
+			class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">重命名文件夹</h3>
+			<input
+				type="text"
+				value={editingName}
+				oninput={(e) => editingName = e.currentTarget.value}
+				onkeydown={handleEditingKeydown}
+				class="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100"
+				placeholder="文件夹名称"
+				autofocus
+			/>
+			<div class="flex justify-end gap-2">
+				<button
+					onclick={cancelEditing}
+					class="rounded-md px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+				>
+					取消
+				</button>
+				<button
+					onclick={saveEditing}
+					class="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+				>
+					保存
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
