@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/middleware"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
@@ -65,6 +66,13 @@ func main() {
 		workspaceRoutes.Get("/trash", workspace.GetTrashHandler)
 		workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
 		workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
+
+		// Content routes (protected) - for markdown content management
+		contentRoutes := api.Group("/workspace/markdowns", middleware.Protected())
+		contentRoutes.Get("/:id/content", content.GetContentHandler)
+		contentRoutes.Put("/:id/content", content.UpdateContentHandler)
+		contentRoutes.Get("/:id/versions", content.GetVersionsHandler)
+		contentRoutes.Get("/:id/versions/:version", content.GetContentByVersionHandler)
 	
 
 

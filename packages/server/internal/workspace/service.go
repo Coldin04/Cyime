@@ -1,10 +1,12 @@
 package workspace
+
 import (
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
@@ -91,7 +93,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		query.Count(&total)
 
 		var markdowns []models.Markdown
-		if err := query.Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&markdowns).Error; err != nil {
+		if err := query.Select("id", "user_id", "folder_id", "title", "excerpt", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&markdowns).Error; err != nil {
 			return nil, err
 		}
 
@@ -213,7 +215,7 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 }
 
 // CreateMarkdown creates a new markdown document with unique title handling
-func CreateMarkdown(userID uuid.UUID, title string, content string, folderID *uuid.UUID) (*models.Markdown, error) {
+func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID *uuid.UUID) (*models.Markdown, error) {
 	// Validate title length
 	if len(title) > 255 {
 		return nil, errors.New("文档标题不能超过 255 个字符")
@@ -268,20 +270,34 @@ func CreateMarkdown(userID uuid.UUID, title string, content string, folderID *uu
 	}
 
 	// Generate excerpt from content
-	excerpt := generateExcerpt(content)
+	excerpt := generateExcerpt(contentStr)
 
-	// Create the markdown
-	markdown := &models.Markdown{
-		ID:        uuid.New(),
-		UserID:    userID,
-		FolderID:  folderID,
-		Title:     newTitle,
-		Excerpt:   excerpt,
-		Content:   content,
-		CreatedBy: userID,
-	}
+	// Create the markdown in a transaction
+	var markdown *models.Markdown
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Create markdown metadata
+		markdown = &models.Markdown{
+			ID:        uuid.New(),
+			UserID:    userID,
+			FolderID:  folderID,
+			Title:     newTitle,
+			Excerpt:   excerpt,
+			CreatedBy: userID,
+		}
 
-	if err := database.DB.Create(markdown).Error; err != nil {
+		if err := tx.Create(markdown).Error; err != nil {
+			return err
+		}
+
+		// Create initial content (version 1)
+		if err := content.CreateInitialContent(tx, markdown.ID, contentStr); err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
@@ -296,15 +312,23 @@ func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 			return deleteFolderRecursive(tx, userID, fileID)
 		})
 	} else if fileType == "markdown" {
-		// Soft delete markdown
-		result := database.DB.Where("id = ? AND user_id = ?", fileID, userID).Delete(&models.Markdown{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return errors.New("文档不存在或无权删除")
-		}
-		return nil
+		// Start a transaction to delete markdown and its content
+		return database.DB.Transaction(func(tx *gorm.DB) error {
+			// Delete content first
+			if err := content.DeleteContentByMarkdownID(tx, fileID); err != nil {
+				return err
+			}
+
+			// Soft delete markdown metadata
+			result := tx.Where("id = ? AND user_id = ?", fileID, userID).Delete(&models.Markdown{})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return errors.New("文档不存在或无权删除")
+			}
+			return nil
+		})
 	}
 
 	return errors.New("无效的文件类型")
@@ -325,9 +349,22 @@ func deleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) er
 		}
 	}
 
-	// Delete all markdowns in this folder within the transaction
-	if err := tx.Where("folder_id = ? AND user_id = ?", folderID, userID).Delete(&models.Markdown{}).Error; err != nil {
+	// Find all markdowns in this folder
+	var markdowns []models.Markdown
+	if err := tx.Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
 		return err
+	}
+
+	// Delete content for each markdown, then soft delete the markdown
+	for _, md := range markdowns {
+		// Delete content
+		if err := content.DeleteContentByMarkdownID(tx, md.ID); err != nil {
+			return err
+		}
+		// Soft delete markdown metadata
+		if err := tx.Where("id = ?", md.ID).Delete(&models.Markdown{}).Error; err != nil {
+			return err
+		}
 	}
 
 	// Soft delete the folder itself within the transaction
