@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import Trash from '~icons/ph/trash';
+	import * as m from '$paraglide/messages';
 
 	let {
 		allSelected,
@@ -52,12 +53,12 @@
 				checked={allSelected}
 				onclick={toggle}
 			/>
-			<span>名称</span>
+			<span>{m.common_name()}</span>
 		</div>
 		<div class="flex items-center justify-end gap-x-4 sm:gap-x-6">
 			{#if !bulkMode}
-				<div class="hidden w-28 text-right sm:block">上次修改</div>
-				<div class="hidden w-24 text-right md:block">创建者</div>
+				<div class="hidden w-28 text-right sm:block">{m.common_last_modified()}</div>
+				<div class="hidden w-24 text-right md:block">{m.common_creator()}</div>
 				<div class="w-10"></div>
 			{/if}
 		</div>

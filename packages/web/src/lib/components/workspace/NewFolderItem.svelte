@@ -3,6 +3,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import Folder from '~icons/ph/folder';
 	import { onMount } from 'svelte';
+	import * as m from '$paraglide/messages';
 
 	let { parentId }: { parentId: string | null } = $props();
 
@@ -56,7 +57,7 @@
 				type="text"
 				bind:value={name}
 				onkeydown={handleKeydown}
-				placeholder="输入文件夹名称..."
+				placeholder={m.new_folder_placeholder()}
 				class="w-full bg-transparent py-1 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
 				disabled={isCreating}
 			/>
@@ -67,13 +68,13 @@
 				disabled={!name.trim() || isCreating}
 				class="rounded bg-riptide-500 px-3 py-1 text-xs font-semibold text-white hover:bg-riptide-600 disabled:cursor-not-allowed disabled:opacity-50"
 			>
-				{isCreating ? '创建中...' : '创建'}
+				{isCreating ? m.new_folder_creating() : m.common_create()}
 			</button>
 			<button
 				onclick={handleCancel}
 				class="rounded bg-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
 			>
-				取消
+				{m.common_cancel()}
 			</button>
 		</div>
 	</div>

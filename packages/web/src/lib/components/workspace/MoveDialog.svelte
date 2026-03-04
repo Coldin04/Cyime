@@ -4,6 +4,7 @@
 	import Folder from '~icons/ph/folder';
 	import CaretRight from '~icons/ph/caret-right';
 	import { toast } from 'svelte-sonner';
+	import * as m from '$paraglide/messages';
 
 	let {
 		itemId,
@@ -65,7 +66,7 @@
 				}
 			} catch (error) {
 				console.error('Failed to load folders:', error);
-				toast.error('加载文件夹列表失败');
+				toast.error(m.move_dialog_load_failed());
 			} finally {
 				isLoadingFolders = false;
 			}
@@ -142,18 +143,18 @@
 
 		// Prevent moving a folder into itself or its descendants
 		if (itemType === 'folder' && selectedFolderId === itemId) {
-			toast.error('不能将文件夹移动到自己里面');
+			toast.error(m.move_dialog_error_self_move());
 			return;
 		}
 
 		isMoving = true;
 		try {
 			await moveFile(itemId, itemType, selectedFolderId);
-			toast.success('移动成功');
+			toast.success(m.move_dialog_success());
 			dispatch('move', { targetId: selectedFolderId });
 		} catch (error) {
 			console.error('Failed to move:', error);
-			toast.error(error instanceof Error ? error.message : '移动失败');
+			toast.error(m.move_dialog_failed());
 		} finally {
 			isMoving = false;
 		}
@@ -190,7 +191,7 @@
 		onkeydown={(e) => e.stopPropagation()}
 	>
 		<h3 id="move-dialog-title" class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">
-			移动到文件夹
+			{m.move_dialog_title()}
 		</h3>
 
 		{#if isLoadingFolders}
@@ -200,7 +201,7 @@
 		{:else if flatFolders.length === 0}
 			<div class="mb-4 flex flex-col items-center justify-center py-8 text-center">
 				<Folder class="mb-2 h-8 w-8 text-zinc-400" />
-				<p class="text-sm text-zinc-500 dark:text-zinc-400">暂无其他文件夹</p>
+				<p class="text-sm text-zinc-500 dark:text-zinc-400">{m.move_dialog_no_folders()}</p>
 			</div>
 		{:else}
 			<div class="mb-4 max-h-64 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-700">
@@ -220,7 +221,7 @@
 					}}
 				>
 					<Folder class="h-4 w-4 flex-shrink-0 text-zinc-500" />
-					<span class="truncate">全部文件（根目录）</span>
+					<span class="truncate">{m.move_dialog_root_folder()}</span>
 				</button>
 
 				{#each flatFolders as folder (folder.id)}
@@ -252,7 +253,7 @@
 				onclick={handleCancel}
 				class="rounded-md px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
 			>
-				取消
+				{m.common_cancel()}
 			</button>
 			<button
 				type="button"
@@ -260,7 +261,7 @@
 				disabled={isMoving || (isLoadingFolders || (flatFolders.length === 0 && selectedFolderId === null))}
 				class="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
 			>
-				{isMoving ? '移动中...' : '移动'}
+				{isMoving ? m.move_dialog_moving() : m.common_move()}
 			</button>
 		</div>
 	</div>

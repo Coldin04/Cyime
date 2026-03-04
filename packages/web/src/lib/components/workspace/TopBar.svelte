@@ -4,6 +4,7 @@
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
 	import { auth } from '$lib/stores/auth';
+	import * as m from '$paraglide/messages';
 
 	let showUserMenu = $state(false);
 
@@ -44,14 +45,14 @@
 					<a
 					href="#"
 						class="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
-						>个人资料</a
+						>{m.topbar_profile()}</a
 					>
 					<a
 						href="/workspace/trash"
 						class="flex items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
 					>
 						<Trash class="h-4 w-4" />
-						<span>回收站</span>
+						<span>{m.topbar_trash()}</span>
 					</a>
 					<div class="my-1 h-px bg-zinc-200 dark:bg-zinc-700"></div>
 					<button
@@ -59,7 +60,7 @@
 						class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
 					>
 						<SignOut class="h-4 w-4" />
-						<span>登出</span>
+						<span>{m.topbar_logout()}</span>
 					</button>
 				</div>
 			{/if}

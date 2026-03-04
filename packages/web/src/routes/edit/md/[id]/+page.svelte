@@ -9,6 +9,7 @@
 	import { getMarkdownContent, updateMarkdownContent } from '$lib/api/editor';
 	import { getMarkdownDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
+	import * as m from '$paraglide/messages';
 
 	let title = $state('');
 	let content = $state('');
@@ -51,7 +52,7 @@
 			// 自动保存不弹窗
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
-			toast.error('保存失败');
+			toast.error(m.folder_delete_failed());
 		} finally {
 			isSaving = false;
 		}
@@ -82,7 +83,7 @@
 					console.log('[Load] Content loaded, length:', data.content?.length);
 					content = data.content;
 					// Use the title from the API
-					title = details.title || '未命名文档';
+					title = details.title || m.edit_document_title();
 					console.log('[Load] Title loaded:', title);
 					// Reset state for the new document
 					hasUnsavedChanges = false;
@@ -90,7 +91,7 @@
 					console.log('[Load] Content set, hasUnsavedChanges:', hasUnsavedChanges);
 				} catch (error) {
 					console.error('[Load] Failed to load markdown:', error);
-					toast.error('加载文档失败');
+					toast.error(m.move_dialog_load_failed());
 					goto('/workspace');
 				} finally {
 					isLoading = false;
@@ -128,7 +129,7 @@
 				<Editor {content} onContentChange={handleContentChange} />
 			{:else}
 				<div class="prose dark:prose-invert">
-					<p>正在加载编辑器...</p>
+					<p>{m.workspace_loading()}</p>
 				</div>
 			{/if}
 		</div>

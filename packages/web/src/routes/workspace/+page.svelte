@@ -8,6 +8,7 @@
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
 	import { getFiles, getFolderAncestors, deleteFile, type FileItem } from '$lib/api/workspace';
 	import { breadcrumbItems } from '$lib/stores/workspace';
+	import * as m from '$paraglide/messages';
 
 	let items = $state<FileItem[]>([]);
 	let selectedItems = $state<{ [key: string]: boolean }>({});
@@ -131,13 +132,11 @@
 
 			await Promise.all(deletePromises);
 			toast.success(
-				itemsToDelete.length > 1
-					? `已成功删除 ${itemsToDelete.length} 个项目`
-					: '已成功删除 1 个项目'
+				m.workspace_bulk_delete_success({ count: itemsToDelete.length })
 			);
 		} catch (error) {
 			console.error('Failed to delete items:', error);
-			toast.error(`删除失败: ${error instanceof Error ? error.message : '未知错误'}`);
+			toast.error(m.workspace_bulk_delete_failed({ error: error instanceof Error ? error.message : '未知错误' }));
 		} finally {
 			// Clear selection and refresh the list
 			for (const key in selectedItems) {
@@ -207,9 +206,9 @@
 				>
 					<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
 				</svg>
-				<h3 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200">此文件夹为空</h3>
+				<h3 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200">{m.workspace_empty_title()}</h3>
 				<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-					点击“新建文档”或“新建文件夹”来开始创作。
+					{m.workspace_empty_description()}
 				</p>
 			</div>
 		{:else}

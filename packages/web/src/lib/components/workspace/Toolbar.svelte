@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 	import Breadcrumb from './Breadcrumb.svelte';
 	import { breadcrumbItems } from '$lib/stores/workspace';
+	import * as m from '$paraglide/messages';
 
 	const {
 		bulkMode = false,
@@ -36,7 +37,7 @@
 	async function handleCreateDocument() {
 		try {
 			const newDoc = await createMarkdown({
-				title: '未命名文档',
+				title: m.edit_document_title(),
 				content: '',
 				folderId: currentFolderId
 			});
@@ -58,14 +59,14 @@
 			<!-- Bulk Mode Actions -->
 			<div class="flex items-center gap-2">
 				<span class="text-sm text-zinc-600 dark:text-zinc-400">
-					已选 {selectedItemsCount} 项
+					{m.toolbar_selected_count({ count: selectedItemsCount })}
 				</span>
 				<button
 					onclick={onBulkDelete}
 					class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600"
 				>
 					<Trash class="h-4 w-4" />
-					<span class="hidden sm:inline">删除</span>
+					<span class="hidden sm:inline">{m.common_delete()}</span>
 				</button>
 				<button
 					onclick={onToggleBulk}
@@ -81,12 +82,12 @@
 				class="inline-flex h-10 items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4"
 			>
 				<Plus class="h-4 w-4" />
-				<span class="hidden sm:inline">新建文档</span>
+				<span class="hidden sm:inline">{m.common_new_document()}</span>
 			</button>
 			<button
 				onclick={toggleMenu}
 				class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
-				aria-label="更多选项"
+				aria-label={m.common_more_options()}
 			>
 				<DotsThreeVertical class="h-5 w-5" />
 			</button>
@@ -111,7 +112,7 @@
 								d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
 							/>
 						</svg>
-						<span>多选</span>
+						<span>{m.common_bulk_select()}</span>
 					</button>
 					<button
 						onclick={() => {
@@ -122,7 +123,7 @@
 						role="menuitem"
 					>
 						<FolderPlus class="h-4 w-4" />
-						<span>新建文件夹</span>
+						<span>{m.common_new_folder()}</span>
 					</button>
 				</div>
 			{/if}

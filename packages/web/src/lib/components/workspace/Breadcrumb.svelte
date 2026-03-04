@@ -2,6 +2,7 @@
 	import type { BreadcrumbItem } from '$lib/stores/workspace';
 	import Home from '~icons/ph/house-line';
 	import CaretRight from '~icons/ph/caret-right';
+	import * as m from '$paraglide/messages';
 
 	import { browser } from '$app/environment';
 
@@ -55,7 +56,7 @@
 		class="flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 	>
 		<Home class="h-4 w-4" />
-		<span>全部文件</span>
+		<span>{m.breadcrumb_all_files()}</span>
 	</button>
 
 	{#if items.length > 0}

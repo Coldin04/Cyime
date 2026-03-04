@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
+	import * as m from '$paraglide/messages';
 
 	function getGreeting(): string {
 		const hour = new Date().getHours();
 		if (hour < 6) {
-			return '夜深了';
+			return m.greeting_night();
 		} else if (hour < 12) {
-			return '早上好';
+			return m.greeting_morning();
 		} else if (hour < 14) {
-			return '中午好';
+			return m.greeting_noon();
 		} else if (hour < 18) {
-			return '下午好';
+			return m.greeting_afternoon();
 		} else {
-			return '晚上好';
+			return m.greeting_evening();
 		}
 	}
 
@@ -36,6 +37,6 @@
 		<h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200">
 			{getGreeting()}, {$auth.user?.displayName || 'User'}
 		</h2>
-		<p class="text-zinc-500 dark:text-zinc-400">今天有什么新灵感？</p>
+		<p class="text-zinc-500 dark:text-zinc-400">{m.greeting_question()}</p>
 	</div>
 </section>

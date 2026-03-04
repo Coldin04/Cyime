@@ -8,6 +8,7 @@
 	import { deleteFile, updateFileName, moveFile } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
+	import * as m from '$paraglide/messages';
 
 	let {
 		item,
@@ -42,16 +43,16 @@
 		const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
 		if (diffInSeconds < 60) {
-			return '刚刚';
+			return m.time_just_now();
 		} else if (diffInSeconds < 3600) {
 			const minutes = Math.floor(diffInSeconds / 60);
-			return `${minutes} 分钟前`;
+			return m.time_minutes_ago({ minutes });
 		} else if (diffInSeconds < 86400) {
 			const hours = Math.floor(diffInSeconds / 3600);
-			return `${hours} 小时前`;
+			return m.time_hours_ago({ hours });
 		} else if (diffInSeconds < 604800) {
 			const days = Math.floor(diffInSeconds / 86400);
-			return `${days} 天前`;
+			return m.time_days_ago({ days });
 		} else {
 			return date.toLocaleDateString('zh-CN', {
 				year: 'numeric',
@@ -90,11 +91,11 @@
 
 		try {
 			await updateFileName(item.id, 'markdown', editingName.trim());
-			toast.success('重命名成功');
+			toast.success(m.markdown_rename_success());
 			onRefresh?.();
 		} catch (error) {
 			console.error('Failed to rename:', error);
-			toast.error('重命名失败');
+			toast.error(m.folder_rename_failed());
 		} finally {
 			isEditing = false;
 		}
@@ -113,17 +114,17 @@
 	}
 
 	async function handleDelete() {
-		if (!confirm('确定要删除这个文档吗？')) {
+		if (!confirm(m.markdown_delete_confirm())) {
 			return;
 		}
 
 		try {
 			await deleteFile(item.id, 'markdown');
-			toast.success('已删除到回收站');
+			toast.success(m.folder_delete_success());
 			onRefresh?.();
 		} catch (error) {
 			console.error('Failed to delete:', error);
-			toast.error('删除失败');
+			toast.error(m.folder_delete_failed());
 		}
 		showMenu = false;
 	}
@@ -208,7 +209,7 @@
 						role="menuitem"
 					>
 						<Pencil class="h-4 w-4" />
-						<span>重命名</span>
+						<span>{m.common_rename()}</span>
 					</button>
 					<button
 						onclick={startMoving}
@@ -216,7 +217,7 @@
 						role="menuitem"
 					>
 						<FolderOpen class="h-4 w-4" />
-						<span>移动到</span>
+						<span>{m.common_move_to()}</span>
 					</button>
 					<button
 						onclick={handleDelete}
@@ -224,7 +225,7 @@
 						role="menuitem"
 					>
 						<Trash class="h-4 w-4" />
-						<span>删除</span>
+						<span>{m.common_delete()}</span>
 					</button>
 				</div>
 			{/if}
@@ -259,27 +260,27 @@
 			class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">重命名文档</h3>
+			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">{m.markdown_rename_title()}</h3>
 			<input
 				type="text"
 				value={editingName}
 				oninput={(e) => editingName = e.currentTarget.value}
 				onkeydown={handleEditingKeydown}
 				class="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100"
-				placeholder="文档名称"
+				placeholder={m.markdown_name_placeholder()}
 			/>
 			<div class="flex justify-end gap-2">
 				<button
 					onclick={cancelEditing}
 					class="rounded-md px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
 				>
-					取消
+					{m.common_cancel()}
 				</button>
 				<button
 					onclick={saveEditing}
 					class="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
 				>
-					保存
+					{m.common_save()}
 				</button>
 			</div>
 		</div>
