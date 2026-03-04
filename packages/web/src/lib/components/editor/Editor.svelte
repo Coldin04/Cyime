@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Crepe } from '@milkdown/crepe';
 	import '@milkdown/crepe/theme/common/style.css';
-	import '@milkdown/crepe/theme/frame-dark.css';
+	import '@milkdown/crepe/theme/frame.css';
 	import { replaceAll } from '@milkdown/utils';
 
 	interface Props {
@@ -80,5 +80,4 @@
 	    min-height: 100%;
         overflow: auto;      
 	}
-	
 </style>

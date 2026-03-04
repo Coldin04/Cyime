@@ -8,3 +8,10 @@
 		@apply scroll-smooth;
 	}
 }
+
+.milkdown{
+        --crepe-font-title: "HarmonyOS Sans",'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+        --crepe-font-default: "HarmonyOS Sans", 'ui-sans-serif', 'system-ui', 'sans-serif'!important;
+        --crepe-font-code: "HarmonyOS Sans",  'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+	}
+	/*为防止主题中自定义字体渲染未支持中文字体体验不佳，在此强制覆盖 */
