@@ -309,3 +309,81 @@ export async function updateFileName(id: string, type: 'folder' | 'markdown', na
 	}
 	return updateMarkdownTitle(id, name);
 }
+
+/**
+ * Move markdown document to a different folder
+ */
+export async function moveMarkdown(id: string, folderId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
+	const response = await apiFetch(`/api/v1/workspace/markdowns/${id}/move`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ folderId })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to move markdown');
+	}
+
+	return response.json();
+}
+
+/**
+ * Move folder to a different parent folder
+ */
+export async function moveFolder(id: string, parentId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
+	const response = await apiFetch(`/api/v1/workspace/folders/${id}/move`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ parentId })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to move folder');
+	}
+
+	return response.json();
+}
+
+/**
+ * Unified API for moving both folder and markdown
+ */
+export async function moveFile(id: string, type: 'folder' | 'markdown', targetId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
+	if (type === 'folder') {
+		return moveFolder(id, targetId);
+	}
+	return moveMarkdown(id, targetId);
+}
+
+/**
+ * Fetches all folders for the current user (for move dialog)
+ */
+export async function getAllFolders(params: {
+	parent_id?: string | null;
+}): Promise<FileItem[]> {
+	const queryParams = new URLSearchParams();
+	queryParams.set('type', 'folders');
+	
+	if (params.parent_id !== undefined && params.parent_id !== null) {
+		queryParams.set('parent_id', params.parent_id);
+	}
+	
+	// Fetch all items by using a large limit
+	queryParams.set('limit', '1000');
+	queryParams.set('offset', '0');
+
+	const response = await apiFetch(`/api/v1/workspace/files?${queryParams.toString()}`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch folders');
+	}
+
+	const data: FileListResponse = await response.json();
+	return data.items || [];
+}

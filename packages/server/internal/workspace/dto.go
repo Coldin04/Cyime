@@ -89,3 +89,20 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
+
+// MoveMarkdownRequest represents the request body for moving a markdown document
+type MoveMarkdownRequest struct {
+	FolderID *uuid.UUID `json:"folderId"` // null means move to root
+}
+
+// MoveFolderRequest represents the request body for moving a folder
+type MoveFolderRequest struct {
+	ParentID *uuid.UUID `json:"parentId"` // null means move to root
+}
+
+// MoveResponse represents the response for move operations
+type MoveResponse struct {
+	Success   bool      `json:"success"`
+	Message   string    `json:"message"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

@@ -641,4 +641,141 @@ func UpdateFolderNameHandler(c *fiber.Ctx) error {
 	})
 }
 
+// MoveMarkdownHandler handles PUT /api/v1/workspace/markdowns/:id/move
+func MoveMarkdownHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
 
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse markdown ID from path
+	markdownIDStr := c.Params("id")
+	markdownID, err := uuid.Parse(markdownIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Markdown ID",
+			Message: "Markdown ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req MoveMarkdownRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Move the markdown
+	updatedAt, err := MoveMarkdown(userID, markdownID, req.FolderID)
+	if err != nil {
+		switch err.Error() {
+		case "文档不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "目标文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(MoveResponse{
+		Success:   true,
+		Message:   "文档移动成功",
+		UpdatedAt: *updatedAt,
+	})
+}
+
+// MoveFolderHandler handles PUT /api/v1/workspace/folders/:id/move
+func MoveFolderHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req MoveFolderRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Move the folder
+	updatedAt, err := MoveFolder(userID, folderID, req.ParentID)
+	if err != nil {
+		switch err.Error() {
+		case "文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "目标父文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "不能将文件夹移动到其子文件夹下":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(MoveResponse{
+		Success:   true,
+		Message:   "文件夹移动成功",
+		UpdatedAt: *updatedAt,
+	})
+}

@@ -71,6 +71,10 @@ func main() {
 		workspaceRoutes.Put("/markdowns/:id/title", workspace.UpdateMarkdownTitleHandler)
 		// Update folder name
 		workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
+		// Move markdown document
+		workspaceRoutes.Put("/markdowns/:id/move", workspace.MoveMarkdownHandler)
+		// Move folder
+		workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
 
 		// Content routes (protected) - for markdown content management
 		contentRoutes := api.Group("/workspace/markdowns", middleware.Protected())

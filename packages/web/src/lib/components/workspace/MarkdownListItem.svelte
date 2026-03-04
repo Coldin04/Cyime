@@ -4,8 +4,10 @@
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import Pencil from '~icons/ph/pencil';
 	import Trash from '~icons/ph/trash';
-	import { deleteFile, updateFileName } from '$lib/api/workspace';
+	import FolderOpen from '~icons/ph/folder-open';
+	import { deleteFile, updateFileName, moveFile } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
+	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
 
 	let {
 		item,
@@ -31,6 +33,8 @@
 	let showMenu = $state(false);
 	let isEditing = $state(false);
 	let editingName = $state('');
+	let isMoving = $state(false);
+	const isMovingItem = $derived(isMoving && item.type === 'markdown');
 
 	function formatRelativeTime(dateString: string): string {
 		const date = new Date(dateString);
@@ -123,6 +127,20 @@
 		}
 		showMenu = false;
 	}
+
+	function startMoving() {
+		isMoving = true;
+		showMenu = false;
+	}
+
+	function handleMoveComplete() {
+		isMoving = false;
+		onRefresh?.();
+	}
+
+	function handleMoveCancel() {
+		isMoving = false;
+	}
 </script>
 
 <div
@@ -193,6 +211,14 @@
 						<span>重命名</span>
 					</button>
 					<button
+						onclick={startMoving}
+						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+						role="menuitem"
+					>
+						<FolderOpen class="h-4 w-4" />
+						<span>移动到</span>
+					</button>
+					<button
 						onclick={handleDelete}
 						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
 						role="menuitem"
@@ -205,6 +231,16 @@
 		</div>
 	</div>
 </div>
+
+{#if isMoving && isMovingItem}
+	<MoveDialog
+		itemId={item.id}
+		itemType={item.type}
+		currentParentId={item.folderId ?? null}
+		on:cancel={handleMoveCancel}
+		on:move={handleMoveComplete}
+	/>
+{/if}
 
 {#if isEditing}
 	<div

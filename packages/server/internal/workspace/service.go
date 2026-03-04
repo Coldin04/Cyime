@@ -72,8 +72,6 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		query := database.DB.Model(&models.Folder{}).Where("user_id = ? AND deleted_at IS NULL", userID)
 		if parentID != nil {
 			query = query.Where("parent_id = ?", parentID)
-		} else {
-			query = query.Where("parent_id IS NULL")
 		}
 
 		query.Count(&total)
@@ -526,6 +524,127 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 
 	// Update the name
 	return database.DB.Model(&folder).Update("name", name).Error
+}
+
+// MoveMarkdown moves a markdown document to a different folder (or root)
+func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (*time.Time, error) {
+	// 1. Verify the markdown exists, belongs to the user, and is not deleted
+	var markdown models.Markdown
+	result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", markdownID, userID).First(&markdown)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档不存在或已被删除")
+		}
+		return nil, result.Error
+	}
+
+	// 2. Validate target folder if provided
+	if folderID != nil {
+		var folder models.Folder
+		result = database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return nil, errors.New("目标文件夹不存在或已被删除")
+			}
+			return nil, result.Error
+		}
+	}
+
+	// 3. Update the folder_id
+	var updatedAt time.Time
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Update folder_id
+		if err := tx.Model(&markdown).Update("folder_id", folderID).Error; err != nil {
+			return err
+		}
+
+		// Update updated_at timestamp
+		now := time.Now()
+		updatedAt = now
+		return tx.Model(&markdown).Update("updated_at", now).Error
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &updatedAt, nil
+}
+
+// MoveFolder moves a folder to a different parent folder (or root)
+func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*time.Time, error) {
+	// 1. Verify the folder exists, belongs to the user, and is not deleted
+	var folder models.Folder
+	result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文件夹不存在或已被删除")
+		}
+		return nil, result.Error
+	}
+
+	// 2. Validate target parent folder if provided
+	if parentID != nil {
+		// Check if parent folder exists and belongs to user
+		var parentFolder models.Folder
+		result = database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", parentID, userID).First(&parentFolder)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return nil, errors.New("目标父文件夹不存在或已被删除")
+			}
+			return nil, result.Error
+		}
+
+		// 3. Check for circular dependency: cannot move folder into its own descendant
+		if err := checkCircularDependency(userID, &folderID, parentID); err != nil {
+			return nil, err
+		}
+	}
+
+	// 4. Update the parent_id
+	var updatedAt time.Time
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Update parent_id
+		if err := tx.Model(&folder).Update("parent_id", parentID).Error; err != nil {
+			return err
+		}
+
+		// Update updated_at timestamp
+		now := time.Now()
+		updatedAt = now
+		return tx.Model(&folder).Update("updated_at", now).Error
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &updatedAt, nil
+}
+
+// checkCircularDependency checks if moving sourceFolder into targetParent would create a cycle
+// Returns error if moving would create a circular reference
+func checkCircularDependency(userID uuid.UUID, sourceFolderID, targetParentID *uuid.UUID) error {
+	currentID := targetParentID
+
+	// Traverse up the parent chain
+	for currentID != nil {
+		if *currentID == *sourceFolderID {
+			return errors.New("不能将文件夹移动到其子文件夹下")
+		}
+
+		// Get the parent folder
+		var parent models.Folder
+		result := database.DB.Where("id = ? AND user_id = ?", currentID, userID).First(&parent)
+		if result.Error != nil {
+			// If parent doesn't exist, we've reached an invalid state, but not a cycle
+			break
+		}
+
+		currentID = parent.ParentID
+	}
+
+	return nil
 }
 
 // Helper function for Go versions without built-in max

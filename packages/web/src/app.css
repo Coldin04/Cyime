@@ -10,9 +10,10 @@
 }
 
 .milkdown{
-    --crepe-font-title: "HarmonyOS Sans",'ui-sans-serif', 'system-ui', 'sans-serif' !important;
-    --crepe-font-default: "HarmonyOS Sans", 'ui-sans-serif', 'system-ui', 'sans-serif'!important;
-    --crepe-font-code: "HarmonyOS Sans",  'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+    --crepe-font-title: 'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+    --crepe-font-default: 'ui-sans-serif', 'system-ui', 'sans-serif'!important;
+    --crepe-font-code: 'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+    min-height: 100%;
 }
 .ProseMirror.editor {
         padding-left:15% !important; /* 留出一点点给 + 号的空间即可 */

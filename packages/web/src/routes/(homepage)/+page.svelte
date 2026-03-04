@@ -3,7 +3,7 @@
 </script>
 
 <div
-	class="flex min-h-screen flex-col items-center justify-center bg-riptide-50 p-8 text-center dark:bg-slate-800"
+	class="flex min-h-screen flex-col items-center justify-center bg-riptide-50 p-8 text-center dark:bg-slate-900"
 >
 	<h1 class="text-3xl font-bold sm:text-4xl md:text-6xl">
 		<span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text text-transparent">
@@ -32,7 +32,7 @@
 <!-- Features Section -->
 <div id="features" class="space-y-16 py-16 md:space-y-28 md:py-28">
 	<!-- Feature 1: Online Sync -->
-	<section class="bg-white px-8 dark:bg-slate-900">
+	<section class="bg-white px-8 dark:bg-slate-800">
 		<div class="mx-auto max-w-5xl">
 			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
 				<div class="w-full md:w-1/2">
@@ -56,7 +56,7 @@
 	</section>
 
 	<!-- Feature 2: Minimalist Interface -->
-	<section class="bg-riptide-50 py-16 dark:bg-slate-800 md:py-28">
+	<section class="bg-riptide-50 py-16 dark:bg-slate-900 md:py-28">
 		<div class="mx-auto max-w-5xl px-8">
 			<div class="flex flex-col items-center gap-8 md:flex-row-reverse md:gap-8">
 				<div class="w-full md:w-1/2">
@@ -80,7 +80,7 @@
 	</section>
 
 	<!-- Feature 3: Smooth Response -->
-	<section class="bg-white px-8 dark:bg-slate-900">
+	<section class="bg-white px-8 dark:bg-slate-800">
 		<div class="mx-auto max-w-5xl">
 			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
 				<div class="w-full md:w-1/2">
