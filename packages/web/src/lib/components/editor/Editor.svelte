@@ -75,9 +75,8 @@
 <div class="milkdown-editor h-full w-full" bind:this={editorContainer}></div>
 
 <style>
-	/* 修复滚动问题 */
 	.milkdown-editor {
-	    min-height: 100%;
-        overflow: auto;      
+		min-height: 100%;
+		overflow: auto;
 	}
 </style>

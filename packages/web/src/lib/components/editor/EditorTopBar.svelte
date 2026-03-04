@@ -12,7 +12,7 @@
 	import User from '~icons/ph/user';
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
-	import FileText from '~icons/ph/file-text';
+	import FileMd from '~icons/ph/file-md';
 	import Pencil from '~icons/ph/pencil';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
@@ -114,63 +114,71 @@
 	</div>
 
 	<!-- Center: Title Section -->
-	<div class="flex min-w-0 flex-1 items-center gap-4 px-20">
-		<FileText class="h-5 w-5 shrink-0 text-zinc-400" />
-		{#if isEditingTitle}
-			<input
-				bind:this={titleInput}
-				type="text"
-				value={editingTitle}
-				oninput={(e) => (editingTitle = e.currentTarget.value)}
-				onkeydown={handleTitleKeydown}
-				onblur={saveTitle}
-				class="w-full max-w-xl bg-transparent text-lg font-medium text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
-				placeholder="文档标题"
-			/>
-			<div class="flex items-center gap-1">
-				<button
-					onclick={saveTitle}
-					class="grid h-8 w-8 place-content-center rounded-full text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-					title="保存标题"
-				>
-					<Check class="h-5 w-5" />
-				</button>
-				<button
-					onclick={cancelEditingTitle}
-					class="grid h-8 w-8 place-content-center rounded-full text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
-					title="取消"
-				>
-					<X class="h-5 w-5" />
-				</button>
-			</div>
-		{:else}
-			<button
-				onclick={startEditingTitle}
-				class="group flex min-w-0 flex-1 items-center gap-2"
-				title="点击编辑标题"
-			>
-				<h1
-					class="truncate bg-transparent text-lg font-medium text-zinc-900 placeholder-zinc-400 group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800 rounded px-2 py-1 transition-colors"
-				>
-					{title || '未命名文档'}
-				</h1>
-				<Pencil
-					class="h-4 w-4 shrink-0 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
-				/>
-			</button>
-		{/if}
+	<div class="flex min-w-0 flex-1 items-center gap-2 px-20">
+		<FileMd class="h-5 w-5 shrink-0 text-zinc-400 self-center" />
 
-		<!-- Save Status -->
-		<div class="shrink-0">
-			{#if hasUnsavedChanges}
-				<span class="text-sm text-zinc-400">未保存</span>
-			{:else if isSaving}
-				<span class="text-sm text-zinc-400">保存中...</span>
-			{:else if lastSaved}
-				<span class="text-sm text-zinc-400">
-					已保存 {lastSaved.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-				</span>
+		<!-- Container for Title and Status -->
+		<div class="flex flex-col">
+			{#if isEditingTitle}
+				<div class="flex items-center">
+					<input
+						bind:this={titleInput}
+						type="text"
+						value={editingTitle}
+						oninput={(e) => (editingTitle = e.currentTarget.value)}
+						onkeydown={handleTitleKeydown}
+						onblur={saveTitle}
+						class="w-full max-w-xl bg-transparent text-base text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
+						placeholder="文档标题"
+					/>
+					<div class="flex items-center gap-1">
+						<button
+							onclick={saveTitle}
+							class="grid h-8 w-8 place-content-center rounded-full text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+							title="保存标题"
+						>
+							<Check class="h-5 w-5" />
+						</button>
+						<button
+							onclick={cancelEditingTitle}
+							class="grid h-8 w-8 place-content-center rounded-full text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+							title="取消"
+						>
+							<X class="h-5 w-5" />
+						</button>
+					</div>
+				</div>
+			{:else}
+				<button
+					onclick={startEditingTitle}
+					class="group flex min-w-0 items-center gap-2"
+					title="点击编辑标题"
+				>
+					<h1
+						class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
+					>
+						{title || '未命名文档'}
+					</h1>
+					<Pencil
+						class="h-4 w-4 shrink-0 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
+					/>
+				</button>
 			{/if}
+
+			<!-- Save Status -->
+			<div class="px-2 py-0 text-left leading-3">
+				{#if isSaving}
+					<span class="text-xs text-zinc-400 py-0">保存中...</span>
+				{:else if hasUnsavedChanges}
+					<span class="text-xs text-zinc-400 py-0">未保存</span>
+				{:else if lastSaved}
+					<span class="text-xs text-zinc-400 py-0">
+						已保存 {lastSaved.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+					</span>
+				{:else}
+					<span class="text-xs text-zinc-400 py-0">待修改</span>
+				{/if}
+			</div>
 		</div>
 	</div>
 
