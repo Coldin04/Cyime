@@ -174,12 +174,20 @@
 			
 			{#if showMenu}
 				<div
+					role="menu"
 					class="absolute top-full right-0 z-20 mt-1 w-40 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
 					onclick={(e) => e.stopPropagation()}
+					onkeydown={(e) => {
+						if (e.key === 'Escape') {
+							closeMenu();
+						}
+					}}
+					tabindex="-1"
 				>
 					<button
 						onclick={startEditing}
 						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+						role="menuitem"
 					>
 						<Pencil class="h-4 w-4" />
 						<span>重命名</span>
@@ -187,6 +195,7 @@
 					<button
 						onclick={handleDelete}
 						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
+						role="menuitem"
 					>
 						<Trash class="h-4 w-4" />
 						<span>删除</span>
@@ -198,8 +207,19 @@
 </div>
 
 {#if isEditing}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={cancelEditing}>
+	<div
+		role="button"
+		tabindex="0"
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		onclick={cancelEditing}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' || e.key === 'Enter') {
+				cancelEditing();
+			}
+		}}
+	>
 		<div
+			role="presentation"
 			class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800"
 			onclick={(e) => e.stopPropagation()}
 		>
@@ -211,7 +231,6 @@
 				onkeydown={handleEditingKeydown}
 				class="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100"
 				placeholder="文档名称"
-				autofocus
 			/>
 			<div class="flex justify-end gap-2">
 				<button

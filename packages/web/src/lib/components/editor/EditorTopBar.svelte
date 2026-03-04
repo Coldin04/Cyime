@@ -96,7 +96,7 @@
 
 <!-- Top Bar -->
 <header
-	class="relative flex h-16 shrink-0 items-center justify-center border-b border-black/10 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
+	class="relative z-30 flex h-16 shrink-0 items-center justify-center border-b border-black/10 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
 >
 	<!-- Left Controls: Absolutely positioned -->
 	<div class="absolute left-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
