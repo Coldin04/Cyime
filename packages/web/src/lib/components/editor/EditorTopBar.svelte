@@ -23,13 +23,15 @@
 		initialTitle,
 		isSaving,
 		lastSaved,
-		hasUnsavedChanges
+		hasUnsavedChanges,
+		onTitleChange
 	}: {
 		markdownId: string;
 		initialTitle: string;
 		isSaving: boolean;
 		lastSaved: Date | null;
 		hasUnsavedChanges: boolean;
+		onTitleChange?: (title: string) => void;
 	} = $props();
 
 	let showUserMenu = $state(false);
@@ -64,6 +66,7 @@
 		try {
 			await updateMarkdownTitle(markdownId!, editingTitle.trim());
 			title = editingTitle.trim();
+			onTitleChange?.(title);
 			toast.success(m.editor_topbar_title_updated());
 		} catch (error) {
 			console.error('Failed to update title:', error);
@@ -121,7 +124,7 @@
 		<!-- Container for Title and Status -->
 		<div class="flex flex-col">
 			{#if isEditingTitle}
-				<div class="flex items-center">
+				<div class="flex items-center gap-1">
 					<input
 						bind:this={titleInput}
 						type="text"
@@ -129,25 +132,23 @@
 						oninput={(e) => (editingTitle = e.currentTarget.value)}
 						onkeydown={handleTitleKeydown}
 						onblur={saveTitle}
-						class="w-full max-w-xl bg-transparent text-base text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100"
+						class="w-full max-w-xl bg-transparent text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100 px-2 py-0"
 						placeholder={m.markdown_name_placeholder()}
 					/>
-					<div class="flex items-center gap-1">
-						<button
-							onclick={saveTitle}
-							class="grid h-8 w-8 place-content-center rounded-full text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-							title={m.editor_topbar_save_title()}
-						>
-							<Check class="h-5 w-5" />
-						</button>
-						<button
-							onclick={cancelEditingTitle}
-							class="grid h-8 w-8 place-content-center rounded-full text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
-							title={m.common_cancel()}
-						>
-							<X class="h-5 w-5" />
-						</button>
-					</div>
+					<button
+						onclick={saveTitle}
+						class="grid h-4 w-4 place-content-center rounded text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+						title={m.editor_topbar_save_title()}
+					>
+						<Check class="h-4 w-4" />
+					</button>
+					<button
+						onclick={cancelEditingTitle}
+						class="grid h-4 w-4 place-content-center rounded text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+						title={m.common_cancel()}
+					>
+						<X class="h-4 w-4" />
+					</button>
 				</div>
 			{:else}
 				<button

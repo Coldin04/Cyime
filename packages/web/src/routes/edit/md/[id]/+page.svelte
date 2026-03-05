@@ -67,6 +67,10 @@
 		scheduleSave(newContent);
 	}
 
+	function handleTitleChange(newTitle: string) {
+		title = newTitle;
+	}
+
 	// Load markdown content when ID becomes available
 	$effect(() => {
 		if (markdownId) {
@@ -112,7 +116,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.page_title_auth_callback()}</title>
+  <title>{m.page_title_edit_document({ title })}</title>
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
@@ -123,6 +127,7 @@
 			{isSaving}
 			{lastSaved}
 			{hasUnsavedChanges}
+			onTitleChange={handleTitleChange}
 		/>
 	{/if}
 
