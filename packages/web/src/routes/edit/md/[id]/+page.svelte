@@ -111,6 +111,10 @@
 	});
 </script>
 
+<svelte:head>
+  <title>{m.page_title_auth_callback()}</title>
+</svelte:head>
+
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
 	{#if markdownId}
 		<EditorTopBar

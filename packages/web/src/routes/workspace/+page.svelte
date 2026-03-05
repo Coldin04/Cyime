@@ -156,6 +156,10 @@
 	}
 </script>
 
+<svelte:head>
+  <title>{m.page_title_workspace()}</title>
+</svelte:head>
+
 <div>
 	<Toolbar
 		{bulkMode}

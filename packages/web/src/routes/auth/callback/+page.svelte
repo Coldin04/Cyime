@@ -22,6 +22,10 @@
 	});
 </script>
 
+<svelte:head>
+  <title>{m.page_title_auth_callback()}</title>
+</svelte:head>
+
 <div class="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-gray-900">
 	<div class="text-center">
 		<h1 class="text-xl font-semibold text-gray-700 dark:text-gray-200">{m.auth_callback_finish_title()}</h1>

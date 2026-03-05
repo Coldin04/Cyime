@@ -77,6 +77,10 @@ async function handleEmptyTrash() {
 }
 </script>
 
+<svelte:head>
+  <title>{m.page_title_trash()}</title>
+</svelte:head>
+
 <div>
 	<div class="flex items-center justify-between">
 		<div>

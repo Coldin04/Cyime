@@ -112,5 +112,11 @@
   "editor_topbar_saving": "Saving...",
   "editor_topbar_unsaved": "Unsaved",
   "editor_topbar_saved_at": "Saved at {time}",
-  "editor_topbar_pending_changes": "Pending changes"
+  "editor_topbar_pending_changes": "Pending changes",
+  "page_title_homepage": "CyimeWrite - Flowing Creativity",
+  "page_title_login": "Login - CyimeWrite",
+  "page_title_auth_callback": "Redirecting... - CyimeWrite",
+  "page_title_workspace": "Workspace - CyimeWrite",
+  "page_title_trash": "Trash - CyimeWrite",
+  "page_title_edit_document": "Editing: {title} - CyimeWrite"
 }

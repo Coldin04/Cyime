@@ -2,6 +2,10 @@
   import * as m from '$paraglide/messages';
 </script>
 
+<svelte:head>
+  <title>{m.page_title_homepage()}</title>
+</svelte:head>
+
 <div
 	class="flex min-h-screen flex-col items-center justify-center bg-riptide-50 p-8 text-center dark:bg-slate-900"
 >
