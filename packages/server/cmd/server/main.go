@@ -62,6 +62,7 @@ func main() {
 		workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 		workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 		workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
+		workspaceRoutes.Post("/files/batch-delete", workspace.BatchDeleteHandler)
 		workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
 		workspaceRoutes.Get("/folders/:id/ancestors", workspace.GetFolderAncestorsHandler)
 		workspaceRoutes.Get("/trash", workspace.GetTrashHandler)

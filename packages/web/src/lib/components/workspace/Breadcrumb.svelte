@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { BreadcrumbItem } from '$lib/stores/workspace';
-	import Home from '~icons/ph/house-line';
+	import Home from '~icons/ph/house';
 	import CaretRight from '~icons/ph/caret-right';
 	import * as m from '$paraglide/messages';
 

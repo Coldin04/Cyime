@@ -6,7 +6,7 @@
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
-	import { getFiles, getFolderAncestors, deleteFile, type FileItem } from '$lib/api/workspace';
+	import { getFiles, getFolderAncestors, deleteFile, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
 	import { breadcrumbItems } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
 
@@ -122,18 +122,28 @@
 		if (itemsToDelete.length === 0) return;
 
 		try {
-			const deletePromises = itemsToDelete.map((id) => {
-				const item = items.find((i) => i.id === id);
-				if (item) {
-					return deleteFile(id, item.type);
+			const deleteItems = itemsToDelete.map((id) => {
+				const fileItem = items.find((i) => i.id === id);
+				if (fileItem) {
+					return { id: fileItem.id, type: fileItem.type };
 				}
-				return Promise.resolve(); // Should not happen, but as a safeguard
-			});
+				return null;
+			}).filter((item) => item !== null);
 
-			await Promise.all(deletePromises);
-			toast.success(
-				m.workspace_bulk_delete_success({ count: itemsToDelete.length })
-			);
+			const result = await batchDeleteFiles(deleteItems);
+			
+			if (result.success) {
+				toast.success(m.workspace_bulk_delete_success({ count: itemsToDelete.length }));
+			} else {
+				const failedCount = result.failedItems?.length || 0;
+				const successCount = itemsToDelete.length - failedCount;
+				toast.warning(
+					m.workspace_bulk_delete_partial_success({ 
+						success: successCount, 
+						failed: failedCount 
+					})
+				);
+			}
 		} catch (error) {
 			console.error('Failed to delete items:', error);
 			toast.error(m.workspace_bulk_delete_failed({ error: error instanceof Error ? error.message : '未知错误' }));

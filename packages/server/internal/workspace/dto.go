@@ -78,6 +78,31 @@ type DeleteResponse struct {
 	Message string `json:"message"`
 }
 
+// BatchDeleteRequest represents the request body for batch deleting files
+type BatchDeleteRequest struct {
+	Items []ItemToDelete `json:"items"`
+}
+
+// ItemToDelete represents an item to be deleted
+type ItemToDelete struct {
+	ID   uuid.UUID `json:"id"`
+	Type string    `json:"type"` // "folder" | "markdown"
+}
+
+// BatchDeleteResponse represents the response for batch delete operations
+type BatchDeleteResponse struct {
+	Success    bool         `json:"success"`
+	Message    string       `json:"message"`
+	FailedItems []FailedItem `json:"failedItems,omitempty"`
+}
+
+// FailedItem represents an item that failed to delete
+type FailedItem struct {
+	ID     uuid.UUID `json:"id"`
+	Type   string    `json:"type"`
+	Reason string    `json:"reason"`
+}
+
 // AncestorItem represents a single folder in a breadcrumb path
 type AncestorItem struct {
 	ID   uuid.UUID `json:"id"`

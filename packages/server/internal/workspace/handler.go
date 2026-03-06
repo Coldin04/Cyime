@@ -152,23 +152,24 @@ func CreateFolderHandler(c *fiber.Ctx) error {
 	// Create folder
 	folder, err := CreateFolder(userID, req.Name, req.Description, req.ParentID)
 	if err != nil {
-		switch err.Error() {
-		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符", "不能使用系统保留的文件夹名称":
+		// Handle known validation errors
+		if err.Error() == "文件夹名称不能为空" || err.Error() == "文件夹名称不能超过 255 个字符" || err.Error() == "不能使用系统保留的文件夹名称" || err.Error() == "同名文件夹已存在" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
 			})
-		case "父文件夹不存在", "同名文件夹已存在":
+		}
+		if err.Error() == "父文件夹不存在" {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: err.Error(),
-			})
 		}
+		// Handle unknown errors with user-friendly message
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Server Error",
+			Message: "创建文件夹失败，请稍后重试",
+		})
 	}
 
 	// Get creator info
@@ -226,23 +227,24 @@ func CreateMarkdownHandler(c *fiber.Ctx) error {
 	// Create markdown
 	markdown, err := CreateMarkdown(userID, req.Title, req.Content, req.FolderID)
 	if err != nil {
-		switch err.Error() {
-		case "文档标题不能为空", "文档标题不能超过 255 个字符":
+		// Handle known validation errors
+		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
 			})
-		case "文件夹不存在":
+		}
+		if err.Error() == "文件夹不存在" {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: err.Error(),
-			})
 		}
+		// Handle unknown errors with user-friendly message
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Server Error",
+			Message: "创建文档失败，请稍后重试",
+		})
 	}
 
 	// Get creator info
@@ -267,6 +269,57 @@ func CreateMarkdownHandler(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
+}
+
+// BatchDeleteHandler handles POST /api/v1/workspace/files/batch-delete
+func BatchDeleteHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req BatchDeleteRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if len(req.Items) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "至少需要删除一个项目",
+		})
+	}
+
+	// Batch delete files
+	response, err := BatchDeleteFiles(userID, req.Items)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	if !response.Success {
+		return c.Status(fiber.StatusPartialContent).JSON(response)
+	}
+
+	return c.JSON(response)
 }
 
 // DeleteFileHandler handles DELETE /api/v1/workspace/files/:id

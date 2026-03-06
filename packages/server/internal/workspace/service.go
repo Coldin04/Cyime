@@ -308,6 +308,86 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 	return markdown, nil
 }
 
+// BatchDeleteFiles soft deletes multiple files (folders and markdowns) in a single transaction
+func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDeleteResponse, error) {
+	var successCount int
+	var failedItems []FailedItem
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		for _, item := range itemsToDelete {
+			if item.Type == "folder" {
+				if err := deleteFolderRecursive(tx, userID, item.ID); err != nil {
+					failedItems = append(failedItems, FailedItem{
+						ID:     item.ID,
+						Type:   item.Type,
+						Reason: err.Error(),
+					})
+					continue
+				}
+				successCount++
+			} else if item.Type == "markdown" {
+				// Delete content first
+				if err := content.DeleteContentByMarkdownID(tx, item.ID); err != nil {
+					failedItems = append(failedItems, FailedItem{
+						ID:     item.ID,
+						Type:   item.Type,
+						Reason: err.Error(),
+					})
+					continue
+				}
+
+				// Soft delete markdown metadata
+				result := tx.Where("id = ? AND user_id = ?", item.ID, userID).Delete(&models.Markdown{})
+				if result.Error != nil {
+					failedItems = append(failedItems, FailedItem{
+						ID:     item.ID,
+						Type:   item.Type,
+						Reason: result.Error.Error(),
+					})
+					continue
+				}
+				if result.RowsAffected == 0 {
+					failedItems = append(failedItems, FailedItem{
+						ID:     item.ID,
+						Type:   item.Type,
+						Reason: "文档不存在或无权删除",
+					})
+					continue
+				}
+				successCount++
+			} else {
+				failedItems = append(failedItems, FailedItem{
+					ID:     item.ID,
+					Type:   item.Type,
+					Reason: "无效的文件类型",
+				})
+			}
+		}
+		// Don't return error here, we want to commit even if some items fail
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &BatchDeleteResponse{
+		Success:     len(failedItems) == 0,
+		Message:     buildBatchDeleteMessage(successCount, len(failedItems)),
+		FailedItems: failedItems,
+	}, nil
+}
+
+func buildBatchDeleteMessage(successCount, failedCount int) string {
+	if failedCount == 0 {
+		return "已成功删除所有项目"
+	}
+	if successCount == 0 {
+		return "删除失败"
+	}
+	return fmt.Sprintf("已成功删除 %d 个项目，%d 个失败", successCount, failedCount)
+}
+
 // DeleteFile soft deletes a file (folder or markdown)
 func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 	if fileType == "folder" {
@@ -797,13 +877,6 @@ type RestoreTrashResponse struct {
 	Message       string       `json:"message"`
 	RestoredCount int          `json:"restoredCount"`
 	FailedItems   []FailedItem `json:"failedItems"`
-}
-
-// FailedItem defines a file that failed to be restored, and the reason why
-type FailedItem struct {
-	ID     uuid.UUID `json:"id"`
-	Type   string    `json:"type"`
-	Reason string    `json:"reason"`
 }
 
 type ItemToRestore struct {

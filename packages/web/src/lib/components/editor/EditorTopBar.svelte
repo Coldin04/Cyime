@@ -159,7 +159,7 @@
 					<h1
 						class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
 					>
-						{title || m.edit_document_title()}
+						{title}
 					</h1>
 					<Pencil
 						class="h-4 w-4 shrink-0 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"

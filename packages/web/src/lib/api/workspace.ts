@@ -100,7 +100,7 @@ export async function createFolder(request: CreateFolderRequest): Promise<Create
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.message || 'Failed to create folder');
+		throw new Error(error.Message || error.message || 'Failed to create folder');
 	}
 
 	return response.json();
@@ -120,7 +120,7 @@ export async function createMarkdown(request: CreateMarkdownRequest): Promise<Cr
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.message || 'Failed to create markdown');
+		throw new Error(error.Message || error.message || 'Failed to create markdown');
 	}
 
 	return response.json();
@@ -137,6 +137,26 @@ export async function deleteFile(id: string, type: 'folder' | 'markdown'): Promi
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to delete file');
+	}
+
+	return response.json();
+}
+
+/**
+ * Batch deletes multiple files (folders and markdowns)
+ */
+export async function batchDeleteFiles(items: { id: string; type: 'folder' | 'markdown' }[]): Promise<{ success: boolean; message: string; failedItems?: { id: string; type: string; reason: string }[] }> {
+	const response = await apiFetch('/api/v1/workspace/files/batch-delete', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ items })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to delete files');
 	}
 
 	return response.json();
