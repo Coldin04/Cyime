@@ -100,10 +100,10 @@
 
 <!-- Top Bar -->
 <header
-	class="relative z-30 flex h-16 shrink-0 items-center justify-center border-b border-black/10 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
+	class="z-30 flex h-16 shrink-0 items-center justify-between border-b border-black/10 bg-white/80 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
 >
-	<!-- Left Controls: Absolutely positioned -->
-	<div class="absolute left-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
+	<!-- Left Controls -->
+	<div class="flex items-center gap-2 px-4">
 		<!-- Home Button -->
 		<a
 			href="/workspace"
@@ -118,11 +118,11 @@
 	</div>
 
 	<!-- Center: Title Section -->
-	<div class="flex min-w-0 flex-1 items-center gap-2 px-20">
+	<div class="flex min-w-0 flex-1 items-center gap-2 px-0">
 		<FileMd class="h-5 w-5 shrink-0 text-zinc-400 self-center" />
 
 		<!-- Container for Title and Status -->
-		<div class="flex flex-col">
+		<div class="flex flex-col min-w-0">
 			{#if isEditingTitle}
 				<div class="flex items-center gap-1">
 					<input
@@ -153,17 +153,15 @@
 			{:else}
 				<button
 					onclick={startEditingTitle}
-					class="group flex min-w-0 items-center gap-2"
+					class="group flex min-w-0 items-center"
 					title={m.editor_topbar_edit_title_tooltip()}
 				>
 					<h1
 						class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
+						title={title}
 					>
 						{title}
 					</h1>
-					<Pencil
-						class="h-4 w-4 shrink-0 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
-					/>
 				</button>
 			{/if}
 
@@ -184,10 +182,10 @@
 		</div>
 	</div>
 
-	<!-- Right Controls: Absolutely positioned -->
-	<div class="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-4">
+	<!-- Right Controls -->
+	<div class="flex items-center gap-4 pr-4">
 		<button
-			class="grid h-8 w-8 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+			class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 			title={m.common_search_placeholder()}
 		>
 			<Search class="h-5 w-5" />
@@ -195,7 +193,7 @@
 		<div class="relative">
 			<button
 				onclick={toggleUserMenu}
-				class="grid h-8 w-8 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+				class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 			>
 				<User class="h-5 w-5" />
 			</button>
