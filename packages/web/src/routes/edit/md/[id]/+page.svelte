@@ -87,7 +87,7 @@
 					console.log('[Load] Content loaded, length:', data.content?.length);
 					content = data.content;
 					// Use the title from the API
-					title = details.title;
+					title = details.title ?? '';
 					console.log('[Load] Title loaded:', title);
 					// Reset state for the new document
 					hasUnsavedChanges = false;

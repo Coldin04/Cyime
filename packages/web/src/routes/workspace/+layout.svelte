@@ -5,19 +5,18 @@
 	import { auth } from '$lib/stores/auth';
 	import TopBar from '$lib/components/workspace/TopBar.svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
+	import { workspaceContext } from '$lib/stores/workspace';
 
-	// This reactive block is the core of our route guard.
-	// It automatically re-runs whenever the value of `$auth` changes.
-	$: {
+	// Route guard using $effect
+	$effect(() => {
 		// We only run this logic in the browser.
 		if (browser) {
 			// We wait for the auth store's loading process to complete.
 			if (!$auth.loading && !$auth.token) {
-				// If loading is complete and there's no token, redirect to login.
 				goto('/login', { replaceState: true });
 			}
 		}
-	}
+	});
 </script>
 
 <!--

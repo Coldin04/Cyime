@@ -11,7 +11,7 @@
 		onNavigate
 	}: {
 		items: BreadcrumbItem[];
-		onNavigate: (id: string | null) => void;
+		onNavigate?: (id: string | null) => void;
 	} = $props();
 
 	const MAX_BREADCRUMBS = 4; // Max items to show before truncating with '...' on large screens
@@ -52,7 +52,7 @@
 
 <nav class="flex items-center text-sm font-medium text-zinc-600 dark:text-zinc-400">
 	<button
-		onclick={() => onNavigate(null)}
+		onclick={() => onNavigate?.(null)}
 		class="flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 	>
 		<Home class="h-4 w-4" />
@@ -69,7 +69,7 @@
 				<span class="px-2">...</span>
 			{:else}
 				<button
-					onclick={() => onNavigate(crumb.id)}
+					onclick={() => onNavigate?.(crumb.id)}
 					class="block max-w-[120px] truncate rounded-md px-2 py-1 transition-colors hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 				>
 					{crumb.name}

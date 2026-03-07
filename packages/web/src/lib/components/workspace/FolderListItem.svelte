@@ -22,7 +22,7 @@
 		selectedItems: { [key: string]: boolean };
 		bulkMode?: boolean;
 		onToggle: (id: string) => void;
-		onNavigate: (id: string) => void;
+		onNavigate?: (id: string) => void;
 		onRefresh?: () => void;
 	} = $props();
 
@@ -68,7 +68,7 @@
 		if (bulkMode) {
 			onToggle(item.id);
 		} else {
-			onNavigate(item.id);
+			onNavigate?.(item.id);
 		}
 	}
 

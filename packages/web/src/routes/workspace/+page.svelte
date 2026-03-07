@@ -7,37 +7,59 @@
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
 	import { getFiles, getFolderAncestors, deleteFile, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
-	import { breadcrumbItems } from '$lib/stores/workspace';
+	import { breadcrumbItems, workspaceContext } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
 
 	let items = $state<FileItem[]>([]);
-	let selectedItems = $state<{ [key: string]: boolean }>({});
 	let hasMore = $state(false);
 	let sortBy = $state('updated_at');
 	let order = $state('desc');
 	let filterType = $state<'all' | 'folders' | 'markdowns'>('all');
 	let isLoading = $state(true);
-	let currentFolderId = $state<string | null>(null);
-	let isCreatingFolder = $state(false);
-	let bulkMode = $state(false);
 	let refreshTrigger = $state(0);
 
+	// Use local state for selected items to avoid store overhead during rapid selection
+	let bulkMode = $state(false);
+	let selectedItems = $state<{ [key: string]: boolean }>({});
+
+	// Sync bulk mode with store and reset local selection when bulk mode changes
+	$effect(() => {
+		if ($workspaceContext.bulkMode !== bulkMode) {
+			bulkMode = $workspaceContext.bulkMode;
+			if (!bulkMode) {
+				selectedItems = {};
+			}
+		}
+	});
+
+	// Use local state for derived values (much faster than store-derived)
 	const selectedItemsCount = $derived(Object.keys(selectedItems).length);
 	const allSelected = $derived(items.length > 0 && selectedItemsCount === items.length);
 	const someSelected = $derived(selectedItemsCount > 0 && !allSelected);
 
-	// Centralized, cancellable data loading effect
+	// Skeleton delay state - only show skeleton if loading takes more than 200ms
+	let showSkeleton = $state(false);
+	let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
+	
 	$effect(() => {
-		// Add refreshTrigger to the dependencies
 		const trigger = refreshTrigger;
 		let aborted = false;
 
+		// Start loading and skeleton timer
+		isLoading = true;
+		showSkeleton = false;
+		
+		// Only show skeleton if loading takes more than 200ms
+		skeletonTimer = setTimeout(() => {
+			if (!aborted && isLoading) {
+				showSkeleton = true;
+			}
+		}, 200);
+
 		(async () => {
-			isLoading = true;
 			try {
-				// Fetch files and ancestors in parallel for better performance
 				const filesPromise = getFiles({
-					parent_id: currentFolderId,
+					parent_id: $workspaceContext.currentFolderId,
 					limit: 50,
 					offset: 0,
 					sort_by: sortBy,
@@ -45,72 +67,67 @@
 					type: filterType
 				});
 
-				const ancestorsPromise = currentFolderId
-					? getFolderAncestors(currentFolderId)
-					: Promise.resolve([]); // At root, ancestors are an empty array
+				const ancestorsPromise = $workspaceContext.currentFolderId
+					? getFolderAncestors($workspaceContext.currentFolderId)
+					: Promise.resolve([]);
 
-				// Await both promises simultaneously
 				const [fileData, ancestorData] = await Promise.all([filesPromise, ancestorsPromise]);
 
-				if (aborted) return; // Don't update state if effect has been re-run
+				if (aborted) return;
 
-				// Atomically update state after all data is successfully fetched
-				items = fileData.items || []; // Guard against null from API response
+				items = fileData.items || [];
 				hasMore = fileData.hasMore;
 				breadcrumbItems.set(ancestorData);
 			} catch (error) {
 				if (aborted) return;
 				console.error('Failed to load workspace data:', error);
-				// On error, reset to a clean empty state
 				items = [];
 				hasMore = false;
 				breadcrumbItems.set([]);
 			} finally {
 				if (aborted) return;
-				// This will always run, ensuring the loading spinner doesn't get stuck
 				isLoading = false;
+				showSkeleton = false;
+				if (skeletonTimer) {
+					clearTimeout(skeletonTimer);
+					skeletonTimer = null;
+				}
 			}
 		})();
 
 		return () => {
 			aborted = true;
+			showSkeleton = false;
+			if (skeletonTimer) {
+				clearTimeout(skeletonTimer);
+				skeletonTimer = null;
+			}
 		};
 	});
 
-	function handleNavigate(id: string | null) {
-		if (currentFolderId === id) return;
-		currentFolderId = id;
-		bulkMode = false;
-		for (const key in selectedItems) {
-			delete selectedItems[key];
-		}
-	}
-
 	function handleFolderCreated() {
-		isCreatingFolder = false;
-		refreshTrigger++; // Trigger the effect to refresh data
+		workspaceContext.update((ctx) => ({ ...ctx, isCreatingFolder: false }));
+		refreshTrigger++;
 	}
 
 	function toggleBulkMode() {
 		bulkMode = !bulkMode;
-		if (!bulkMode) {
-			for (const key in selectedItems) {
-				delete selectedItems[key];
-			}
-		}
+		selectedItems = {};
+		workspaceContext.update((ctx) => ({ ...ctx, bulkMode }));
 	}
 
 	function toggleSelectAll() {
 		if (allSelected) {
-			for (const key in selectedItems) {
-				delete selectedItems[key];
-			}
+			selectedItems = {};
 		} else {
+			const newSelected: { [key: string]: boolean } = {};
 			for (const item of items) {
-				selectedItems[item.id] = true;
+				newSelected[item.id] = true;
 			}
+			selectedItems = newSelected;
 			if (!bulkMode) {
 				bulkMode = true;
+				workspaceContext.update((ctx) => ({ ...ctx, bulkMode: true }));
 			}
 		}
 	}
@@ -131,16 +148,16 @@
 			}).filter((item) => item !== null);
 
 			const result = await batchDeleteFiles(deleteItems);
-			
+
 			if (result.success) {
 				toast.success(m.workspace_bulk_delete_success({ count: itemsToDelete.length }));
 			} else {
 				const failedCount = result.failedItems?.length || 0;
 				const successCount = itemsToDelete.length - failedCount;
 				toast.warning(
-					m.workspace_bulk_delete_partial_success({ 
-						success: successCount, 
-						failed: failedCount 
+					m.workspace_bulk_delete_partial_success({
+						success: successCount,
+						failed: failedCount
 					})
 				);
 			}
@@ -148,11 +165,9 @@
 			console.error('Failed to delete items:', error);
 			toast.error(m.workspace_bulk_delete_failed({ error: error instanceof Error ? error.message : '未知错误' }));
 		} finally {
-			// Clear selection and refresh the list
-			for (const key in selectedItems) {
-				delete selectedItems[key];
-			}
+			selectedItems = {};
 			bulkMode = false;
+			workspaceContext.update((ctx) => ({ ...ctx, bulkMode: false }));
 			refreshTrigger++;
 		}
 	}
@@ -174,11 +189,13 @@
 	<Toolbar
 		{bulkMode}
 		{selectedItemsCount}
-		{currentFolderId}
-		onCreateFolder={() => (isCreatingFolder = true)}
 		onToggleBulk={toggleBulkMode}
 		onBulkDelete={handleBulkDelete}
-		onNavigate={handleNavigate}
+		onNavigate={(id) => {
+			workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
+			bulkMode = false;
+			selectedItems = {};
+		}}
 	/>
 
 	<div class="my-6 border-t border-zinc-200 dark:border-zinc-700">
@@ -192,16 +209,18 @@
 		/>
 
 		<!-- 新建文件夹组件 -->
-		{#if isCreatingFolder}
+		{#if $workspaceContext.isCreatingFolder}
 			<NewFolderItem
-				parentId={currentFolderId}
+				parentId={$workspaceContext.currentFolderId}
 				on:create={handleFolderCreated}
-				on:cancel={() => (isCreatingFolder = false)}
+				on:cancel={() => {
+					workspaceContext.update((ctx) => ({ ...ctx, isCreatingFolder: false }));
+				}}
 			/>
 		{/if}
 
 		<!-- 文件列表 -->
-		{#if isLoading}
+		{#if showSkeleton}
 			<FolderListItemSkeleton />
 			<MarkdownListItemSkeleton />
 		{:else if items.length === 0}
@@ -233,7 +252,11 @@
 						{selectedItems}
 						{bulkMode}
 						onToggle={toggleItem}
-						onNavigate={handleNavigate}
+						onNavigate={(id) => {
+							workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
+							bulkMode = false;
+							selectedItems = {};
+						}}
 						onRefresh={() => refreshTrigger++}
 					/>
 				{:else if item.type === 'markdown'}
