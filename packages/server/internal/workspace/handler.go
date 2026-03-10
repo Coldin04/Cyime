@@ -316,7 +316,7 @@ func BatchDeleteHandler(c *fiber.Ctx) error {
 	}
 
 	if !response.Success {
-		return c.Status(fiber.StatusPartialContent).JSON(response)
+		return c.Status(fiber.StatusMultiStatus).JSON(response)
 	}
 
 	return c.JSON(response)

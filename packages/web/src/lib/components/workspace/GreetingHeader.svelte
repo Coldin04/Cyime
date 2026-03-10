@@ -5,10 +5,14 @@
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import FolderPlus from '~icons/ph/folder-plus';
 	import CheckSquare from '~icons/ph/check-square';
+	import House from '~icons/ph/house';
 	import { createMarkdown } from '$lib/api/workspace';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { workspaceContext } from '$lib/stores/workspace';
+
+	let { mode = 'workspace' }: { mode?: 'workspace' | 'trash' } = $props();
+	const isTrashMode = $derived(mode === 'trash');
 
 	function getGreeting(): string {
 		const hour = new Date().getHours();
@@ -58,6 +62,10 @@
 		}
 	}
 
+	function handleGoToWorkspaceRoot() {
+		goto('/workspace');
+	}
+
 	function handleCreateFolder() {
 		workspaceContext.update((ctx) => ({ ...ctx, isCreatingFolder: true }));
 		showMenu = false;
@@ -92,29 +100,37 @@
 	<!-- Action Buttons -->
 	<div class="relative flex flex-shrink-0 items-center">
 		<button
-			onclick={handleCreateDocument}
+			onclick={isTrashMode ? handleGoToWorkspaceRoot : handleCreateDocument}
 			disabled={isLoading}
-			class="inline-flex h-10 items-center justify-center gap-2 rounded-l-lg bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4"
+			class="inline-flex h-10 items-center justify-center gap-2 bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4 {isTrashMode
+				? 'rounded-lg'
+				: 'rounded-l-lg'}"
 		>
 			{#if isLoading}
 				<svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
 					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
 					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
 				</svg>
+			{:else if isTrashMode}
+				<House class="h-4 w-4" />
 			{:else}
 				<Plus class="h-4 w-4" />
 			{/if}
-			<span class="hidden sm:inline">{m.common_new_document()}</span>
+			<span class="hidden sm:inline">
+				{isTrashMode ? m.topbar_back_to_workspace() : m.common_new_document()}
+			</span>
 		</button>
-		<button
-			onclick={toggleMenu}
-			class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
-			aria-label={m.common_more_options()}
-		>
-			<DotsThreeVertical class="h-5 w-5" />
-		</button>
+		{#if !isTrashMode}
+			<button
+				onclick={toggleMenu}
+				class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
+				aria-label={m.common_more_options()}
+			>
+				<DotsThreeVertical class="h-5 w-5" />
+			</button>
+		{/if}
 
-		{#if showMenu}
+		{#if showMenu && !isTrashMode}
 			<div
 				class="absolute top-full right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
 				role="menu"

@@ -239,9 +239,7 @@
 
 {#if isMoving && isMovingItem}
 	<MoveDialog
-		itemId={item.id}
-		itemType={item.type}
-		currentParentId={item.parentId ?? null}
+		items={[{ id: item.id, type: item.type }]}
 		on:cancel={handleMoveCancel}
 		on:move={handleMoveComplete}
 	/>

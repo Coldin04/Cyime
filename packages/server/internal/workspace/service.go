@@ -538,7 +538,7 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 			}
 			return nil, result.Error
 		}
-		
+
 		item := folderToFileItem(folder)
 		return &item, nil
 	} else if fileType == "markdown" {
@@ -550,11 +550,11 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 			}
 			return nil, result.Error
 		}
-		
+
 		item := markdownToFileItem(markdown)
 		return &item, nil
 	}
-	
+
 	return nil, errors.New("无效的文件类型")
 }
 
@@ -694,7 +694,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 		}
 
 		// 4. Check for circular dependency: cannot move folder into its own descendant
-		if err := checkCircularDependency(userID, &folderID, parentID); err != nil {
+		if err := checkCircularDependency(database.DB, userID, &folderID, parentID); err != nil {
 			return nil, err
 		}
 	}
@@ -735,7 +735,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 
 // checkCircularDependency checks if moving sourceFolder into targetParent would create a cycle
 // Returns error if moving would create a circular reference
-func checkCircularDependency(userID uuid.UUID, sourceFolderID, targetParentID *uuid.UUID) error {
+func checkCircularDependency(db *gorm.DB, userID uuid.UUID, sourceFolderID, targetParentID *uuid.UUID) error {
 	currentID := targetParentID
 
 	// Traverse up the parent chain
@@ -746,7 +746,7 @@ func checkCircularDependency(userID uuid.UUID, sourceFolderID, targetParentID *u
 
 		// Get the parent folder
 		var parent models.Folder
-		result := database.DB.Where("id = ? AND user_id = ?", currentID, userID).First(&parent)
+		result := db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", currentID, userID).First(&parent)
 		if result.Error != nil {
 			// If parent doesn't exist, we've reached an invalid state, but not a cycle
 			break
@@ -820,9 +820,9 @@ type TrashListResponse struct {
 
 // TrashItem defines the structure for a single item in the trash list
 type TrashItem struct {
-	ID        uuid.UUID `json:"id"`
-	Type      string    `json:"type"`
-	Name      string    `json:"name"`
+	ID        uuid.UUID      `json:"id"`
+	Type      string         `json:"type"`
+	Name      string         `json:"name"`
 	DeletedAt gorm.DeletedAt `json:"deletedAt"`
 }
 
@@ -848,7 +848,7 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 		queryFolders = queryFolders.Where("parent_id IS NULL OR parent_id NOT IN ?", deletedFolderIDs)
 	}
 	queryFolders.Find(&topLevelFolders)
-	
+
 	// 3. Find top-level soft-deleted markdowns
 	// A markdown is top-level if its folder_id is NULL or its folder is NOT in the set of deleted folders
 	var topLevelMarkdowns []models.Markdown
@@ -1010,7 +1010,7 @@ func restoreFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) e
 
 // PermanentDeleteResponse defines the structure for the permanent delete API response
 type PermanentDeleteResponse struct {
-	Success      bool  `json:"success"`
+	Success      bool   `json:"success"`
 	Message      string `json:"message"`
 	DeletedCount int64  `json:"deletedCount"`
 }
@@ -1119,33 +1119,78 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 			}
 		}
 
-		// Separate items by type
+		// Separate items by type and deduplicate IDs.
 		var foldersToMove []uuid.UUID
 		var markdownsToMove []uuid.UUID
-		itemMap := make(map[uuid.UUID]string) // For quick lookup
+		seenFolders := make(map[uuid.UUID]bool)
+		seenMarkdowns := make(map[uuid.UUID]bool)
 		for _, item := range itemsToMove {
-			itemMap[item.ID] = item.Type
 			if item.Type == "folder" {
-				foldersToMove = append(foldersToMove, item.ID)
+				if !seenFolders[item.ID] {
+					seenFolders[item.ID] = true
+					foldersToMove = append(foldersToMove, item.ID)
+				}
 			} else if item.Type == "markdown" {
-				markdownsToMove = append(markdownsToMove, item.ID)
+				if !seenMarkdowns[item.ID] {
+					seenMarkdowns[item.ID] = true
+					markdownsToMove = append(markdownsToMove, item.ID)
+				}
 			} else {
 				failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "无效的文件类型"})
 			}
 		}
 
-		// Items that fail validation will be added to this map
+		// Items that fail validation will be added to this map.
 		itemsToExclude := make(map[uuid.UUID]bool)
+		folderMap := make(map[uuid.UUID]models.Folder)
+		markdownMap := make(map[uuid.UUID]models.Markdown)
+
+		// Validate all source folders belong to the current user and are not deleted.
+		if len(foldersToMove) > 0 {
+			var folders []models.Folder
+			if err := tx.Where("id IN ? AND user_id = ? AND deleted_at IS NULL", foldersToMove, userID).Find(&folders).Error; err != nil {
+				return err
+			}
+			for _, f := range folders {
+				folderMap[f.ID] = f
+			}
+			for _, folderID := range foldersToMove {
+				if _, ok := folderMap[folderID]; !ok {
+					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: "文件夹不存在或无权操作"})
+					itemsToExclude[folderID] = true
+				}
+			}
+		}
+
+		// Validate all source markdowns belong to the current user and are not deleted.
+		if len(markdownsToMove) > 0 {
+			var markdowns []models.Markdown
+			if err := tx.Where("id IN ? AND user_id = ? AND deleted_at IS NULL", markdownsToMove, userID).Find(&markdowns).Error; err != nil {
+				return err
+			}
+			for _, m := range markdowns {
+				markdownMap[m.ID] = m
+			}
+			for _, markdownID := range markdownsToMove {
+				if _, ok := markdownMap[markdownID]; !ok {
+					failedItems = append(failedItems, FailedItem{ID: markdownID, Type: "markdown", Reason: "文档不存在或无权操作"})
+					itemsToExclude[markdownID] = true
+				}
+			}
+		}
 
 		// A. Circular dependency and self-move checks
 		if destFolderID != nil {
 			for _, folderID := range foldersToMove {
+				if itemsToExclude[folderID] {
+					continue
+				}
 				if folderID == *destFolderID {
 					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: "不能将文件夹移动到其自身内部"})
 					itemsToExclude[folderID] = true
 					continue
 				}
-				if err := checkCircularDependency(userID, &folderID, destFolderID); err != nil {
+				if err := checkCircularDependency(tx, userID, &folderID, destFolderID); err != nil {
 					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: err.Error()})
 					itemsToExclude[folderID] = true
 				}
@@ -1156,18 +1201,22 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		// Get existing names in destination
 		var existingFolders []models.Folder
 		var existingMarkdowns []models.Markdown
-		destQueryFolder := tx.Model(&models.Folder{}).Where("user_id = ?", userID)
-		destQueryMarkdown := tx.Model(&models.Markdown{}).Where("user_id = ?", userID)
+		destQueryFolder := tx.Model(&models.Folder{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+		destQueryMarkdown := tx.Model(&models.Markdown{}).Where("user_id = ? AND deleted_at IS NULL", userID)
 
 		if destFolderID != nil {
-			destQueryFolder.Where("parent_id = ?", destFolderID)
-			destQueryMarkdown.Where("folder_id = ?", destFolderID)
+			destQueryFolder = destQueryFolder.Where("parent_id = ?", destFolderID)
+			destQueryMarkdown = destQueryMarkdown.Where("folder_id = ?", destFolderID)
 		} else {
-			destQueryFolder.Where("parent_id IS NULL")
-			destQueryMarkdown.Where("folder_id IS NULL")
+			destQueryFolder = destQueryFolder.Where("parent_id IS NULL")
+			destQueryMarkdown = destQueryMarkdown.Where("folder_id IS NULL")
 		}
-		destQueryFolder.Find(&existingFolders)
-		destQueryMarkdown.Find(&existingMarkdowns)
+		if err := destQueryFolder.Find(&existingFolders).Error; err != nil {
+			return err
+		}
+		if err := destQueryMarkdown.Find(&existingMarkdowns).Error; err != nil {
+			return err
+		}
 
 		existingNames := make(map[string]bool)
 		for _, f := range existingFolders {
@@ -1179,13 +1228,12 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 
 		// Check for conflicts
 		if len(foldersToMove) > 0 {
-			var folders []models.Folder
-			tx.Where("id IN ? AND user_id = ?", foldersToMove, userID).Find(&folders)
-			for _, f := range folders {
+			for _, folderID := range foldersToMove {
 				// Don't check items that already failed validation
-				if itemsToExclude[f.ID] {
+				if itemsToExclude[folderID] {
 					continue
 				}
+				f := folderMap[folderID]
 				if existingNames["folder_"+f.Name] {
 					failedItems = append(failedItems, FailedItem{ID: f.ID, Type: "folder", Reason: "目标位置已存在同名文件夹"})
 					itemsToExclude[f.ID] = true
@@ -1196,13 +1244,12 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 			}
 		}
 		if len(markdownsToMove) > 0 {
-			var markdowns []models.Markdown
-			tx.Where("id IN ? AND user_id = ?", markdownsToMove, userID).Find(&markdowns)
-			for _, m := range markdowns {
+			for _, markdownID := range markdownsToMove {
 				// Don't check items that already failed validation
-				if itemsToExclude[m.ID] {
+				if itemsToExclude[markdownID] {
 					continue
 				}
+				m := markdownMap[markdownID]
 				if existingNames["markdown_"+m.Title] {
 					failedItems = append(failedItems, FailedItem{ID: m.ID, Type: "markdown", Reason: "目标位置已存在同名文档"})
 					itemsToExclude[m.ID] = true
@@ -1230,17 +1277,29 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 
 		now := time.Now()
 		if len(finalFoldersToMove) > 0 {
-			if err := tx.Model(&models.Folder{}).Where("id IN ?", finalFoldersToMove).Updates(map[string]interface{}{"parent_id": destFolderID, "updated_at": now}).Error; err != nil {
+			result := tx.Model(&models.Folder{}).
+				Where("id IN ? AND user_id = ? AND deleted_at IS NULL", finalFoldersToMove, userID).
+				Updates(map[string]interface{}{"parent_id": destFolderID, "updated_at": now})
+			if result.Error != nil {
 				// If this fails, it's a serious DB error, rollback everything
-				return err
+				return result.Error
 			}
-			movedCount += len(finalFoldersToMove)
+			if int(result.RowsAffected) != len(finalFoldersToMove) {
+				return errors.New("部分文件夹状态已变更，请重试")
+			}
+			movedCount += int(result.RowsAffected)
 		}
 		if len(finalMarkdownsToMove) > 0 {
-			if err := tx.Model(&models.Markdown{}).Where("id IN ?", finalMarkdownsToMove).Updates(map[string]interface{}{"folder_id": destFolderID, "updated_at": now}).Error; err != nil {
-				return err
+			result := tx.Model(&models.Markdown{}).
+				Where("id IN ? AND user_id = ? AND deleted_at IS NULL", finalMarkdownsToMove, userID).
+				Updates(map[string]interface{}{"folder_id": destFolderID, "updated_at": now})
+			if result.Error != nil {
+				return result.Error
 			}
-			movedCount += len(finalMarkdownsToMove)
+			if int(result.RowsAffected) != len(finalMarkdownsToMove) {
+				return errors.New("部分文档状态已变更，请重试")
+			}
+			movedCount += int(result.RowsAffected)
 		}
 
 		return nil // Commit transaction
@@ -1257,5 +1316,3 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		FailedItems: failedItems,
 	}, nil
 }
-
-

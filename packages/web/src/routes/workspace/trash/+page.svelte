@@ -8,6 +8,7 @@
 	import Folder from '~icons/ph/folder';
 	import File from '~icons/ph/file';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
+	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import { toast } from 'svelte-sonner';
 	import ClockClockwise from '~icons/ph/clock-clockwise';
 	import TrashSimple from '~icons/ph/trash-simple';
@@ -82,6 +83,8 @@ async function handleEmptyTrash() {
 </svelte:head>
 
 <div>
+	<GreetingHeader mode="trash" />
+
 	<div class="flex items-center justify-between">
 		<div>
 			<h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{m.trash_title()}</h1>

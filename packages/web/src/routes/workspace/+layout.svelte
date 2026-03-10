@@ -4,8 +4,8 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import TopBar from '$lib/components/workspace/TopBar.svelte';
-	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
-	import { workspaceContext } from '$lib/stores/workspace';
+
+	let { children } = $props();
 
 	// Route guard using $effect
 	$effect(() => {
@@ -32,7 +32,6 @@
 {:else if $auth.token}
 	<TopBar />
 	<main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-		<GreetingHeader />
-		<slot />
+		{@render children()}
 	</main>
 {/if}

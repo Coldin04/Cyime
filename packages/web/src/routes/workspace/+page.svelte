@@ -1,4 +1,5 @@
 <script lang="ts">
+	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
 	import FolderListItem from '$lib/components/workspace/FolderListItem.svelte';
@@ -210,6 +211,8 @@
 </svelte:head>
 
 <div>
+	<GreetingHeader />
+
 	<Toolbar
 		{bulkMode}
 		{selectedItemsCount}

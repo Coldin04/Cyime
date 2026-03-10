@@ -3,10 +3,12 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
+
+	let { children } = $props();
 	
-	// This reactive block is the core of our route guard.
+	// This effect is the core of our route guard.
 	// It automatically re-runs whenever the value of `$auth` changes.
-	$: {
+	$effect(() => {
 		// We only run this logic in the browser.
 		if (browser) {
 			// We wait for the auth store's loading process to complete.
@@ -15,7 +17,7 @@
 				goto('/login', { replaceState: true });
 			}
 		}
-	}
+	});
 </script>
 
 <!--
@@ -28,5 +30,5 @@
 		<p class="text-lg text-gray-600 dark:text-gray-300">{m.workspace_loading()}</p>
 	</div>
 {:else if $auth.token}
-	<slot />
+	{@render children()}
 {/if}

@@ -7,6 +7,7 @@
 	import FolderOpen from '~icons/ph/folder-open';
 	import { deleteFile, updateFileName, moveFile } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
+	import { goto } from '$app/navigation';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
 	import * as m from '$paraglide/messages';
 
@@ -62,10 +63,18 @@
 		}
 	}
 
+	function handleClick() {
+		if (bulkMode) {
+			onToggle(item.id);
+		} else {
+			goto(`/edit/md/${item.id}`);
+		}
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === ' ' || event.key === 'Enter') {
 			event.preventDefault();
-			onToggle(item.id);
+			handleClick();
 		}
 	}
 
@@ -147,10 +156,10 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-zinc-800/60 {isSelected
+	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-transparent dark:border-zinc-700 dark:hover:bg-none dark:hover:bg-zinc-800/60 {isSelected
 		? 'bg-blue-50 dark:bg-blue-900/30'
 		: ''}"
-	onclick={() => onToggle(item.id)}
+	onclick={handleClick}
 	onkeydown={handleKeyDown}
 >
 	<!-- Left Side: Name -->
@@ -163,13 +172,11 @@
 			onchange={() => onToggle(item.id)}
 		/>
 		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
-		<a
-			href="/edit/md/{item.id}"
+		<span
 			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
-			onclick={(e) => e.stopPropagation()}
 		>
 			{item.title}
-		</a>
+		</span>
 	</div>
 
 	<!-- Right Side: Metadata -->
@@ -235,9 +242,7 @@
 
 {#if isMoving && isMovingItem}
 	<MoveDialog
-		itemId={item.id}
-		itemType={item.type}
-		currentParentId={item.folderId ?? null}
+		items={[{ id: item.id, type: item.type }]}
 		on:cancel={handleMoveCancel}
 		on:move={handleMoveComplete}
 	/>
