@@ -4,18 +4,21 @@
 	import Breadcrumb from './Breadcrumb.svelte';
 	import { breadcrumbItems } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
+	import ArrowRight from '~icons/ph/arrow-right';
 
 	const {
 		bulkMode = false,
 		selectedItemsCount = 0,
 		onToggleBulk,
 		onBulkDelete,
+		onBulkMove,
 		onNavigate
 	}: {
 		bulkMode?: boolean;
 		selectedItemsCount?: number;
 		onToggleBulk: () => void;
 		onBulkDelete: () => void;
+		onBulkMove: () => void;
 		onNavigate?: (id: string | null) => void;
 	} = $props();
 </script>
@@ -31,6 +34,13 @@
 			<span class="text-sm text-zinc-600 dark:text-zinc-400">
 				{m.toolbar_selected_count({ count: selectedItemsCount })}
 			</span>
+			<button
+				onclick={onBulkMove}
+				class="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+			>
+				<ArrowRight class="h-4 w-4" />
+				<span class="hidden sm:inline">{m.common_move()}</span>
+			</button>
 			<button
 				onclick={onBulkDelete}
 				class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600"

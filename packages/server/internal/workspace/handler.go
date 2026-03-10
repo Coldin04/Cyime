@@ -832,3 +832,55 @@ func MoveFolderHandler(c *fiber.Ctx) error {
 		UpdatedAt: *updatedAt,
 	})
 }
+
+// BatchMoveHandler handles POST /api/v1/workspace/files/batch-move
+func BatchMoveHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req BatchMoveRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body: " + err.Error(),
+		})
+	}
+
+	if len(req.Items) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "至少需要移动一个项目",
+		})
+	}
+
+	// Call the service function
+	response, err := BatchMoveFiles(userID, req.Items, req.DestinationFolderID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{ // Most likely a validation error
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+	}
+
+	// Use 207 Multi-Status if some items failed
+	if !response.Success {
+		return c.Status(fiber.StatusMultiStatus).JSON(response)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response)
+}

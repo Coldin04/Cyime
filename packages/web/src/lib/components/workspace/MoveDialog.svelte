@@ -1,19 +1,19 @@
 <script lang="ts">
-	import { moveFile, getAllFolders, type FileItem } from '$lib/api/workspace';
+	import { batchMoveFiles, getAllFolders, type FileItem } from '$lib/api/workspace';
 	import { createEventDispatcher } from 'svelte';
 	import Folder from '~icons/ph/folder';
-	import CaretRight from '~icons/ph/caret-right';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
+	type ItemToMove = {
+		id: string;
+		type: 'folder' | 'markdown';
+	};
+
 	let {
-		itemId,
-		itemType,
-		currentParentId = null
+		items = []
 	}: {
-		itemId: string;
-		itemType: 'folder' | 'markdown';
-		currentParentId?: string | null;
+		items: ItemToMove[];
 	} = $props();
 
 	const dispatch = createEventDispatcher();
@@ -30,11 +30,17 @@
 				isLoadingFolders = true;
 				const folders = await getAllFolders({});
 
-				// If moving a folder, filter out itself and all its descendants from the possible destinations
-				if (itemType === 'folder') {
+				// If moving folders, filter out themselves and all their descendants from the possible destinations
+				const foldersToMove = items.filter((i) => i.type === 'folder');
+				if (foldersToMove.length > 0) {
 					const foldersToExclude = new Set<string>();
-					const queue: string[] = [itemId];
-					foldersToExclude.add(itemId);
+					const queue: string[] = [];
+
+					// Add all folders being moved to the exclusion list and the initial queue
+					for (const folder of foldersToMove) {
+						foldersToExclude.add(folder.id);
+						queue.push(folder.id);
+					}
 
 					// Create a map for efficient child lookup
 					const parentToChildrenMap = new Map<string, string[]>();
@@ -47,7 +53,7 @@
 						}
 					}
 
-					// BFS to find all descendants
+					// BFS to find all descendants of all folders being moved
 					let head = 0;
 					while (head < queue.length) {
 						const currentId = queue[head++];
@@ -139,22 +145,28 @@
 	}
 
 	async function handleMove() {
-		if (isMoving) return;
-
-		// Prevent moving a folder into itself or its descendants
-		if (itemType === 'folder' && selectedFolderId === itemId) {
-			toast.error(m.move_dialog_error_self_move());
-			return;
-		}
+		if (isMoving || items.length === 0) return;
 
 		isMoving = true;
 		try {
-			await moveFile(itemId, itemType, selectedFolderId);
-			toast.success(m.move_dialog_success());
+			const result = await batchMoveFiles(items, selectedFolderId);
+
+			if (result.success) {
+				toast.success(result.message || m.move_dialog_success());
+			} else {
+				// Show a generic error message, with details for failed items
+				let errorMessage = result.message || m.move_dialog_failed();
+				if (result.failedItems && result.failedItems.length > 0) {
+					const failedReasons = result.failedItems.map((item) => item.reason).join(', ');
+					errorMessage += `: ${failedReasons}`;
+				}
+				toast.error(errorMessage);
+			}
+
 			dispatch('move', { targetId: selectedFolderId });
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Failed to move:', error);
-			toast.error(m.move_dialog_failed());
+			toast.error(error.message || m.move_dialog_failed());
 		} finally {
 			isMoving = false;
 		}

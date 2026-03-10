@@ -630,7 +630,20 @@ func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (
 		}
 	}
 
-	// 3. Update the folder_id
+	// 3. Check for naming conflict in the destination
+	var conflictCount int64
+	query := database.DB.Model(&models.Markdown{}).Where("title = ? AND user_id = ? AND deleted_at IS NULL", markdown.Title, userID)
+	if folderID != nil {
+		query = query.Where("folder_id = ?", folderID)
+	} else {
+		query = query.Where("folder_id IS NULL")
+	}
+	query.Count(&conflictCount)
+	if conflictCount > 0 {
+		return nil, errors.New("目标文件夹中已存在同名文档")
+	}
+
+	// 4. Update the folder_id
 	var updatedAt time.Time
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// Update folder_id
@@ -663,7 +676,12 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 		return nil, result.Error
 	}
 
-	// 2. Validate target parent folder if provided
+	// 2. Prevent moving a folder into itself
+	if parentID != nil && *parentID == folderID {
+		return nil, errors.New("不能将文件夹移动到其自身内部")
+	}
+
+	// 3. Validate target parent folder if provided
 	if parentID != nil {
 		// Check if parent folder exists and belongs to user
 		var parentFolder models.Folder
@@ -675,13 +693,26 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 			return nil, result.Error
 		}
 
-		// 3. Check for circular dependency: cannot move folder into its own descendant
+		// 4. Check for circular dependency: cannot move folder into its own descendant
 		if err := checkCircularDependency(userID, &folderID, parentID); err != nil {
 			return nil, err
 		}
 	}
 
-	// 4. Update the parent_id
+	// 5. Check for naming conflict in the destination
+	var conflictCount int64
+	query := database.DB.Model(&models.Folder{}).Where("name = ? AND user_id = ? AND deleted_at IS NULL", folder.Name, userID)
+	if parentID != nil {
+		query = query.Where("parent_id = ?", parentID)
+	} else {
+		query = query.Where("parent_id IS NULL")
+	}
+	query.Count(&conflictCount)
+	if conflictCount > 0 {
+		return nil, errors.New("目标文件夹中已存在同名文件夹")
+	}
+
+	// 6. Update the parent_id
 	var updatedAt time.Time
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// Update parent_id
@@ -1066,6 +1097,165 @@ func permanentDeleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid
 	}
 
 	return nil
+}
+
+// BatchMoveFiles moves multiple files and folders to a new destination.
+func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uuid.UUID) (*BatchMoveResponse, error) {
+	var movedCount int
+	var failedItems []FailedItem
+
+	// Use a transaction for the entire operation
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// --- 1. PRE-VALIDATION PHASE ---
+
+		// Validate destination folder exists and belongs to the user
+		if destFolderID != nil {
+			var destFolder models.Folder
+			if err := tx.Where("id = ? AND user_id = ? AND deleted_at IS NULL", destFolderID, userID).First(&destFolder).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errors.New("目标文件夹不存在或已被删除")
+				}
+				return err
+			}
+		}
+
+		// Separate items by type
+		var foldersToMove []uuid.UUID
+		var markdownsToMove []uuid.UUID
+		itemMap := make(map[uuid.UUID]string) // For quick lookup
+		for _, item := range itemsToMove {
+			itemMap[item.ID] = item.Type
+			if item.Type == "folder" {
+				foldersToMove = append(foldersToMove, item.ID)
+			} else if item.Type == "markdown" {
+				markdownsToMove = append(markdownsToMove, item.ID)
+			} else {
+				failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "无效的文件类型"})
+			}
+		}
+
+		// Items that fail validation will be added to this map
+		itemsToExclude := make(map[uuid.UUID]bool)
+
+		// A. Circular dependency and self-move checks
+		if destFolderID != nil {
+			for _, folderID := range foldersToMove {
+				if folderID == *destFolderID {
+					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: "不能将文件夹移动到其自身内部"})
+					itemsToExclude[folderID] = true
+					continue
+				}
+				if err := checkCircularDependency(userID, &folderID, destFolderID); err != nil {
+					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: err.Error()})
+					itemsToExclude[folderID] = true
+				}
+			}
+		}
+
+		// B. Naming conflict checks
+		// Get existing names in destination
+		var existingFolders []models.Folder
+		var existingMarkdowns []models.Markdown
+		destQueryFolder := tx.Model(&models.Folder{}).Where("user_id = ?", userID)
+		destQueryMarkdown := tx.Model(&models.Markdown{}).Where("user_id = ?", userID)
+
+		if destFolderID != nil {
+			destQueryFolder.Where("parent_id = ?", destFolderID)
+			destQueryMarkdown.Where("folder_id = ?", destFolderID)
+		} else {
+			destQueryFolder.Where("parent_id IS NULL")
+			destQueryMarkdown.Where("folder_id IS NULL")
+		}
+		destQueryFolder.Find(&existingFolders)
+		destQueryMarkdown.Find(&existingMarkdowns)
+
+		existingNames := make(map[string]bool)
+		for _, f := range existingFolders {
+			existingNames["folder_"+f.Name] = true
+		}
+		for _, m := range existingMarkdowns {
+			existingNames["markdown_"+m.Title] = true
+		}
+
+		// Check for conflicts
+		if len(foldersToMove) > 0 {
+			var folders []models.Folder
+			tx.Where("id IN ? AND user_id = ?", foldersToMove, userID).Find(&folders)
+			for _, f := range folders {
+				// Don't check items that already failed validation
+				if itemsToExclude[f.ID] {
+					continue
+				}
+				if existingNames["folder_"+f.Name] {
+					failedItems = append(failedItems, FailedItem{ID: f.ID, Type: "folder", Reason: "目标位置已存在同名文件夹"})
+					itemsToExclude[f.ID] = true
+				} else {
+					// Add to map to check for self-conflicts within the moved items
+					existingNames["folder_"+f.Name] = true
+				}
+			}
+		}
+		if len(markdownsToMove) > 0 {
+			var markdowns []models.Markdown
+			tx.Where("id IN ? AND user_id = ?", markdownsToMove, userID).Find(&markdowns)
+			for _, m := range markdowns {
+				// Don't check items that already failed validation
+				if itemsToExclude[m.ID] {
+					continue
+				}
+				if existingNames["markdown_"+m.Title] {
+					failedItems = append(failedItems, FailedItem{ID: m.ID, Type: "markdown", Reason: "目标位置已存在同名文档"})
+					itemsToExclude[m.ID] = true
+				} else {
+					// Add to map to check for self-conflicts within the moved items
+					existingNames["markdown_"+m.Title] = true
+				}
+			}
+		}
+
+		// --- 2. EXECUTION PHASE ---
+
+		finalFoldersToMove := []uuid.UUID{}
+		for _, id := range foldersToMove {
+			if !itemsToExclude[id] {
+				finalFoldersToMove = append(finalFoldersToMove, id)
+			}
+		}
+		finalMarkdownsToMove := []uuid.UUID{}
+		for _, id := range markdownsToMove {
+			if !itemsToExclude[id] {
+				finalMarkdownsToMove = append(finalMarkdownsToMove, id)
+			}
+		}
+
+		now := time.Now()
+		if len(finalFoldersToMove) > 0 {
+			if err := tx.Model(&models.Folder{}).Where("id IN ?", finalFoldersToMove).Updates(map[string]interface{}{"parent_id": destFolderID, "updated_at": now}).Error; err != nil {
+				// If this fails, it's a serious DB error, rollback everything
+				return err
+			}
+			movedCount += len(finalFoldersToMove)
+		}
+		if len(finalMarkdownsToMove) > 0 {
+			if err := tx.Model(&models.Markdown{}).Where("id IN ?", finalMarkdownsToMove).Updates(map[string]interface{}{"folder_id": destFolderID, "updated_at": now}).Error; err != nil {
+				return err
+			}
+			movedCount += len(finalMarkdownsToMove)
+		}
+
+		return nil // Commit transaction
+	})
+
+	if err != nil {
+		return nil, err // This will be the destination folder validation error or a DB error
+	}
+
+	return &BatchMoveResponse{
+		Success:     len(failedItems) == 0,
+		Message:     fmt.Sprintf("移动操作完成。成功 %d 个，失败 %d 个。", movedCount, len(failedItems)),
+		MovedCount:  movedCount,
+		FailedItems: failedItems,
+	}, nil
 }
 
 

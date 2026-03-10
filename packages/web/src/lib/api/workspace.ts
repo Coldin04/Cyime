@@ -381,6 +381,34 @@ export async function moveFile(id: string, type: 'folder' | 'markdown', targetId
 }
 
 /**
+ * Batch moves multiple files and folders to a new destination
+ */
+export async function batchMoveFiles(
+	items: { id: string; type: 'folder' | 'markdown' }[],
+	destinationFolderId: string | null
+): Promise<{
+	success: boolean;
+	message: string;
+	movedCount: number;
+	failedItems?: { id: string; type: string; reason: string }[];
+}> {
+	const response = await apiFetch('/api/v1/workspace/files/batch-move', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ items, destinationFolderId })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to move files');
+	}
+
+	return response.json();
+}
+
+/**
  * Fetches all folders for the current user (for move dialog)
  */
 export async function getAllFolders(params: {

@@ -76,6 +76,8 @@ func main() {
 		workspaceRoutes.Put("/markdowns/:id/move", workspace.MoveMarkdownHandler)
 		// Move folder
 		workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
+		// Batch move files and folders
+		workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
 
 		// Content routes (protected) - for markdown content management
 		contentRoutes := api.Group("/workspace/markdowns", middleware.Protected())

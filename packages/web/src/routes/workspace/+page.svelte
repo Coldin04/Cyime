@@ -6,9 +6,11 @@
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
-	import { getFiles, getFolderAncestors, deleteFile, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
+	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
+	import { getFiles, getFolderAncestors, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
 	import { breadcrumbItems, workspaceContext } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
+	import { toast } from 'svelte-sonner';
 
 	let items = $state<FileItem[]>([]);
 	let hasMore = $state(false);
@@ -17,6 +19,7 @@
 	let filterType = $state<'all' | 'folders' | 'markdowns'>('all');
 	let isLoading = $state(true);
 	let refreshTrigger = $state(0);
+	let isMoveDialogOpen = $state(false);
 
 	// Use local state for selected items to avoid store overhead during rapid selection
 	let bulkMode = $state(false);
@@ -40,7 +43,7 @@
 	// Skeleton delay state - only show skeleton if loading takes more than 200ms
 	let showSkeleton = $state(false);
 	let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
-	
+
 	$effect(() => {
 		const trigger = refreshTrigger;
 		let aborted = false;
@@ -48,7 +51,7 @@
 		// Start loading and skeleton timer
 		isLoading = true;
 		showSkeleton = false;
-		
+
 		// Only show skeleton if loading takes more than 200ms
 		skeletonTimer = setTimeout(() => {
 			if (!aborted && isLoading) {
@@ -132,22 +135,12 @@
 		}
 	}
 
-	import { toast } from 'svelte-sonner';
-
 	async function handleBulkDelete() {
-		const itemsToDelete = Object.keys(selectedItems);
+		const itemsToDelete = getSelectedItemsDetails();
 		if (itemsToDelete.length === 0) return;
 
 		try {
-			const deleteItems = itemsToDelete.map((id) => {
-				const fileItem = items.find((i) => i.id === id);
-				if (fileItem) {
-					return { id: fileItem.id, type: fileItem.type };
-				}
-				return null;
-			}).filter((item) => item !== null);
-
-			const result = await batchDeleteFiles(deleteItems);
+			const result = await batchDeleteFiles(itemsToDelete);
 
 			if (result.success) {
 				toast.success(m.workspace_bulk_delete_success({ count: itemsToDelete.length }));
@@ -163,38 +156,69 @@
 			}
 		} catch (error) {
 			console.error('Failed to delete items:', error);
-			toast.error(m.workspace_bulk_delete_failed({ error: error instanceof Error ? error.message : '未知错误' }));
+			toast.error(
+				m.workspace_bulk_delete_failed({
+					error: error instanceof Error ? error.message : '未知错误'
+				})
+			);
 		} finally {
-			selectedItems = {};
-			bulkMode = false;
-			workspaceContext.update((ctx) => ({ ...ctx, bulkMode: false }));
+			resetBulkMode();
 			refreshTrigger++;
 		}
 	}
 
 	function toggleItem(id: string) {
-		if (selectedItems[id]) {
-			delete selectedItems[id];
+		const newSelected = { ...selectedItems };
+		if (newSelected[id]) {
+			delete newSelected[id];
 		} else {
-			selectedItems[id] = true;
+			newSelected[id] = true;
 		}
+		selectedItems = newSelected;
+	}
+
+	function getSelectedItemsDetails() {
+		return Object.keys(selectedItems)
+			.map((id) => {
+				const fileItem = items.find((i) => i.id === id);
+				return fileItem ? { id: fileItem.id, type: fileItem.type } : null;
+			})
+			.filter((item): item is { id: string; type: 'folder' | 'markdown' } => item !== null);
+	}
+
+	function handleBulkMove() {
+		if (selectedItemsCount > 0) {
+			isMoveDialogOpen = true;
+		}
+	}
+
+	function handleMoveDialogClose() {
+		isMoveDialogOpen = false;
+		resetBulkMode();
+		refreshTrigger++;
+	}
+
+	function resetBulkMode() {
+		selectedItems = {};
+		bulkMode = false;
+		workspaceContext.update((ctx) => ({ ...ctx, bulkMode: false }));
 	}
 </script>
 
 <svelte:head>
-  <title>{m.page_title_workspace()}</title>
+	<title>{m.page_title_workspace()}</title>
 </svelte:head>
 
 <div>
 	<Toolbar
 		{bulkMode}
 		{selectedItemsCount}
-		onToggleBulk={toggleBulkMode}
+		onToggleBulk={resetBulkMode}
 		onBulkDelete={handleBulkDelete}
+		onBulkMove={handleBulkMove}
 		onNavigate={(id) => {
 			workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
-			bulkMode = false;
-			selectedItems = {};
+			resetBulkMode();
 		}}
 	/>
 
@@ -237,9 +261,13 @@
 					stroke-linejoin="round"
 					class="mb-4 text-zinc-400 dark:text-zinc-500"
 				>
-					<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+					<path
+						d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
+					/>
 				</svg>
-				<h3 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200">{m.workspace_empty_title()}</h3>
+				<h3 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
+					{m.workspace_empty_title()}
+				</h3>
 				<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 					{m.workspace_empty_description()}
 				</p>
@@ -254,15 +282,28 @@
 						onToggle={toggleItem}
 						onNavigate={(id) => {
 							workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
-							bulkMode = false;
-							selectedItems = {};
+							resetBulkMode();
 						}}
 						onRefresh={() => refreshTrigger++}
 					/>
 				{:else if item.type === 'markdown'}
-					<MarkdownListItem {item} {selectedItems} {bulkMode} onToggle={toggleItem} onRefresh={() => refreshTrigger++} />
+					<MarkdownListItem
+						{item}
+						{selectedItems}
+						{bulkMode}
+						onToggle={toggleItem}
+						onRefresh={() => refreshTrigger++}
+					/>
 				{/if}
 			{/each}
 		{/if}
 	</div>
 </div>
+
+{#if isMoveDialogOpen}
+	<MoveDialog
+		items={getSelectedItemsDetails()}
+		on:cancel={() => (isMoveDialogOpen = false)}
+		on:move={handleMoveDialogClose}
+	/>
+{/if}

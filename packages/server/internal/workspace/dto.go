@@ -131,3 +131,23 @@ type MoveResponse struct {
 	Message   string    `json:"message"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// BatchMoveRequest defines the request for moving multiple items.
+type BatchMoveRequest struct {
+	Items               []ItemToMove `json:"items"`
+	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"` // null for root
+}
+
+// ItemToMove represents a single item to be moved.
+type ItemToMove struct {
+	ID   uuid.UUID `json:"id"`
+	Type string    `json:"type"` // "folder" or "markdown"
+}
+
+// BatchMoveResponse defines the response for a batch move operation.
+type BatchMoveResponse struct {
+	Success     bool         `json:"success"`
+	Message     string       `json:"message"`
+	MovedCount  int          `json:"movedCount"`
+	FailedItems []FailedItem `json:"failedItems,omitempty"`
+}
