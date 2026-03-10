@@ -224,6 +224,35 @@ func DeleteContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error 
 		return nil
 	}
 
-	// 2. If the check passes, delete the content.
+	// 2. If the check passes, soft delete all content versions.
 	return tx.Where("markdown_id = ?", markdownID).Delete(&models.MarkdownContent{}).Error
+}
+
+// RestoreContentByMarkdownID restores all soft-deleted content versions for a document.
+func RestoreContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
+	var count int64
+	if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+
+	return tx.Unscoped().
+		Model(&models.MarkdownContent{}).
+		Where("markdown_id = ?", markdownID).
+		Update("deleted_at", nil).Error
+}
+
+// PermanentDeleteContentByMarkdownID permanently deletes all content versions for a document.
+func PermanentDeleteContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
+	var count int64
+	if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+
+	return tx.Unscoped().Where("markdown_id = ?", markdownID).Delete(&models.MarkdownContent{}).Error
 }

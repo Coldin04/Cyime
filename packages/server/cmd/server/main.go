@@ -46,47 +46,45 @@ func main() {
 
 	// Auth routes
 	authRoutes := api.Group("/auth")
-		authRoutes.Get("/config", auth.GetAuthConfig)
-		authRoutes.Get("/login/:provider", auth.AuthLogin)
-		authRoutes.Get("/callback/:provider", auth.AuthCallback)
-		authRoutes.Post("/refresh", auth.HandleRefresh)
-		authRoutes.Post("/logout", auth.HandleLogout)
-	
-		// User routes (protected)
-		userRoutes := api.Group("/user", middleware.Protected())
-		userRoutes.Get("/me", user.GetMe)
+	authRoutes.Get("/config", auth.GetAuthConfig)
+	authRoutes.Get("/login/:provider", auth.AuthLogin)
+	authRoutes.Get("/callback/:provider", auth.AuthCallback)
+	authRoutes.Post("/refresh", auth.HandleRefresh)
+	authRoutes.Post("/logout", auth.HandleLogout)
 
-		// Workspace routes (protected)
-		workspaceRoutes := api.Group("/workspace", middleware.Protected())
-		workspaceRoutes.Get("/files", workspace.GetFilesHandler)
-		workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
-		workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
-		workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
-		workspaceRoutes.Post("/files/batch-delete", workspace.BatchDeleteHandler)
-		workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
-		workspaceRoutes.Get("/folders/:id/ancestors", workspace.GetFolderAncestorsHandler)
-		workspaceRoutes.Get("/trash", workspace.GetTrashHandler)
-		workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
-		workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
-		// Update markdown title
-		workspaceRoutes.Put("/markdowns/:id/title", workspace.UpdateMarkdownTitleHandler)
-		// Update folder name
-		workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
-		// Move markdown document
-		workspaceRoutes.Put("/markdowns/:id/move", workspace.MoveMarkdownHandler)
-		// Move folder
-		workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
-		// Batch move files and folders
-		workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
+	// User routes (protected)
+	userRoutes := api.Group("/user", middleware.Protected())
+	userRoutes.Get("/me", user.GetMe)
 
-		// Content routes (protected) - for markdown content management
-		contentRoutes := api.Group("/workspace/markdowns", middleware.Protected())
-		contentRoutes.Get("/:id/content", content.GetContentHandler)
-		contentRoutes.Put("/:id/content", content.UpdateContentHandler)
-		contentRoutes.Get("/:id/versions", content.GetVersionsHandler)
-		contentRoutes.Get("/:id/versions/:version", content.GetContentByVersionHandler)
-	
+	// Workspace routes (protected)
+	workspaceRoutes := api.Group("/workspace", middleware.Protected())
+	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
+	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
+	workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
+	workspaceRoutes.Post("/files/batch-delete", workspace.BatchDeleteHandler)
+	workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
+	workspaceRoutes.Get("/folders/:id/ancestors", workspace.GetFolderAncestorsHandler)
+	workspaceRoutes.Get("/trash", workspace.GetTrashHandler)
+	workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
+	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
+	// Update markdown title
+	workspaceRoutes.Put("/markdowns/:id/title", workspace.UpdateMarkdownTitleHandler)
+	// Update folder name
+	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
+	// Move markdown document
+	workspaceRoutes.Put("/markdowns/:id/move", workspace.MoveMarkdownHandler)
+	// Move folder
+	workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
+	// Batch move files and folders
+	workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
 
+	// Edit routes (protected) - for markdown content management
+	editRoutes := api.Group("/edit/md", middleware.Protected())
+	editRoutes.Get("/:id/content", content.GetContentHandler)
+	editRoutes.Put("/:id/content", content.UpdateContentHandler)
+	editRoutes.Get("/:id/versions", content.GetVersionsHandler)
+	editRoutes.Get("/:id/versions/:version", content.GetContentByVersionHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -99,4 +97,3 @@ func main() {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
-

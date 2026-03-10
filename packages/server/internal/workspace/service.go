@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -150,7 +151,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 
 	return &FileListResponse{
 		Items:   items,
-		HasMore: int64(len(items)) < total,
+		HasMore: int64(offset+len(items)) < total,
 		Total:   total,
 	}, nil
 }
@@ -560,11 +561,13 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 
 // UpdateMarkdownTitle updates the title of a markdown document
 func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) error {
+	trimmedTitle := strings.TrimSpace(title)
+
 	// Validate title length
-	if len(title) == 0 {
+	if len(trimmedTitle) == 0 {
 		return errors.New("文档标题不能为空")
 	}
-	if len(title) > 255 {
+	if len(trimmedTitle) > 255 {
 		return errors.New("文档标题不能超过 255 个字符")
 	}
 
@@ -578,18 +581,48 @@ func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) e
 		return result.Error
 	}
 
+	// Same title is treated as a no-op.
+	if markdown.Title == trimmedTitle {
+		return nil
+	}
+
+	// Check duplicate title in the same folder.
+	var conflictCount int64
+	query := database.DB.Model(&models.Markdown{}).
+		Where("user_id = ? AND id <> ? AND title = ? AND deleted_at IS NULL", userID, markdownID, trimmedTitle)
+	if markdown.FolderID != nil {
+		query = query.Where("folder_id = ?", markdown.FolderID)
+	} else {
+		query = query.Where("folder_id IS NULL")
+	}
+	if err := query.Count(&conflictCount).Error; err != nil {
+		return err
+	}
+	if conflictCount > 0 {
+		return errors.New("同名文档已存在")
+	}
+
 	// Update the title
-	return database.DB.Model(&markdown).Update("title", title).Error
+	return database.DB.Model(&markdown).Update("title", trimmedTitle).Error
 }
 
 // UpdateFolderName updates the name of a folder
 func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
+	trimmedName := strings.TrimSpace(name)
+
 	// Validate name length
-	if len(name) == 0 {
+	if len(trimmedName) == 0 {
 		return errors.New("文件夹名称不能为空")
 	}
-	if len(name) > 255 {
+	if len(trimmedName) > 255 {
 		return errors.New("文件夹名称不能超过 255 个字符")
+	}
+
+	lowerName := strings.ToLower(trimmedName)
+	for _, reserved := range ReservedFolderNames {
+		if lowerName == strings.ToLower(reserved) {
+			return errors.New("不能使用系统保留的文件夹名称")
+		}
 	}
 
 	// Verify the folder exists and belongs to the user
@@ -602,8 +635,28 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 		return result.Error
 	}
 
+	// Same name is treated as a no-op.
+	if folder.Name == trimmedName {
+		return nil
+	}
+
+	var conflictCount int64
+	query := database.DB.Model(&models.Folder{}).
+		Where("user_id = ? AND id <> ? AND name = ? AND deleted_at IS NULL", userID, folderID, trimmedName)
+	if folder.ParentID != nil {
+		query = query.Where("parent_id = ?", folder.ParentID)
+	} else {
+		query = query.Where("parent_id IS NULL")
+	}
+	if err := query.Count(&conflictCount).Error; err != nil {
+		return err
+	}
+	if conflictCount > 0 {
+		return errors.New("同名文件夹已存在")
+	}
+
 	// Update the name
-	return database.DB.Model(&folder).Update("name", name).Error
+	return database.DB.Model(&folder).Update("name", trimmedName).Error
 }
 
 // MoveMarkdown moves a markdown document to a different folder (or root)
@@ -830,6 +883,22 @@ type TrashItem struct {
 func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) (*TrashListResponse, error) {
 	db := database.DB
 
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if sortBy == "" {
+		sortBy = "deleted_at"
+	}
+	if order != "asc" && order != "desc" {
+		order = "desc"
+	}
+	if sortBy != "deleted_at" && sortBy != "name" {
+		sortBy = "deleted_at"
+	}
+
 	// 1. Find all soft-deleted folder IDs, correctly using Unscoped
 	var deletedFolderIDs []uuid.UUID
 	db.Unscoped().Model(&models.Folder{}).
@@ -880,8 +949,31 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 	}
 
 	// 5. Sort the combined list (in-memory sort)
-	// TODO: For larger datasets, sorting should be done in the DB, which requires a more complex UNION query.
-	// For now, in-memory sort is acceptable.
+	slices.SortStableFunc(items, func(a, b TrashItem) int {
+		var comparison int
+		switch sortBy {
+		case "name":
+			comparison = strings.Compare(a.Name, b.Name)
+			if comparison == 0 {
+				comparison = a.DeletedAt.Time.Compare(b.DeletedAt.Time)
+			}
+		default:
+			comparison = a.DeletedAt.Time.Compare(b.DeletedAt.Time)
+			if comparison == 0 {
+				comparison = strings.Compare(a.Name, b.Name)
+			}
+		}
+
+		if order == "desc" {
+			comparison = -comparison
+		}
+
+		if comparison == 0 {
+			return strings.Compare(a.ID.String(), b.ID.String())
+		}
+
+		return comparison
+	})
 
 	total := int64(len(items))
 	// Manual pagination
@@ -897,7 +989,7 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 
 	return &TrashListResponse{
 		Items:   paginatedItems,
-		HasMore: total > int64(end),
+		HasMore: int64(offset+len(paginatedItems)) < total,
 		Total:   total,
 	}, nil
 }
@@ -962,6 +1054,9 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 				if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ?", item.ID).Update("deleted_at", nil).Error; err != nil {
 					return err
 				}
+				if err := content.RestoreContentByMarkdownID(tx, userID, item.ID); err != nil {
+					return err
+				}
 				restoredCount++
 			}
 		}
@@ -990,6 +1085,15 @@ func restoreFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) e
 	// Restore all markdowns in this folder
 	if err := tx.Unscoped().Model(&models.Markdown{}).Where("folder_id = ? AND user_id = ?", folderID, userID).Update("deleted_at", nil).Error; err != nil {
 		return err
+	}
+	var markdowns []models.Markdown
+	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
+		return err
+	}
+	for _, markdown := range markdowns {
+		if err := content.RestoreContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+			return err
+		}
 	}
 
 	// Find all soft-deleted child folders that were deleted at the same time or after the parent
@@ -1033,6 +1137,11 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 
 			var markdowns []models.Markdown
 			tx.Unscoped().Where("user_id = ? AND deleted_at IS NOT NULL", userID).Find(&markdowns)
+			for _, markdown := range markdowns {
+				if err := content.PermanentDeleteContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+					return err
+				}
+			}
 			result := tx.Unscoped().Delete(&markdowns)
 			if result.Error != nil {
 				return result.Error
@@ -1050,6 +1159,9 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 				}
 				deletedCount++ // This only counts the top-level folder
 			} else if item.Type == "markdown" {
+				if err := content.PermanentDeleteContentByMarkdownID(tx, userID, item.ID); err != nil {
+					return err
+				}
 				result := tx.Unscoped().Where("id = ? AND user_id = ?", item.ID, userID).Delete(&models.Markdown{})
 				if result.Error != nil {
 					return result.Error
@@ -1087,6 +1199,15 @@ func permanentDeleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid
 	}
 
 	// Permanently delete all markdowns in this folder
+	var markdowns []models.Markdown
+	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
+		return err
+	}
+	for _, markdown := range markdowns {
+		if err := content.PermanentDeleteContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+			return err
+		}
+	}
 	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Delete(&models.Markdown{}).Error; err != nil {
 		return err
 	}

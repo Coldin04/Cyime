@@ -35,20 +35,20 @@ func (a *AuthProvider) BeforeCreate(tx *gorm.DB) (err error) {
 
 // AuthProvider stores configuration for an OIDC or OAuth2 provider
 type AuthProvider struct {
-	ID                      uuid.UUID `gorm:"type:uuid;primary_key"`
-	Name                    string    `gorm:"type:varchar(100);not null;unique"`
-	ProtocolType            string    `gorm:"type:varchar(20);not null;default:'oidc'"`
-	IssuerURL               *string   `gorm:"type:varchar(255)"`
-	AuthURL                 *string   `gorm:"type:varchar(255)"` // For OAuth2
-	TokenURL                *string   `gorm:"type:varchar(255)"` // For OAuth2
-	UserInfoURL             *string   `gorm:"type:varchar(255)"`
-	ClientID                string    `gorm:"type:varchar(255);not null"`
-	ClientSecretEncrypted   string    `gorm:"type:text;not null"`
-	IconURL                 *string   `gorm:"type:varchar(255)"`
-	Scopes                  string    `gorm:"type:varchar(255);not null"`
-	IsActive                bool      `gorm:"not null;default:true"`
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	ID                    uuid.UUID `gorm:"type:uuid;primary_key"`
+	Name                  string    `gorm:"type:varchar(100);not null;unique"`
+	ProtocolType          string    `gorm:"type:varchar(20);not null;default:'oidc'"`
+	IssuerURL             *string   `gorm:"type:varchar(255)"`
+	AuthURL               *string   `gorm:"type:varchar(255)"` // For OAuth2
+	TokenURL              *string   `gorm:"type:varchar(255)"` // For OAuth2
+	UserInfoURL           *string   `gorm:"type:varchar(255)"`
+	ClientID              string    `gorm:"type:varchar(255);not null"`
+	ClientSecretEncrypted string    `gorm:"type:text;not null"`
+	IconURL               *string   `gorm:"type:varchar(255)"`
+	Scopes                string    `gorm:"type:varchar(255);not null"`
+	IsActive              bool      `gorm:"not null;default:true"`
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -61,12 +61,12 @@ func (uip *UserIdentityProvider) BeforeCreate(tx *gorm.DB) (err error) {
 
 // UserIdentityProvider links a user to an OIDC identity
 type UserIdentityProvider struct {
-	ID               uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID           uuid.UUID `gorm:"not null"`
-	User             User      `gorm:"foreignKey:UserID"`
-	ProviderName     string    `gorm:"type:varchar(100);not null"`
-	ProviderUserID   string    `gorm:"type:varchar(255);not null"`
-	CreatedAt        time.Time
+	ID             uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID         uuid.UUID `gorm:"not null"`
+	User           User      `gorm:"foreignKey:UserID"`
+	ProviderName   string    `gorm:"type:varchar(100);not null"`
+	ProviderUserID string    `gorm:"type:varchar(255);not null"`
+	CreatedAt      time.Time
 
 	// Unique constraints
 	// _      struct{} `gorm:"uniqueIndex:idx_user_provider,columns:user_id,provider_name"`
@@ -101,12 +101,12 @@ func (f *Folder) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Folder represents a folder in the workspace
 type Folder struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primary_key"`
-	UserID      uuid.UUID      `gorm:"not null;index:idx_user_parent"`
-	ParentID    *uuid.UUID     `gorm:"index:idx_user_parent"`
-	Name        string         `gorm:"type:varchar(255);not null"`
-	Description *string        `gorm:"type:text"`
-	CreatedBy   uuid.UUID      `gorm:"not null"`
+	ID          uuid.UUID  `gorm:"type:uuid;primary_key"`
+	UserID      uuid.UUID  `gorm:"not null;index:idx_user_parent"`
+	ParentID    *uuid.UUID `gorm:"index:idx_user_parent"`
+	Name        string     `gorm:"type:varchar(255);not null"`
+	Description *string    `gorm:"type:text"`
+	CreatedBy   uuid.UUID  `gorm:"not null"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
@@ -122,12 +122,12 @@ func (m *Markdown) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Markdown represents a markdown document in the workspace (metadata only)
 type Markdown struct {
-	ID        uuid.UUID      `gorm:"type:uuid;primary_key"`
-	UserID    uuid.UUID      `gorm:"not null;index:idx_user_folder"`
-	FolderID  *uuid.UUID     `gorm:"index:idx_user_folder"`
-	Title     string         `gorm:"type:varchar(255);not null"`
-	Excerpt   string         `gorm:"type:text"`                       // 纯文本摘要（前 100 字）
-	CreatedBy uuid.UUID      `gorm:"not null"`
+	ID        uuid.UUID  `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID  `gorm:"not null;index:idx_user_folder"`
+	FolderID  *uuid.UUID `gorm:"index:idx_user_folder"`
+	Title     string     `gorm:"type:varchar(255);not null"`
+	Excerpt   string     `gorm:"type:text"` // 纯文本摘要（前 100 字）
+	CreatedBy uuid.UUID  `gorm:"not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
@@ -143,11 +143,12 @@ func (mc *MarkdownContent) BeforeCreate(tx *gorm.DB) (err error) {
 
 // MarkdownContent represents the content of a markdown document (supports version history)
 type MarkdownContent struct {
-	ID         uuid.UUID `gorm:"type:uuid;primary_key"`                         // 独立 UUID
-	MarkdownID uuid.UUID `gorm:"type:uuid;not null;index:idx_markdown_version"` // 关联文档 ID
-	Version    int       `gorm:"not null;default:1;index:idx_markdown_version"` // 版本号
-	Content    string    `gorm:"type:longtext"`                                 // 完整 Markdown 内容
-	CreatedAt  time.Time `gorm:"autoCreateTime"`                                // 版本创建时间
+	ID         uuid.UUID      `gorm:"type:uuid;primary_key"`                         // 独立 UUID
+	MarkdownID uuid.UUID      `gorm:"type:uuid;not null;index:idx_markdown_version"` // 关联文档 ID
+	Version    int            `gorm:"not null;default:1;index:idx_markdown_version"` // 版本号
+	Content    string         `gorm:"type:longtext"`                                 // 完整 Markdown 内容
+	CreatedAt  time.Time      `gorm:"autoCreateTime"`                                // 版本创建时间
+	DeletedAt  gorm.DeletedAt `gorm:"index"`                                         // 软删除，便于回收站恢复正文
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -160,16 +161,16 @@ func (a *Attachment) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Attachment represents an attachment (image, file) uploaded by a user
 type Attachment struct {
-	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
-	UserID         uuid.UUID      `gorm:"not null;index:idx_user_markdown"`
-	MarkdownID     *uuid.UUID     `gorm:"type:uuid;index:idx_user_markdown"` // 所属文档（NULL=未关联）
-	Filename       string         `gorm:"type:varchar(255);not null"`        // 原始文件名
-	FileHash       string         `gorm:"type:varchar(64);not null;index"`   // SHA256 Hash（去重用）
-	FileSize       int64          `gorm:"not null"`                          // 文件大小 (bytes)
-	MimeType       string         `gorm:"type:varchar(100);not null"`        // MIME 类型
-	R2Key          string         `gorm:"type:varchar(255);not null;unique"` // R2 对象键
-	R2URL          string         `gorm:"type:text;not null"`                // R2 公开访问 URL
-	ReferenceCount int            `gorm:"not null;default:1;index"`          // 引用计数（去重用）
+	ID             uuid.UUID  `gorm:"type:uuid;primary_key"`
+	UserID         uuid.UUID  `gorm:"not null;index:idx_user_markdown"`
+	MarkdownID     *uuid.UUID `gorm:"type:uuid;index:idx_user_markdown"` // 所属文档（NULL=未关联）
+	Filename       string     `gorm:"type:varchar(255);not null"`        // 原始文件名
+	FileHash       string     `gorm:"type:varchar(64);not null;index"`   // SHA256 Hash（去重用）
+	FileSize       int64      `gorm:"not null"`                          // 文件大小 (bytes)
+	MimeType       string     `gorm:"type:varchar(100);not null"`        // MIME 类型
+	R2Key          string     `gorm:"type:varchar(255);not null;unique"` // R2 对象键
+	R2URL          string     `gorm:"type:text;not null"`                // R2 公开访问 URL
+	ReferenceCount int        `gorm:"not null;default:1;index"`          // 引用计数（去重用）
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt `gorm:"index"` // 软删除，用于垃圾回收

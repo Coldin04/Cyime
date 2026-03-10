@@ -32,7 +32,7 @@ export type VersionsResponse = {
  * Get the latest content of a markdown document
  */
 export async function getMarkdownContent(markdownId: string): Promise<MarkdownContent> {
-	const response = await apiFetch(`/api/v1/workspace/markdowns/${markdownId}/content`);
+	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/content`);
 
 	if (!response.ok) {
 		const error = await response.json();
@@ -49,7 +49,7 @@ export async function updateMarkdownContent(
 	markdownId: string,
 	content: string
 ): Promise<UpdateContentResponse> {
-	const response = await apiFetch(`/api/v1/workspace/markdowns/${markdownId}/content`, {
+	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/content`, {
 		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json'
@@ -69,7 +69,7 @@ export async function updateMarkdownContent(
  * Get all versions of a markdown document
  */
 export async function getMarkdownVersions(markdownId: string): Promise<VersionsResponse> {
-	const response = await apiFetch(`/api/v1/workspace/markdowns/${markdownId}/versions`);
+	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/versions`);
 
 	if (!response.ok) {
 		const error = await response.json();
@@ -86,9 +86,7 @@ export async function getMarkdownContentByVersion(
 	markdownId: string,
 	version: number
 ): Promise<MarkdownContent> {
-	const response = await apiFetch(
-		`/api/v1/workspace/markdowns/${markdownId}/versions/${version}`
-	);
+	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/versions/${version}`);
 
 	if (!response.ok) {
 		const error = await response.json();

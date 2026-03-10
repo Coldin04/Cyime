@@ -602,7 +602,7 @@ func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "文档标题不能为空", "文档标题不能超过 255 个字符":
+		case "文档标题不能为空", "文档标题不能超过 255 个字符", "同名文档已存在":
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
@@ -676,7 +676,7 @@ func UpdateFolderNameHandler(c *fiber.Ctx) error {
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符":
+		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符", "同名文件夹已存在", "不能使用系统保留的文件夹名称":
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
