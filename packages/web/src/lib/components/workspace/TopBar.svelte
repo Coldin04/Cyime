@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import MagnifyingGlass from '~icons/ph/magnifying-glass';
 	import User from '~icons/ph/user';
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
 	import { auth } from '$lib/stores/auth';
+	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
 
 	let showUserMenu = $state(false);
@@ -16,6 +18,14 @@
 		auth.logout();
 		showUserMenu = false;
 	}
+
+	function closeUserMenu() {
+		showUserMenu = false;
+	}
+
+	afterNavigate(() => {
+		closeUserMenu();
+	});
 </script>
 
 <nav
@@ -31,7 +41,13 @@
 		>
 			<MagnifyingGlass class="h-5 w-5" />
 		</button>
-		<div class="relative">
+		<div
+			class="relative"
+			use:clickOutside={{
+				enabled: showUserMenu,
+				handler: closeUserMenu
+			}}
+		>
 			<button
 				onclick={toggleUserMenu}
 				class="grid h-8 w-8 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
@@ -42,13 +58,16 @@
 				<div
 					class="absolute top-full right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
 				>
-					<a
-					href="#"
-						class="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
-						>{m.topbar_profile()}</a
+					<button
+						type="button"
+						onclick={closeUserMenu}
+						class="block w-full px-4 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
 					>
+						{m.topbar_profile()}
+					</button>
 					<a
 						href="/workspace/trash"
+						onclick={closeUserMenu}
 						class="flex items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
 					>
 						<Trash class="h-4 w-4" />

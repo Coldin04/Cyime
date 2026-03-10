@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import * as m from '$paraglide/messages';
 	import Plus from '~icons/ph/plus';
@@ -10,6 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { workspaceContext } from '$lib/stores/workspace';
+	import { clickOutside } from '$lib/actions/clickOutside';
 
 	let { mode = 'workspace' }: { mode?: 'workspace' | 'trash' } = $props();
 	const isTrashMode = $derived(mode === 'trash');
@@ -38,9 +40,29 @@
 
 	let showMenu = $state(false);
 	let isLoading = $state(false);
+	let avatarLoadFailed = $state(false);
+	let avatarLoaded = $state(false);
+	let avatarImgEl = $state<HTMLImageElement | null>(null);
+	const avatarUrl = $derived(($auth.user?.avatarUrl || '').trim());
+
+	$effect(() => {
+		const _avatar = avatarUrl;
+		avatarLoadFailed = false;
+		avatarLoaded = false;
+	});
+
+	$effect(() => {
+		if (avatarImgEl && avatarImgEl.complete && avatarImgEl.naturalWidth > 0) {
+			avatarLoaded = true;
+		}
+	});
 
 	function toggleMenu() {
 		showMenu = !showMenu;
+	}
+
+	function closeMenu() {
+		showMenu = false;
 	}
 
 	async function handleCreateDocument() {
@@ -68,7 +90,7 @@
 
 	function handleCreateFolder() {
 		workspaceContext.update((ctx) => ({ ...ctx, isCreatingFolder: true }));
-		showMenu = false;
+		closeMenu();
 	}
 
 	function handleToggleBulk() {
@@ -76,18 +98,48 @@
 			...ctx,
 			bulkMode: !ctx.bulkMode
 		}));
-		showMenu = false;
+		closeMenu();
 	}
+
+	afterNavigate(() => {
+		closeMenu();
+	});
 </script>
 
 <section class="mb-6 flex items-center justify-between gap-4">
 	<div class="flex items-center gap-4">
 		<div
-			class="grid h-16 w-16 flex-shrink-0 place-content-center rounded-full bg-riptide-100 dark:bg-riptide-900"
+			class="relative grid h-16 w-16 flex-shrink-0 place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900"
 		>
-			<span class="text-3xl font-bold text-riptide-600 dark:text-riptide-300">
-				{getInitial($auth.user?.displayName || null)}
-			</span>
+			{#if avatarUrl && !avatarLoadFailed}
+				{#if !avatarLoaded}
+					<div
+						class="absolute inset-0 animate-pulse bg-riptide-200/80 dark:bg-riptide-800/70"
+						aria-hidden="true"
+					></div>
+				{/if}
+				<img
+					bind:this={avatarImgEl}
+					src={avatarUrl}
+					alt={$auth.user?.displayName ? `${$auth.user.displayName} avatar` : 'User avatar'}
+					class="h-full w-full rounded-full object-cover transition-opacity duration-200"
+					class:opacity-0={!avatarLoaded}
+					class:opacity-100={avatarLoaded}
+					decoding="async"
+					fetchpriority="low"
+					referrerpolicy="no-referrer"
+					onload={() => {
+						avatarLoaded = true;
+					}}
+					onerror={() => {
+						avatarLoadFailed = true;
+					}}
+				/>
+			{:else}
+				<span class="text-3xl font-bold text-riptide-600 dark:text-riptide-300">
+					{getInitial($auth.user?.displayName || null)}
+				</span>
+			{/if}
 		</div>
 		<div>
 			<h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200">
@@ -98,7 +150,13 @@
 	</div>
 
 	<!-- Action Buttons -->
-	<div class="relative flex flex-shrink-0 items-center">
+	<div
+		class="relative flex flex-shrink-0 items-center"
+		use:clickOutside={{
+			enabled: showMenu && !isTrashMode,
+			handler: closeMenu
+		}}
+	>
 		<button
 			onclick={isTrashMode ? handleGoToWorkspaceRoot : handleCreateDocument}
 			disabled={isLoading}

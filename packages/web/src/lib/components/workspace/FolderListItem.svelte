@@ -8,6 +8,7 @@
 	import { deleteFile, updateFileName, moveFile } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
+	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
 
 	const {
@@ -184,7 +185,13 @@
 		<div class="hidden w-24 text-right text-sm text-zinc-600 dark:text-zinc-400 md:block pr-0.5">
 			{item.creator.displayName || 'You'}
 		</div>
-		<div class="relative w-10 flex justify-center">
+		<div
+			class="relative w-10 flex justify-center"
+			use:clickOutside={{
+				enabled: showMenu,
+				handler: closeMenu
+			}}
+		>
 			<button
 				class="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
 				onclick={(e) => {

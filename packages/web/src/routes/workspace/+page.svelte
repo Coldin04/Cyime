@@ -169,6 +169,7 @@
 	}
 
 	function toggleItem(id: string) {
+		const wasSelected = !!selectedItems[id];
 		const newSelected = { ...selectedItems };
 		if (newSelected[id]) {
 			delete newSelected[id];
@@ -176,6 +177,13 @@
 			newSelected[id] = true;
 		}
 		selectedItems = newSelected;
+
+		// Keep item-level checkbox behavior aligned with "select all":
+		// selecting an item while not in bulk mode should enter bulk mode.
+		if (!wasSelected && !bulkMode) {
+			bulkMode = true;
+			workspaceContext.update((ctx) => ({ ...ctx, bulkMode: true }));
+		}
 	}
 
 	function getSelectedItemsDetails() {
