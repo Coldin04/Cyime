@@ -33,7 +33,7 @@
 
 	function getInitial(name: string | null): string {
 		if (!name || name.trim() === '') {
-			return 'U';
+			return m.common_user().charAt(0).toUpperCase();
 		}
 		return name.charAt(0).toUpperCase();
 	}
@@ -78,7 +78,11 @@
 			goto(`/edit/md/${newDoc.id}`);
 		} catch (error) {
 			console.error('创建文档失败:', error);
-			toast.error(m.document_create_failed({ error: error instanceof Error ? error.message : '未知错误' }));
+			toast.error(
+				m.document_create_failed({
+					error: error instanceof Error ? error.message : m.common_unknown_error()
+				})
+			);
 		} finally {
 			isLoading = false;
 		}
@@ -121,7 +125,7 @@
 				<img
 					bind:this={avatarImgEl}
 					src={avatarUrl}
-					alt={$auth.user?.displayName ? `${$auth.user.displayName} avatar` : 'User avatar'}
+					alt={m.greeting_avatar_alt({ name: $auth.user?.displayName || m.common_user() })}
 					class="h-full w-full rounded-full object-cover transition-opacity duration-200"
 					class:opacity-0={!avatarLoaded}
 					class:opacity-100={avatarLoaded}
@@ -141,9 +145,9 @@
 				</span>
 			{/if}
 		</div>
-		<div>
+			<div>
 			<h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200">
-				{getGreeting()}, {$auth.user?.displayName || 'User'}
+				{getGreeting()}, {$auth.user?.displayName || m.common_user()}
 			</h2>
 			<p class="text-zinc-500 dark:text-zinc-400">{m.greeting_question()}</p>
 		</div>

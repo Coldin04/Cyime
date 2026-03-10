@@ -10,6 +10,7 @@
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
+	import { getLocale } from '$paraglide/runtime';
 
 	const {
 		item,
@@ -57,7 +58,7 @@
 			const days = Math.floor(diffInSeconds / 86400);
 			return m.time_days_ago({ days });
 		} else {
-			return date.toLocaleDateString('zh-CN', {
+			return date.toLocaleDateString(getLocale(), {
 				year: 'numeric',
 				month: 'short',
 				day: 'numeric'
@@ -183,7 +184,7 @@
 			{formatRelativeTime(item.updatedAt)}
 		</div>
 		<div class="hidden w-24 text-right text-sm text-zinc-600 dark:text-zinc-400 md:block pr-0.5">
-			{item.creator.displayName || 'You'}
+			{item.creator.displayName || m.common_you()}
 		</div>
 		<div
 			class="relative w-10 flex justify-center"

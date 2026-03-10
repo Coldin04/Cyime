@@ -24,7 +24,11 @@
 			dispatch('create');
 		} catch (error) {
 			console.error('创建文件夹失败:', error);
-			toast.error(m.folder_create_failed({ error: error instanceof Error ? error.message : '未知错误' }));
+			toast.error(
+				m.folder_create_failed({
+					error: error instanceof Error ? error.message : m.common_unknown_error()
+				})
+			);
 		} finally {
 			isCreating = false;
 		}
