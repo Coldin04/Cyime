@@ -1,0 +1,886 @@
+package workspace
+
+import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+)
+
+// GetFilesHandler handles GET /api/v1/workspace/files
+func GetFilesHandler(c *fiber.Ctx) error {
+	// Get user ID from locals (set by Protected middleware)
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse query parameters
+	parentIDStr := c.Query("parent_id")
+	var parentID *uuid.UUID
+	if parentIDStr != "" && parentIDStr != "null" {
+		pid, err := uuid.Parse(parentIDStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Invalid parent_id",
+				Message: "parent_id must be a valid UUID or 'null'",
+			})
+		}
+		parentID = &pid
+	}
+
+	limit := c.QueryInt("limit", 50)
+	offset := c.QueryInt("offset", 0)
+	sortBy := c.Query("sort_by", "updated_at")
+	order := c.Query("order", "desc")
+	filterType := c.Query("type", "all")
+
+	// Get files
+	response, err := GetFiles(userID, parentID, limit, offset, sortBy, order, filterType)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// GetFileHandler handles GET /api/v1/workspace/files/:id
+func GetFileHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse file ID from path
+	fileIDStr := c.Params("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid File ID",
+			Message: "File ID must be a valid UUID",
+		})
+	}
+
+	// Get file type from query
+	fileType := c.Query("type", "")
+	if fileType == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "type parameter is required (must be 'folder' or 'markdown')",
+		})
+	}
+
+	if fileType != "folder" && fileType != "markdown" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "type parameter must be either 'folder' or 'markdown'",
+		})
+	}
+
+	// Get file details
+	file, err := GetFile(userID, fileID, fileType)
+	if err != nil {
+		switch err.Error() {
+		case "文件不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(file)
+}
+
+// CreateFolderHandler handles POST /api/v1/workspace/folders
+func CreateFolderHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req CreateFolderRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Create folder
+	folder, err := CreateFolder(userID, req.Name, req.Description, req.ParentID)
+	if err != nil {
+		// Handle known validation errors
+		if err.Error() == "文件夹名称不能为空" || err.Error() == "文件夹名称不能超过 255 个字符" || err.Error() == "不能使用系统保留的文件夹名称" || err.Error() == "同名文件夹已存在" {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Validation Error",
+				Message: err.Error(),
+			})
+		}
+		if err.Error() == "父文件夹不存在" {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		}
+		// Handle unknown errors with user-friendly message
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Server Error",
+			Message: "创建文件夹失败，请稍后重试",
+		})
+	}
+
+	// Get creator info
+	creatorInfo, err := GetCreatorInfo(userID)
+	if err != nil {
+		creatorInfo = &CreatorInfo{
+			ID:          userID,
+			DisplayName: nil,
+		}
+	}
+
+	// Build response
+	response := CreateFolderResponse{
+		ID:          folder.ID,
+		Type:        "folder",
+		Name:        folder.Name,
+		Description: folder.Description,
+		ParentID:    folder.ParentID,
+		CreatedAt:   folder.CreatedAt,
+		UpdatedAt:   folder.UpdatedAt,
+		Creator:     *creatorInfo,
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(response)
+}
+
+// CreateMarkdownHandler handles POST /api/v1/workspace/markdowns
+func CreateMarkdownHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req CreateMarkdownRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Create markdown
+	markdown, err := CreateMarkdown(userID, req.Title, req.Content, req.FolderID)
+	if err != nil {
+		// Handle known validation errors
+		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Validation Error",
+				Message: err.Error(),
+			})
+		}
+		if err.Error() == "文件夹不存在" {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		}
+		// Handle unknown errors with user-friendly message
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Server Error",
+			Message: "创建文档失败，请稍后重试",
+		})
+	}
+
+	// Get creator info
+	creatorInfo, err := GetCreatorInfo(userID)
+	if err != nil {
+		creatorInfo = &CreatorInfo{
+			ID:          userID,
+			DisplayName: nil,
+		}
+	}
+
+	// Build response
+	response := CreateMarkdownResponse{
+		ID:        markdown.ID,
+		Type:      "markdown",
+		Title:     markdown.Title,
+		Excerpt:   markdown.Excerpt,
+		FolderID:  markdown.FolderID,
+		CreatedAt: markdown.CreatedAt,
+		UpdatedAt: markdown.UpdatedAt,
+		Creator:   *creatorInfo,
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(response)
+}
+
+// BatchDeleteHandler handles POST /api/v1/workspace/files/batch-delete
+func BatchDeleteHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req BatchDeleteRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if len(req.Items) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "至少需要删除一个项目",
+		})
+	}
+
+	// Batch delete files
+	response, err := BatchDeleteFiles(userID, req.Items)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	if !response.Success {
+		return c.Status(fiber.StatusMultiStatus).JSON(response)
+	}
+
+	return c.JSON(response)
+}
+
+// DeleteFileHandler handles DELETE /api/v1/workspace/files/:id
+func DeleteFileHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse file ID
+	fileIDStr := c.Params("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid File ID",
+			Message: "File ID must be a valid UUID",
+		})
+	}
+
+	// Get file type from query parameter
+	fileType := c.Query("type")
+	if fileType != "folder" && fileType != "markdown" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "type parameter must be either 'folder' or 'markdown'",
+		})
+	}
+
+	// Delete file
+	if err := DeleteFile(userID, fileID, fileType); err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+			Error:   "Not Found",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(DeleteResponse{
+		Success: true,
+		Message: "文件已移动到回收站",
+	})
+}
+
+// GetFolderAncestorsHandler handles GET /api/v1/workspace/folders/:id/ancestors
+func GetFolderAncestorsHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Get ancestors from service
+	ancestors, err := GetFolderAncestors(userID, folderID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(ancestors)
+}
+
+// GetTrashHandler handles GET /api/v1/workspace/trash
+func GetTrashHandler(c *fiber.Ctx) error {
+	// Get user ID from locals (set by Protected middleware)
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse query parameters
+	limit := c.QueryInt("limit", 50)
+	offset := c.QueryInt("offset", 0)
+	sortBy := c.Query("sort_by", "deleted_at")
+	order := c.Query("order", "desc")
+
+	// Get trashed files
+	response, err := GetTrashedFiles(userID, limit, offset, sortBy, order)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// RestoreTrashRequest defines the shape of the request for restoring items
+type RestoreTrashRequest struct {
+	Items []ItemToRestore `json:"items"`
+}
+
+// RestoreTrashHandler handles POST /api/v1/workspace/trash/restore
+func RestoreTrashHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req RestoreTrashRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Restore items via service
+	response, err := RestoreTrashedItems(userID, req.Items)
+	if err != nil {
+		// Specific error handling can be added here if needed (e.g., for conflicts)
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// PermanentDeleteRequest defines the shape of the request for permanently deleting items
+type PermanentDeleteRequest struct {
+	Items []ItemToRestore `json:"items"`
+}
+
+// PermanentDeleteHandler handles DELETE /api/v1/workspace/trash
+func PermanentDeleteHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req PermanentDeleteRequest
+	// It's a DELETE request, but we might have a body. If not, req will be empty.
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: "Invalid request body",
+			})
+		}
+	}
+
+	// Permanently delete items via service
+	response, err := PermanentDeleteItems(userID, req.Items)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
+// UpdateMarkdownTitleHandler handles PUT /api/v1/workspace/markdowns/:id/title
+func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse markdown ID from path
+	markdownIDStr := c.Params("id")
+	markdownID, err := uuid.Parse(markdownIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Markdown ID",
+			Message: "Markdown ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if req.Title == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Title cannot be empty",
+		})
+	}
+
+	// Update title
+	err = UpdateMarkdownTitle(userID, markdownID, req.Title)
+	if err != nil {
+		switch err.Error() {
+		case "文档不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "文档标题不能为空", "文档标题不能超过 255 个字符", "同名文档已存在":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+	})
+}
+
+// UpdateFolderNameHandler handles PUT /api/v1/workspace/folders/:id/name
+func UpdateFolderNameHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if req.Name == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Folder name cannot be empty",
+		})
+	}
+
+	// Update name
+	err = UpdateFolderName(userID, folderID, req.Name)
+	if err != nil {
+		switch err.Error() {
+		case "文件夹不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符", "同名文件夹已存在", "不能使用系统保留的文件夹名称":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+	})
+}
+
+// MoveMarkdownHandler handles PUT /api/v1/workspace/markdowns/:id/move
+func MoveMarkdownHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse markdown ID from path
+	markdownIDStr := c.Params("id")
+	markdownID, err := uuid.Parse(markdownIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Markdown ID",
+			Message: "Markdown ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req MoveMarkdownRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Move the markdown
+	updatedAt, err := MoveMarkdown(userID, markdownID, req.FolderID)
+	if err != nil {
+		switch err.Error() {
+		case "文档不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "目标文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(MoveResponse{
+		Success:   true,
+		Message:   "文档移动成功",
+		UpdatedAt: *updatedAt,
+	})
+}
+
+// MoveFolderHandler handles PUT /api/v1/workspace/folders/:id/move
+func MoveFolderHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse folder ID from path
+	folderIDStr := c.Params("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Folder ID",
+			Message: "Folder ID must be a valid UUID",
+		})
+	}
+
+	// Parse request body
+	var req MoveFolderRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	// Move the folder
+	updatedAt, err := MoveFolder(userID, folderID, req.ParentID)
+	if err != nil {
+		switch err.Error() {
+		case "文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "目标父文件夹不存在或已被删除":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "不能将文件夹移动到其子文件夹下":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(MoveResponse{
+		Success:   true,
+		Message:   "文件夹移动成功",
+		UpdatedAt: *updatedAt,
+	})
+}
+
+// BatchMoveHandler handles POST /api/v1/workspace/files/batch-move
+func BatchMoveHandler(c *fiber.Ctx) error {
+	// Get user ID from locals
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	// Parse request body
+	var req BatchMoveRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body: " + err.Error(),
+		})
+	}
+
+	if len(req.Items) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "至少需要移动一个项目",
+		})
+	}
+
+	// Call the service function
+	response, err := BatchMoveFiles(userID, req.Items, req.DestinationFolderID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{ // Most likely a validation error
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+	}
+
+	// Use 207 Multi-Status if some items failed
+	if !response.Success {
+		return c.Status(fiber.StatusMultiStatus).JSON(response)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response)
+}

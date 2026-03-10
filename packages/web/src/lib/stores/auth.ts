@@ -34,6 +34,15 @@ function createAuthStore() {
 		loading: true
 	});
 
+	async function _fetchUser(token: string): Promise<User> {
+		const response = await fetch('/api/v1/user/me', {
+			headers: { Authorization: `Bearer ${token}` }
+		});
+		if (!response.ok) throw new Error('Failed to fetch user profile');
+		const user: User = await response.json();
+		return user;
+	}
+
 	async function refreshToken() {
 		console.log('Attempting to refresh token...');
 		try {
@@ -43,12 +52,11 @@ function createAuthStore() {
 			if (!response.ok) throw new Error('Refresh failed');
 
 			const { accessToken: newAccessToken } = await response.json();
-			
-			update(state => ({ ...state, token: newAccessToken }));
+
+			update((state) => ({ ...state, token: newAccessToken }));
 			scheduleRefresh(newAccessToken);
 			console.log('Token refreshed successfully.');
 			return newAccessToken; // Return the new token on success
-
 		} catch (error) {
 			console.error('Could not refresh token:', error);
 			logout(); // If refresh fails, the session is over.
@@ -81,7 +89,27 @@ function createAuthStore() {
 			update((state) => ({ ...state, loading: false }));
 			return;
 		}
-		// In a future step with persistence, we would check localStorage for a token here.
+
+		// Try to restore session from the backend using the refresh token cookie.
+		try {
+			const response = await fetch('/api/v1/auth/refresh', {
+				method: 'POST'
+			});
+
+			if (response.ok) {
+				const { accessToken } = await response.json();
+				const user = await _fetchUser(accessToken);
+				set({ token: accessToken, user, loading: false });
+				scheduleRefresh(accessToken);
+				console.log('Session restored successfully.');
+				return;
+			}
+		} catch (error) {
+			// Session restoration failed, user is not logged in
+			console.log('No active session found.');
+		}
+
+		// No active session, just set loading to false
 		update((state) => ({ ...state, loading: false }));
 	}
 
@@ -93,15 +121,9 @@ function createAuthStore() {
 		}
 
 		try {
-			const response = await fetch('/api/v1/user/me', {
-				headers: { Authorization: `Bearer ${token}` }
-			});
-			if (!response.ok) throw new Error('Failed to fetch user profile');
-			
-			const user: User = await response.json();
+			const user = await _fetchUser(token);
 			set({ token, user, loading: false });
 			scheduleRefresh(token); // Schedule the first refresh on successful login.
-		
 		} catch (error) {
 			console.error('Failed to log in:', error);
 			logout();

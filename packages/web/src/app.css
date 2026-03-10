@@ -2,8 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+
 @layer base {
 	html {
 		@apply scroll-smooth;
 	}
+}
+
+.milkdown{
+    --crepe-font-title: 'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+    --crepe-font-default: 'ui-sans-serif', 'system-ui', 'sans-serif'!important;
+    --crepe-font-code: 'ui-sans-serif', 'system-ui', 'sans-serif' !important;
+    min-height: 100%;
+}
+.ProseMirror.editor {
+        padding-left:15% !important; /* 留出一点点给 + 号的空间即可 */
+        padding-right: 15% !important;
+    }
+/* 针对移动端（宽度小于 640px 或 768px）进行特判调整 */
+@media (max-width: 640px) {
+    /* 缩小编辑器主体的左右内边距 */
+    .ProseMirror.editor {
+        padding-left: 1rem !important; /* 留出一点点给 + 号的空间即可 */
+        padding-right: 1rem !important;
+    }
+    
+    /* 隐藏拖拽手柄（手机上用不到，且占地方） */
+    .milkdown-block-handle {
+        display: none !important;
+    }
 }

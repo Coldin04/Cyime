@@ -233,7 +233,7 @@ func (s *TokenService) HandleRefresh(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 4. Send the new refresh token in a new secure cookie.
+	// 5. Send the new refresh token in a new secure cookie.
 	c.Cookie(&fiber.Cookie{
 		Name:     "cyime_refresh_token",
 		Value:    newRefreshToken,
