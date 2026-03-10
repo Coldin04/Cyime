@@ -40,7 +40,7 @@
 	// Title editing state
 	let isEditingTitle = $state(false);
 	let editingTitle = $state('');
-	let titleInput: HTMLInputElement | null = null;
+	let titleInput: HTMLInputElement | null = $state(null);
 
 	$effect(() => {
 		// When the initial title from the parent changes (e.g., on new doc load),

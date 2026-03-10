@@ -327,7 +327,7 @@ func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDel
 				successCount++
 			} else if item.Type == "markdown" {
 				// Delete content first
-				if err := content.DeleteContentByMarkdownID(tx, item.ID); err != nil {
+				if err := content.DeleteContentByMarkdownID(tx, userID, item.ID); err != nil {
 					failedItems = append(failedItems, FailedItem{
 						ID:     item.ID,
 						Type:   item.Type,
@@ -399,7 +399,7 @@ func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 		// Start a transaction to delete markdown and its content
 		return database.DB.Transaction(func(tx *gorm.DB) error {
 			// Delete content first
-			if err := content.DeleteContentByMarkdownID(tx, fileID); err != nil {
+			if err := content.DeleteContentByMarkdownID(tx, userID, fileID); err != nil {
 				return err
 			}
 
@@ -442,7 +442,7 @@ func deleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) er
 	// Delete content for each markdown, then soft delete the markdown
 	for _, md := range markdowns {
 		// Delete content
-		if err := content.DeleteContentByMarkdownID(tx, md.ID); err != nil {
+		if err := content.DeleteContentByMarkdownID(tx, userID, md.ID); err != nil {
 			return err
 		}
 		// Soft delete markdown metadata

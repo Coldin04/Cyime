@@ -207,8 +207,23 @@ func CreateInitialContent(tx *gorm.DB, markdownID uuid.UUID, content string) err
 	return tx.Create(contentRecord).Error
 }
 
-// DeleteContentByMarkdownID deletes all content versions for a document
-// This is called when deleting a markdown document
-func DeleteContentByMarkdownID(tx *gorm.DB, markdownID uuid.UUID) error {
+// DeleteContentByMarkdownID deletes all content versions for a document.
+// It verifies that the markdown document belongs to the provided userID before deleting.
+func DeleteContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
+	// 1. Verify the markdown exists and belongs to the user.
+	// We only need to know if it exists, so a count is efficient.
+	var count int64
+	if err := tx.Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
+		return err // A database error occurred
+	}
+	if count == 0 {
+		// The document either doesn't exist or doesn't belong to the user.
+		// In either case, we should not proceed. We can return an error or just succeed silently.
+		// For batch operations, it may be better to not return an error and let the parent function decide.
+		// But for direct calls, an error is better. Let's return nil to avoid breaking batch deletes that might try to delete already-deleted items.
+		return nil
+	}
+
+	// 2. If the check passes, delete the content.
 	return tx.Where("markdown_id = ?", markdownID).Delete(&models.MarkdownContent{}).Error
 }
