@@ -31,6 +31,40 @@
 	let lastSyncedContent = '';
 	let editorRevision = $state(0);
 
+	function sanitizePastedHTML(html: string): string {
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(html, 'text/html');
+
+		doc.querySelectorAll('script, style, meta, link').forEach((node) => node.remove());
+
+		doc.querySelectorAll('*').forEach((element) => {
+			for (const attr of [...element.attributes]) {
+				const attrName = attr.name.toLowerCase();
+				const isUnsafe =
+					attrName === 'style' ||
+					attrName === 'class' ||
+					attrName === 'id' ||
+					attrName.startsWith('data-') ||
+					attrName.startsWith('aria-');
+				if (isUnsafe) {
+					element.removeAttribute(attr.name);
+				}
+			}
+		});
+
+		// Flatten styling-only wrappers so pasted content keeps structure but not noisy spans.
+		doc.querySelectorAll('span').forEach((span) => {
+			const parent = span.parentNode;
+			if (!parent) return;
+			while (span.firstChild) {
+				parent.insertBefore(span.firstChild, span);
+			}
+			parent.removeChild(span);
+		});
+
+		return doc.body.innerHTML;
+	}
+
 	function createParagraphNode(text: string): JSONContent {
 		if (!text) {
 			return { type: 'paragraph' };
@@ -84,9 +118,10 @@
 			],
 			content: toTiptapContent(content),
 			editorProps: {
+				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				attributes: {
 					class:
-						'tiptap min-h-full w-full px-4 py-6 text-sm text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'
+						'tiptap min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'
 				}
 			},
 			onUpdate: ({ editor }) => {
@@ -149,8 +184,8 @@
 		<div class="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-center gap-2">
 			<button
 				type="button"
-				title={m.common_save()}
-				aria-label={m.common_save()}
+				title={m.editor_toolbar_save_with_shortcut()}
+				aria-label={m.editor_toolbar_save_with_shortcut()}
 				disabled={isSaving || !hasUnsavedChanges}
 				onclick={() => onSave?.()}
 				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -159,8 +194,8 @@
 			</button>
 			<button
 				type="button"
-				title={m.editor_toolbar_undo()}
-				aria-label={m.editor_toolbar_undo()}
+				title={m.editor_toolbar_undo_with_shortcut()}
+				aria-label={m.editor_toolbar_undo_with_shortcut()}
 				disabled={!canUndo()}
 				onclick={() =>
 					apply((instance) => {
@@ -172,8 +207,8 @@
 			</button>
 			<button
 				type="button"
-				title={m.editor_toolbar_redo()}
-				aria-label={m.editor_toolbar_redo()}
+				title={m.editor_toolbar_redo_with_shortcut()}
+				aria-label={m.editor_toolbar_redo_with_shortcut()}
 				disabled={!canRedo()}
 				onclick={() =>
 					apply((instance) => {

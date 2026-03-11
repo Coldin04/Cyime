@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
@@ -24,6 +24,17 @@
 	let pageSignal = $state(get(page));
 	page.subscribe((p) => (pageSignal = p));
 	const documentId = $derived(pageSignal.params?.id);
+
+	beforeNavigate((navigation) => {
+		if (!browser || !hasUnsavedChanges) {
+			return;
+		}
+
+		const confirmed = window.confirm(m.editor_unsaved_confirm_leave());
+		if (!confirmed) {
+			navigation.cancel();
+		}
+	});
 
 	function handleContentChange(newContent: string) {
 		if (isLoading) return;
@@ -94,9 +105,20 @@
 			void saveContent();
 		};
 
+		const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+			if (!hasUnsavedChanges) {
+				return;
+			}
+
+			event.preventDefault();
+			event.returnValue = '';
+		};
+
 		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('beforeunload', handleBeforeUnload);
 		return () => {
 			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('beforeunload', handleBeforeUnload);
 		};
 	});
 </script>
