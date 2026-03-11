@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import { getDocumentContent } from '$lib/api/editor';
+	import { getDocumentContent, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
@@ -13,6 +14,9 @@
 	let title = $state('');
 	let content = $state('');
 	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
+	let isSaving = $state(false);
+	let lastSaved = $state<Date | null>(null);
+	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
@@ -23,11 +27,30 @@
 
 	function handleContentChange(newContent: string) {
 		if (isLoading) return;
+		hasUnsavedChanges = true;
 		content = newContent;
 	}
 
 	function handleTitleChange(newTitle: string) {
 		title = newTitle;
+	}
+
+	async function saveContent() {
+		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
+			return;
+		}
+
+		isSaving = true;
+		try {
+			await updateDocumentContent(documentId, content);
+			lastSaved = new Date();
+			hasUnsavedChanges = false;
+		} catch (error) {
+			console.error('[Save] Failed to save content:', error);
+			toast.error(m.editor_save_failed());
+		} finally {
+			isSaving = false;
+		}
 	}
 
 	// Load document content when ID becomes available
@@ -48,6 +71,8 @@
 					// Use the title from the API
 					title = details.title ?? '';
 					documentType = details.documentType ?? 'rich_text';
+					hasUnsavedChanges = false;
+					lastSaved = null;
 					console.log('[Load] Title loaded:', title);
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
@@ -60,6 +85,20 @@
 			loadContent();
 		}
 	});
+
+	onMount(() => {
+		const handleKeydown = (event: KeyboardEvent) => {
+			const isSaveKey = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's';
+			if (!isSaveKey) return;
+			event.preventDefault();
+			void saveContent();
+		};
+
+		window.addEventListener('keydown', handleKeydown);
+		return () => {
+			window.removeEventListener('keydown', handleKeydown);
+		};
+	});
 </script>
 
 <svelte:head>
@@ -68,7 +107,14 @@
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
 	{#if documentId}
-		<EditorTopBar {documentId} initialTitle={title} onTitleChange={handleTitleChange} />
+		<EditorTopBar
+			{documentId}
+			initialTitle={title}
+			{isSaving}
+			{lastSaved}
+			{hasUnsavedChanges}
+			onTitleChange={handleTitleChange}
+		/>
 	{/if}
 
 	<!-- Editor -->
@@ -80,7 +126,13 @@
 						<p>{m.edit_document_editor_under_construction()}</p>
 					</div>
 				{:else}
-					<Editor {content} onContentChange={handleContentChange} />
+					<Editor
+						{content}
+						{isSaving}
+						{hasUnsavedChanges}
+						onSave={saveContent}
+						onContentChange={handleContentChange}
+					/>
 				{/if}
 			{:else}
 				<div class="prose dark:prose-invert">
