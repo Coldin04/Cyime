@@ -8,6 +8,7 @@
 	import { deleteFile, updateFileName, moveFile } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
 	import { getLocale } from '$paraglide/runtime';
@@ -37,6 +38,7 @@
 
 	let showMenu = $state(false);
 	let isEditing = $state(false);
+	let isDeleteConfirmOpen = $state(false);
 	let editingName = $state('');
 	let isMoving = $state(false);
 	const isMovingItem = $derived(isMoving && item.type === 'folder');
@@ -125,11 +127,16 @@
 		}
 	}
 
-	async function handleDelete() {
-		if (!confirm(m.folder_delete_confirm())) {
-			return;
-		}
+	function openDeleteConfirm() {
+		isDeleteConfirmOpen = true;
+		showMenu = false;
+	}
 
+	function closeDeleteConfirm() {
+		isDeleteConfirmOpen = false;
+	}
+
+	async function confirmDelete() {
 		try {
 			await deleteFile(item.id, 'folder');
 			toast.success(m.folder_delete_success());
@@ -137,8 +144,9 @@
 		} catch (error) {
 			console.error('Failed to delete:', error);
 			toast.error(m.folder_delete_failed());
+		} finally {
+			isDeleteConfirmOpen = false;
 		}
-		showMenu = false;
 	}
 
 	function startMoving() {
@@ -232,7 +240,7 @@
 						<span>{m.common_move_to()}</span>
 					</button>
 					<button
-						onclick={handleDelete}
+						onclick={openDeleteConfirm}
 						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
 						role="menuitem"
 					>
@@ -252,6 +260,15 @@
 		on:move={handleMoveComplete}
 	/>
 {/if}
+
+<ConfirmDialog
+	open={isDeleteConfirmOpen}
+	title={m.common_delete()}
+	message={m.folder_delete_confirm()}
+	confirmText={m.common_delete()}
+	onCancel={closeDeleteConfirm}
+	onConfirm={confirmDelete}
+/>
 
 {#if isEditing}
 	<div

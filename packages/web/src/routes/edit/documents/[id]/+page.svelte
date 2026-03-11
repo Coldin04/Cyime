@@ -6,6 +6,7 @@
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { getDocumentContent, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
@@ -18,6 +19,9 @@
 	let lastSaved = $state<Date | null>(null);
 	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
+	let isLeaveConfirmOpen = $state(false);
+	let pendingNavigationUrl = $state<string | null>(null);
+	let bypassLeaveGuard = $state(false);
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
@@ -26,15 +30,38 @@
 	const documentId = $derived(pageSignal.params?.id);
 
 	beforeNavigate((navigation) => {
-		if (!browser || !hasUnsavedChanges) {
+		if (!browser || !hasUnsavedChanges || bypassLeaveGuard) {
+			return;
+		}
+		if (!navigation.to?.url) return;
+
+		navigation.cancel();
+		pendingNavigationUrl = `${navigation.to.url.pathname}${navigation.to.url.search}${navigation.to.url.hash}`;
+		isLeaveConfirmOpen = true;
+	});
+
+	function handleCancelLeave() {
+		isLeaveConfirmOpen = false;
+		pendingNavigationUrl = null;
+	}
+
+	async function handleConfirmLeave() {
+		if (!pendingNavigationUrl) {
+			handleCancelLeave();
 			return;
 		}
 
-		const confirmed = window.confirm(m.editor_unsaved_confirm_leave());
-		if (!confirmed) {
-			navigation.cancel();
-		}
-	});
+		const target = pendingNavigationUrl;
+		isLeaveConfirmOpen = false;
+		pendingNavigationUrl = null;
+		bypassLeaveGuard = true;
+		await goto(target);
+		bypassLeaveGuard = false;
+	}
+
+	async function handleLeaveWithoutSave() {
+		await handleConfirmLeave();
+	}
 
 	function handleContentChange(newContent: string) {
 		if (isLoading) return;
@@ -46,9 +73,9 @@
 		title = newTitle;
 	}
 
-	async function saveContent() {
+	async function saveContent(): Promise<boolean> {
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
-			return;
+			return !hasUnsavedChanges;
 		}
 
 		isSaving = true;
@@ -56,12 +83,22 @@
 			await updateDocumentContent(documentId, content);
 			lastSaved = new Date();
 			hasUnsavedChanges = false;
+			return true;
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
 			toast.error(m.editor_save_failed());
+			return false;
 		} finally {
 			isSaving = false;
 		}
+	}
+
+	async function handleSaveAndLeave() {
+		const saved = await saveContent();
+		if (!saved) {
+			return;
+		}
+		await handleConfirmLeave();
 	}
 
 	// Load document content when ID becomes available
@@ -164,3 +201,15 @@
 		</div>
 	</main>
 </div>
+
+<ConfirmDialog
+	open={isLeaveConfirmOpen}
+	title={m.common_unsaved_changes()}
+	message={m.editor_unsaved_confirm_leave()}
+	confirmText={m.common_save()}
+	secondaryText={m.common_dont_save()}
+	confirmVariant="primary"
+	onCancel={handleCancelLeave}
+	onSecondary={handleLeaveWithoutSave}
+	onConfirm={handleSaveAndLeave}
+/>

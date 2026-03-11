@@ -10,6 +10,7 @@
 }
 
 .tiptap {
+	line-height: 1.85;
 	min-height: 100%;
 }
 
@@ -30,7 +31,7 @@
 }
 
 .tiptap > * + * {
-	margin-top: 0.75rem;
+	margin-top: 1rem;
 }
 
 .tiptap ul,
@@ -69,6 +70,13 @@
 	padding: 0.125rem 0.25rem;
 }
 
+@media (prefers-color-scheme: dark) {
+	.tiptap code {
+		background: rgb(39 39 42);
+		color: rgb(228 228 231);
+	}
+}
+
 .tiptap pre {
 	background: rgb(24 24 27);
 	border-radius: 0.75rem;
@@ -79,6 +87,13 @@
 .tiptap pre code {
 	background: transparent;
 	padding: 0;
+}
+
+.tiptap img {
+	border-radius: 0.5rem;
+	display: block;
+	height: auto;
+	max-width: 100%;
 }
 
 @media (max-width: 640px) {

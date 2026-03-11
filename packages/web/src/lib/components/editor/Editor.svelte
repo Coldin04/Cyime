@@ -4,6 +4,8 @@
 	import type { Content, JSONContent } from '@tiptap/core';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
+	import Image from '@tiptap/extension-image';
+	import { marked } from 'marked';
 	import * as m from '$paraglide/messages';
 	import TextHOne from '~icons/ph/text-h-one';
 	import TextHTwo from '~icons/ph/text-h-two';
@@ -21,7 +23,7 @@
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: string) => void;
-		onSave?: () => void | Promise<void>;
+		onSave?: () => void | Promise<unknown>;
 	}
 
 	let { content, isSaving = false, hasUnsavedChanges = false, onContentChange, onSave }: Props = $props();
@@ -36,6 +38,14 @@
 		const doc = parser.parseFromString(html, 'text/html');
 
 		doc.querySelectorAll('script, style, meta, link').forEach((node) => node.remove());
+
+		doc.querySelectorAll('img').forEach((img) => {
+			const src = img.getAttribute('src')?.trim();
+			if (!src) {
+				img.remove();
+				return;
+			}
+		});
 
 		doc.querySelectorAll('*').forEach((element) => {
 			for (const attr of [...element.attributes]) {
@@ -63,6 +73,26 @@
 		});
 
 		return doc.body.innerHTML;
+	}
+
+	function looksLikeMarkdown(text: string): boolean {
+		const sample = text.trim();
+		if (!sample) return false;
+
+		const markdownPatterns = [
+			/^#{1,6}\s/m,
+			/^\s*[-*+]\s+/m,
+			/^\s*\d+\.\s+/m,
+			/```[\s\S]*```/m,
+			/`[^`\n]+`/,
+			/\[[^\]]+\]\([^)]+\)/,
+			/!\[[^\]]*\]\([^)]+\)/,
+			/\*\*[^*\n]+\*\*/,
+			/\*[^*\n]+\*/,
+			/^>\s+/m
+		];
+
+		return markdownPatterns.some((pattern) => pattern.test(sample));
 	}
 
 	function createParagraphNode(text: string): JSONContent {
@@ -112,6 +142,10 @@
 			element: editorElement,
 			extensions: [
 				StarterKit,
+				Image.configure({
+					inline: false,
+					allowBase64: true
+				}),
 				Placeholder.configure({
 					placeholder: m.editor_placeholder()
 				})
@@ -119,6 +153,31 @@
 			content: toTiptapContent(content),
 			editorProps: {
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
+				handleDOMEvents: {
+					paste: (_view, event) => {
+						const clipboardEvent = event as ClipboardEvent;
+						const clipboard = clipboardEvent.clipboardData;
+						if (!clipboard) return false;
+
+						const text = clipboard.getData('text/plain');
+						if (!looksLikeMarkdown(text)) return false;
+
+						const rendered = marked.parse(text, {
+							async: false,
+							gfm: true,
+							breaks: true
+						});
+						if (typeof rendered !== 'string') return false;
+
+						clipboardEvent.preventDefault();
+						editor
+							?.chain()
+							.focus()
+							.insertContent(sanitizePastedHTML(rendered))
+							.run();
+						return true;
+					}
+				},
 				attributes: {
 					class:
 						'tiptap min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'

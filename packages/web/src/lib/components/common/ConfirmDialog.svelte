@@ -1,0 +1,95 @@
+<script lang="ts">
+	import * as m from '$paraglide/messages';
+	import { clickOutside } from '$lib/actions/clickOutside';
+
+	let {
+		open = false,
+		title = '',
+		message,
+		confirmText,
+		secondaryText,
+		cancelText,
+		confirmVariant = 'danger',
+		onConfirm,
+		onSecondary,
+		onCancel
+	}: {
+		open?: boolean;
+		title?: string;
+		message: string;
+		confirmText?: string;
+		secondaryText?: string;
+		cancelText?: string;
+		confirmVariant?: 'danger' | 'primary';
+		onConfirm?: () => void | Promise<void>;
+		onSecondary?: () => void | Promise<void>;
+		onCancel?: () => void;
+	} = $props();
+
+	const confirmClass = $derived(
+		confirmVariant === 'primary'
+			? 'bg-blue-600 hover:bg-blue-700 text-white'
+			: 'bg-red-600 hover:bg-red-700 text-white'
+	);
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (!open) {
+			return;
+		}
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			onCancel?.();
+		}
+	}
+</script>
+
+<svelte:window onkeydown={handleKeydown} />
+
+{#if open}
+	<div
+		class="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[1px]"
+	>
+		<div
+			role="dialog"
+			aria-modal="true"
+			aria-label={title}
+			tabindex="-1"
+			class="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+			use:clickOutside={{
+				enabled: open,
+				handler: () => onCancel?.()
+			}}
+		>
+			{#if title}
+				<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
+			{/if}
+			<p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{message}</p>
+
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					type="button"
+					class="rounded-md px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+					onclick={() => onCancel?.()}
+				>
+					{cancelText ?? m.common_cancel()}
+				</button>
+				{#if secondaryText}
+					<button
+						type="button"
+						class="rounded-md px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+						onclick={() => onSecondary?.()}
+					>
+						{secondaryText}
+					</button>
+				{/if}
+				<button
+					type="button"
+					class={`rounded-md px-4 py-2 text-sm transition-colors ${confirmClass}`}
+					onclick={() => onConfirm?.()}
+				>
+					{confirmText ?? m.common_delete()}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
