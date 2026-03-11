@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import { getDocumentContent, updateDocumentContent } from '$lib/api/editor';
+	import { getDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
@@ -14,11 +13,7 @@
 	let title = $state('');
 	let content = $state('');
 	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
-	let isSaving = $state(false);
-	let lastSaved = $state<Date | null>(null);
-	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
-	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
@@ -26,46 +21,9 @@
 	page.subscribe((p) => (pageSignal = p));
 	const documentId = $derived(pageSignal.params?.id);
 
-	// Auto-save function with debounce
-	function scheduleSave(newContent: string) {
-		if (saveTimer) {
-			clearTimeout(saveTimer);
-		}
-
-		saveTimer = setTimeout(async () => {
-			await saveContent(newContent);
-		}, 1000); // 1 second debounce
-	}
-
-	async function saveContent(newContent: string) {
-		if (!hasUnsavedChanges) {
-			console.log('[Save] No unsaved changes, skipping');
-			return;
-		}
-
-		console.log('[Save] Saving content, length:', newContent?.length, 'documentId:', documentId);
-		isSaving = true;
-		try {
-			const result = await updateDocumentContent(documentId!, newContent);
-			console.log('[Save] Save successful:', result);
-			lastSaved = new Date();
-			hasUnsavedChanges = false;
-			// 自动保存不弹窗
-		} catch (error) {
-			console.error('[Save] Failed to save content:', error);
-			toast.error(m.folder_delete_failed());
-		} finally {
-			isSaving = false;
-		}
-	}
-
 	function handleContentChange(newContent: string) {
-		// Skip if currently loading content
 		if (isLoading) return;
-
-		hasUnsavedChanges = true;
 		content = newContent;
-		scheduleSave(newContent);
 	}
 
 	function handleTitleChange(newTitle: string) {
@@ -91,10 +49,6 @@
 					title = details.title ?? '';
 					documentType = details.documentType ?? 'rich_text';
 					console.log('[Load] Title loaded:', title);
-					// Reset state for the new document
-					hasUnsavedChanges = false;
-					lastSaved = null;
-					console.log('[Load] Content set, hasUnsavedChanges:', hasUnsavedChanges);
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
 					toast.error(m.move_dialog_load_failed());
@@ -106,15 +60,6 @@
 			loadContent();
 		}
 	});
-
-	// Cleanup timer on unmount
-	onMount(() => {
-		return () => {
-			if (saveTimer) {
-				clearTimeout(saveTimer);
-			}
-		};
-	});
 </script>
 
 <svelte:head>
@@ -123,14 +68,7 @@
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
 	{#if documentId}
-		<EditorTopBar
-			{documentId}
-			initialTitle={title}
-			{isSaving}
-			{lastSaved}
-			{hasUnsavedChanges}
-			onTitleChange={handleTitleChange}
-		/>
+		<EditorTopBar {documentId} initialTitle={title} onTitleChange={handleTitleChange} />
 	{/if}
 
 	<!-- Editor -->

@@ -26,23 +26,3 @@ export async function getDocumentContent(documentId: string): Promise<DocumentCo
 
 	return response.json();
 }
-
-export async function updateDocumentContent(
-	documentId: string,
-	content: string
-): Promise<UpdateContentResponse> {
-	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/content`, {
-		method: 'PUT',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({ content })
-	});
-
-	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.message || 'Failed to update document content');
-	}
-
-	return response.json();
-}

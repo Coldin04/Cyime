@@ -1,7 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
-	import { get } from 'svelte/store';
 	import { auth } from '$lib/stores/auth';
 	import { updateDocumentTitle } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
@@ -14,28 +11,21 @@
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
 	import FileText from '~icons/ph/file-text';
-	import Pencil from '~icons/ph/pencil';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
 
-	const {
+	let {
 		documentId,
 		initialTitle,
-		isSaving,
-		lastSaved,
-		hasUnsavedChanges,
 		onTitleChange
 	}: {
 		documentId: string;
 		initialTitle: string;
-		isSaving: boolean;
-		lastSaved: Date | null;
-		hasUnsavedChanges: boolean;
 		onTitleChange?: (title: string) => void;
 	} = $props();
 
 	let showUserMenu = $state(false);
-	let title = $state(initialTitle);
+	let title = $state('');
 
 	// Title editing state
 	let isEditingTitle = $state(false);
@@ -64,7 +54,7 @@
 		}
 
 		try {
-			await updateDocumentTitle(documentId!, editingTitle.trim());
+			await updateDocumentTitle(documentId, editingTitle.trim());
 			title = editingTitle.trim();
 			onTitleChange?.(title);
 			toast.success(m.editor_topbar_title_updated());
@@ -121,8 +111,7 @@
 	<div class="flex min-w-0 flex-1 items-center gap-2 px-0">
 		<FileText class="h-5 w-5 shrink-0 text-zinc-400 self-center" />
 
-		<!-- Container for Title and Status -->
-		<div class="flex flex-col min-w-0">
+		<div class="flex min-w-0">
 			{#if isEditingTitle}
 				<div class="flex items-center gap-1">
 					<input
@@ -164,21 +153,6 @@
 					</h1>
 				</button>
 			{/if}
-
-			<!-- Save Status -->
-			<div class="px-2 py-0 text-left leading-3">
-				{#if isSaving}
-					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_saving()}</span>
-				{:else if hasUnsavedChanges}
-					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_unsaved()}</span>
-				{:else if lastSaved}
-					<span class="text-xs text-zinc-400 py-0">
-						{m.editor_topbar_saved_at({ time: lastSaved.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) })}
-					</span>
-				{:else}
-					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_pending_changes()}</span>
-				{/if}
-			</div>
 		</div>
 	</div>
 

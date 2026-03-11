@@ -1,82 +1,30 @@
 <script lang="ts">
-	import { Crepe } from '@milkdown/crepe';
-	import '@milkdown/crepe/theme/common/style.css';
-	import '@milkdown/crepe/theme/frame.css';
-	import { replaceAll } from '@milkdown/utils';
-
 	interface Props {
 		content: string;
 		onContentChange?: (content: string) => void;
 	}
 
 	let { content, onContentChange }: Props = $props();
+	let localContent = $state('');
 
-	// 捕获内容的初始值，这是一个非响应式变量。
-	const initialContent = content;
-
-	let editorContainer: HTMLDivElement;
-	let crepe: Crepe | null = null;
-	let isCreated = false;
-	// 使用 $state 来跟踪是否是 prop 更新，这样在闭包里也能拿到最新值
-	let isUpdatingFromProp = $state(false);
-	// 仍然需要 localContent 来防止更新循环。
-	// 用 prop 的值来初始化它，以便它们在开始时保持一致。
-	let localContent = $state(content);
-
-	// 用于创建的 Effect，只运行一次。
 	$effect(() => {
-		if (!editorContainer) return;
-
-		crepe = new Crepe({
-			root: editorContainer,
-			// 使用非响应式的初始值。
-			defaultValue: initialContent
-		});
-
-		// 配置 listener 插件来监听 markdown 变化
-		crepe.on((api) => {
-			api.markdownUpdated((_, markdown: string) => {
-				localContent = markdown;
-				// 如果是从 prop 更新导致的，不要触发回调
-				if (isUpdatingFromProp) return;
-				onContentChange?.(markdown);
-			});
-		});
-
-		// 等待编辑器创建完成
-		crepe.create().then(() => {
-			isCreated = true;
-		});
-
-		return () => {
-			crepe?.destroy();
-			crepe = null;
-			isCreated = false;
-		};
+		if (content !== localContent) {
+			localContent = content;
+		}
 	});
 
-	// 用于更新的 Effect。
-	$effect(() => {
-		if (!crepe || !isCreated) return;
-
-		// 如果外部内容与内部内容不一致，则进行更新。
-		// 这可以处理文档切换等情况，同时避免用户输入时的循环更新。
-		if (content === localContent) return;
-
-		isUpdatingFromProp = true;
-		crepe.editor.action(replaceAll(content));
-		// 使用 setTimeout 确保在下一个事件循环重置标志
-		setTimeout(() => {
-			isUpdatingFromProp = false;
-		}, 0);
-	});
+	function handleInput(event: Event) {
+		const target = event.currentTarget as HTMLTextAreaElement;
+		localContent = target.value;
+		onContentChange?.(target.value);
+	}
 </script>
 
-<div class="milkdown-editor h-full w-full" bind:this={editorContainer}></div>
-
-<style>
-	.milkdown-editor {
-		min-height: 100%;
-		overflow: auto;
-	}
-</style>
+<div class="h-full w-full p-4">
+	<textarea
+		class="h-full w-full resize-none rounded-md border border-zinc-200 bg-white p-4 font-mono text-sm text-zinc-800 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
+		value={localContent}
+		oninput={handleInput}
+		placeholder="Tiptap migration in progress..."
+	></textarea>
+</div>
