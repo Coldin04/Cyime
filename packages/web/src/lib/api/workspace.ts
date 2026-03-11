@@ -2,7 +2,7 @@ import { apiFetch } from '$lib/api';
 
 export type FileItem = {
 	id: string;
-	type: 'folder' | 'markdown';
+	type: 'folder' | 'document';
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
@@ -31,13 +31,13 @@ export type CreateFolderRequest = {
 
 export type CreateFolderResponse = FileItem;
 
-export type CreateMarkdownRequest = {
+export type CreateDocumentRequest = {
 	title: string;
 	content: string;
 	folderId?: string | null;
 };
 
-export type CreateMarkdownResponse = FileItem;
+export type CreateDocumentResponse = FileItem;
 
 export type DeleteResponse = {
 	success: boolean;
@@ -53,7 +53,7 @@ export async function getFiles(params: {
 	offset?: number;
 	sort_by?: string;
 	order?: string;
-	type?: 'all' | 'folders' | 'markdowns';
+	type?: 'all' | 'folders' | 'documents';
 }): Promise<FileListResponse> {
 	const queryParams = new URLSearchParams();
 
@@ -107,10 +107,10 @@ export async function createFolder(request: CreateFolderRequest): Promise<Create
 }
 
 /**
- * Creates a new markdown document
+ * Creates a new document document
  */
-export async function createMarkdown(request: CreateMarkdownRequest): Promise<CreateMarkdownResponse> {
-	const response = await apiFetch('/api/v1/workspace/markdowns', {
+export async function createDocument(request: CreateDocumentRequest): Promise<CreateDocumentResponse> {
+	const response = await apiFetch('/api/v1/workspace/documents', {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -120,7 +120,7 @@ export async function createMarkdown(request: CreateMarkdownRequest): Promise<Cr
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.Message || error.message || 'Failed to create markdown');
+		throw new Error(error.Message || error.message || 'Failed to create document');
 	}
 
 	return response.json();
@@ -129,7 +129,7 @@ export async function createMarkdown(request: CreateMarkdownRequest): Promise<Cr
 /**
  * Deletes a file (soft delete)
  */
-export async function deleteFile(id: string, type: 'folder' | 'markdown'): Promise<DeleteResponse> {
+export async function deleteFile(id: string, type: 'folder' | 'document'): Promise<DeleteResponse> {
 	const response = await apiFetch(`/api/v1/workspace/files/${id}?type=${type}`, {
 		method: 'DELETE'
 	});
@@ -143,9 +143,9 @@ export async function deleteFile(id: string, type: 'folder' | 'markdown'): Promi
 }
 
 /**
- * Batch deletes multiple files (folders and markdowns)
+ * Batch deletes multiple files (folders and documents)
  */
-export async function batchDeleteFiles(items: { id: string; type: 'folder' | 'markdown' }[]): Promise<{ success: boolean; message: string; failedItems?: { id: string; type: string; reason: string }[] }> {
+export async function batchDeleteFiles(items: { id: string; type: 'folder' | 'document' }[]): Promise<{ success: boolean; message: string; failedItems?: { id: string; type: string; reason: string }[] }> {
 	const response = await apiFetch('/api/v1/workspace/files/batch-delete', {
 		method: 'POST',
 		headers: {
@@ -185,7 +185,7 @@ export async function getFolderAncestors(id: string): Promise<AncestorItem[]> {
 
 export type TrashItem = {
 	id: string;
-	type: 'folder' | 'markdown';
+	type: 'folder' | 'document';
 	name: string;
 	deletedAt: string;
 };
@@ -233,7 +233,7 @@ export async function getTrashedFiles(params: {
 /**
  * Restores a list of items from the trash
  */
-export async function restoreItems(items: { id: string; type: 'folder' | 'markdown' }[]) {
+export async function restoreItems(items: { id: string; type: 'folder' | 'document' }[]) {
 	const response = await apiFetch('/api/v1/workspace/trash/restore', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -251,7 +251,7 @@ export async function restoreItems(items: { id: string; type: 'folder' | 'markdo
 /**
  * Permanently deletes a list of items from the trash
  */
-export async function permanentDeleteItems(items: { id: string; type: 'folder' | 'markdown' }[]) {
+export async function permanentDeleteItems(items: { id: string; type: 'folder' | 'document' }[]) {
 	const response = await apiFetch('/api/v1/workspace/trash', {
 		method: 'DELETE',
 		headers: { 'Content-Type': 'application/json' },
@@ -267,24 +267,24 @@ export async function permanentDeleteItems(items: { id: string; type: 'folder' |
 }
 
 /**
- * Get markdown details by ID
+ * Get document details by ID
  */
-export async function getMarkdownDetails(id: string): Promise<FileItem> {
-	const response = await apiFetch(`/api/v1/workspace/files/${id}?type=markdown`);
+export async function getDocumentDetails(id: string): Promise<FileItem> {
+	const response = await apiFetch(`/api/v1/workspace/files/${id}?type=document`);
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.message || 'Failed to fetch markdown details');
+		throw new Error(error.message || 'Failed to fetch document details');
 	}
 
 	return response.json();
 }
 
 /**
- * Update markdown title
+ * Update document title
  */
-export async function updateMarkdownTitle(id: string, title: string): Promise<{ success: boolean }> {
-	const response = await apiFetch(`/api/v1/workspace/markdowns/${id}/title`, {
+export async function updateDocumentTitle(id: string, title: string): Promise<{ success: boolean }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/title`, {
 		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json'
@@ -321,20 +321,20 @@ export async function updateFolderName(id: string, name: string): Promise<{ succ
 }
 
 /**
- * Update file name (unified API for both folder and markdown)
+ * Update file name (unified API for both folder and document)
  */
-export async function updateFileName(id: string, type: 'folder' | 'markdown', name: string): Promise<{ success: boolean }> {
+export async function updateFileName(id: string, type: 'folder' | 'document', name: string): Promise<{ success: boolean }> {
 	if (type === 'folder') {
 		return updateFolderName(id, name);
 	}
-	return updateMarkdownTitle(id, name);
+	return updateDocumentTitle(id, name);
 }
 
 /**
- * Move markdown document to a different folder
+ * Move document document to a different folder
  */
-export async function moveMarkdown(id: string, folderId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
-	const response = await apiFetch(`/api/v1/workspace/markdowns/${id}/move`, {
+export async function moveDocument(id: string, folderId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/move`, {
 		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json'
@@ -344,7 +344,7 @@ export async function moveMarkdown(id: string, folderId: string | null): Promise
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.message || 'Failed to move markdown');
+		throw new Error(error.message || 'Failed to move document');
 	}
 
 	return response.json();
@@ -371,20 +371,20 @@ export async function moveFolder(id: string, parentId: string | null): Promise<{
 }
 
 /**
- * Unified API for moving both folder and markdown
+ * Unified API for moving both folder and document
  */
-export async function moveFile(id: string, type: 'folder' | 'markdown', targetId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
+export async function moveFile(id: string, type: 'folder' | 'document', targetId: string | null): Promise<{ success: boolean; message: string; updatedAt: string }> {
 	if (type === 'folder') {
 		return moveFolder(id, targetId);
 	}
-	return moveMarkdown(id, targetId);
+	return moveDocument(id, targetId);
 }
 
 /**
  * Batch moves multiple files and folders to a new destination
  */
 export async function batchMoveFiles(
-	items: { id: string; type: 'folder' | 'markdown' }[],
+	items: { id: string; type: 'folder' | 'document' }[],
 	destinationFolderId: string | null
 ): Promise<{
 	success: boolean;

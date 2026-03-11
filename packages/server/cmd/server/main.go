@@ -61,30 +61,28 @@ func main() {
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
-	workspaceRoutes.Post("/markdowns", workspace.CreateMarkdownHandler)
+	workspaceRoutes.Post("/documents", workspace.CreateDocumentHandler)
 	workspaceRoutes.Post("/files/batch-delete", workspace.BatchDeleteHandler)
 	workspaceRoutes.Delete("/files/:id", workspace.DeleteFileHandler)
 	workspaceRoutes.Get("/folders/:id/ancestors", workspace.GetFolderAncestorsHandler)
 	workspaceRoutes.Get("/trash", workspace.GetTrashHandler)
 	workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
-	// Update markdown title
-	workspaceRoutes.Put("/markdowns/:id/title", workspace.UpdateMarkdownTitleHandler)
+	// Update document title
+	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
-	// Move markdown document
-	workspaceRoutes.Put("/markdowns/:id/move", workspace.MoveMarkdownHandler)
+	// Move document
+	workspaceRoutes.Put("/documents/:id/move", workspace.MoveDocumentHandler)
 	// Move folder
 	workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
 	// Batch move files and folders
 	workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
 
-	// Edit routes (protected) - for markdown content management
-	editRoutes := api.Group("/edit/md", middleware.Protected())
+	// Edit routes (protected) - for document content management
+	editRoutes := api.Group("/edit/documents", middleware.Protected())
 	editRoutes.Get("/:id/content", content.GetContentHandler)
 	editRoutes.Put("/:id/content", content.UpdateContentHandler)
-	editRoutes.Get("/:id/versions", content.GetVersionsHandler)
-	editRoutes.Get("/:id/versions/:version", content.GetContentByVersionHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

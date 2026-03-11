@@ -7,7 +7,7 @@
 	import FolderPlus from '~icons/ph/folder-plus';
 	import CheckSquare from '~icons/ph/check-square';
 	import House from '~icons/ph/house';
-	import { createMarkdown } from '$lib/api/workspace';
+	import { createDocument } from '$lib/api/workspace';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { workspaceContext } from '$lib/stores/workspace';
@@ -70,12 +70,12 @@
 		
 		isLoading = true;
 		try {
-			const newDoc = await createMarkdown({
+			const newDoc = await createDocument({
 				title: '',
 				content: '',
 				folderId: $workspaceContext.currentFolderId
 			});
-			goto(`/edit/md/${newDoc.id}`);
+			goto(`/edit/documents/${newDoc.id}`);
 		} catch (error) {
 			console.error('创建文档失败:', error);
 			toast.error(

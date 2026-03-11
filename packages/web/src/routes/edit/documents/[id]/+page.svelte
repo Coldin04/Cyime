@@ -6,8 +6,8 @@
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import { getMarkdownContent, updateMarkdownContent } from '$lib/api/editor';
-	import { getMarkdownDetails } from '$lib/api/workspace';
+	import { getDocumentContent, updateDocumentContent } from '$lib/api/editor';
+	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -23,7 +23,7 @@
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
 	let pageSignal = $state(get(page));
 	page.subscribe((p) => (pageSignal = p));
-	const markdownId = $derived(pageSignal.params?.id);
+	const documentId = $derived(pageSignal.params?.id);
 
 	// Auto-save function with debounce
 	function scheduleSave(newContent: string) {
@@ -42,10 +42,10 @@
 			return;
 		}
 
-		console.log('[Save] Saving content, length:', newContent?.length, 'markdownId:', markdownId);
+		console.log('[Save] Saving content, length:', newContent?.length, 'documentId:', documentId);
 		isSaving = true;
 		try {
-			const result = await updateMarkdownContent(markdownId!, newContent);
+			const result = await updateDocumentContent(documentId!, newContent);
 			console.log('[Save] Save successful:', result);
 			lastSaved = new Date();
 			hasUnsavedChanges = false;
@@ -71,17 +71,17 @@
 		title = newTitle;
 	}
 
-	// Load markdown content when ID becomes available
+	// Load document content when ID becomes available
 	$effect(() => {
-		if (markdownId) {
+		if (documentId) {
 			isLoading = true;
 			const loadContent = async () => {
 				try {
-					console.log('[Load] Loading markdown for ID:', markdownId);
-					// Load markdown details (for title) and content in parallel
+					console.log('[Load] Loading document for ID:', documentId);
+					// Load document details (for title) and content in parallel
 					const [details, data] = await Promise.all([
-						getMarkdownDetails(markdownId),
-						getMarkdownContent(markdownId)
+						getDocumentDetails(documentId),
+						getDocumentContent(documentId)
 					]);
 
 					console.log('[Load] Content loaded, length:', data.content?.length);
@@ -94,7 +94,7 @@
 					lastSaved = null;
 					console.log('[Load] Content set, hasUnsavedChanges:', hasUnsavedChanges);
 				} catch (error) {
-					console.error('[Load] Failed to load markdown:', error);
+					console.error('[Load] Failed to load document:', error);
 					toast.error(m.move_dialog_load_failed());
 					goto('/workspace');
 				} finally {
@@ -120,9 +120,9 @@
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
-	{#if markdownId}
+	{#if documentId}
 		<EditorTopBar
-			{markdownId}
+			{documentId}
 			initialTitle={title}
 			{isSaving}
 			{lastSaved}

@@ -2,6 +2,7 @@ package content
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
@@ -10,20 +11,28 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetContentResult represents the result of getting a document's content
+// GetContentResult represents the current content of a document.
 type GetContentResult struct {
-	ID         uuid.UUID `json:"id"`
-	MarkdownID uuid.UUID `json:"markdownId"`
-	Version    int       `json:"version"`
-	Content    string    `json:"content"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID              uuid.UUID `json:"id"`
+	DocumentID      uuid.UUID `json:"documentId"`
+	Content         string    `json:"content"`
+	ContentJSON     string    `json:"contentJson"`
+	ContentMarkdown string    `json:"contentMarkdown"`
+	PlainText       string    `json:"plainText"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
-// GetContent retrieves the latest content of a markdown document
-func GetContent(userID uuid.UUID, markdownID uuid.UUID) (*GetContentResult, error) {
-	// First verify the markdown belongs to the user
-	var markdown models.Markdown
-	result := database.DB.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
+// UpdateContentResult represents the result of updating document content.
+type UpdateContentResult struct {
+	Success   bool      `json:"success"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// GetContent retrieves the current content of a document.
+func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("文档不存在或无权访问")
@@ -31,11 +40,8 @@ func GetContent(userID uuid.UUID, markdownID uuid.UUID) (*GetContentResult, erro
 		return nil, result.Error
 	}
 
-	// Get the latest version of the content
-	var content models.MarkdownContent
-	result = database.DB.Where("markdown_id = ?", markdownID).
-		Order("version DESC").
-		First(&content)
+	var content models.DocumentContent
+	result = database.DB.Where("document_id = ?", documentID).First(&content)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("文档内容不存在")
@@ -44,103 +50,26 @@ func GetContent(userID uuid.UUID, markdownID uuid.UUID) (*GetContentResult, erro
 	}
 
 	return &GetContentResult{
-		ID:         content.ID,
-		MarkdownID: content.MarkdownID,
-		Version:    content.Version,
-		Content:    content.Content,
-		CreatedAt:  content.CreatedAt,
+		ID:              content.ID,
+		DocumentID:      content.DocumentID,
+		Content:         currentContentValue(content),
+		ContentJSON:     content.ContentJSON,
+		ContentMarkdown: content.ContentMarkdown,
+		PlainText:       content.PlainText,
+		CreatedAt:       content.CreatedAt,
+		UpdatedAt:       content.UpdatedAt,
 	}, nil
 }
 
-// GetContentByVersion retrieves a specific version of a document's content
-func GetContentByVersion(userID uuid.UUID, markdownID uuid.UUID, version int) (*GetContentResult, error) {
-	// First verify the markdown belongs to the user
-	var markdown models.Markdown
-	result := database.DB.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档不存在或无权访问")
-		}
-		return nil, result.Error
-	}
-
-	// Get the specific version of the content
-	var content models.MarkdownContent
-	result = database.DB.Where("markdown_id = ? AND version = ?", markdownID, version).
-		First(&content)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("指定版本的内容不存在")
-		}
-		return nil, result.Error
-	}
-
-	return &GetContentResult{
-		ID:         content.ID,
-		MarkdownID: content.MarkdownID,
-		Version:    content.Version,
-		Content:    content.Content,
-		CreatedAt:  content.CreatedAt,
-	}, nil
-}
-
-// VersionInfo represents information about a document version
-type VersionInfo struct {
-	ID        uuid.UUID `json:"id"`
-	Version   int       `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-// GetVersions retrieves all versions of a document
-func GetVersions(userID uuid.UUID, markdownID uuid.UUID) ([]VersionInfo, error) {
-	// First verify the markdown belongs to the user
-	var markdown models.Markdown
-	result := database.DB.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档不存在或无权访问")
-		}
-		return nil, result.Error
-	}
-
-	// Get all versions
-	var contents []models.MarkdownContent
-	result = database.DB.Where("markdown_id = ?", markdownID).
-		Order("version DESC").
-		Select("id", "version", "created_at").
-		Find(&contents)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	versions := make([]VersionInfo, len(contents))
-	for i, c := range contents {
-		versions[i] = VersionInfo{
-			ID:        c.ID,
-			Version:   c.Version,
-			CreatedAt: c.CreatedAt,
-		}
-	}
-
-	return versions, nil
-}
-
-// UpdateContentResult represents the result of updating document content
-type UpdateContentResult struct {
-	Success   bool      `json:"success"`
-	Version   int       `json:"version"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-// UpdateContent updates a document's content (creates a new version)
-func UpdateContent(userID uuid.UUID, markdownID uuid.UUID, newContent string) (*UpdateContentResult, error) {
-	var newVersion int
+// UpdateContent updates the current content of a document in place.
+func UpdateContent(userID uuid.UUID, documentID uuid.UUID, newContent string) (*UpdateContentResult, error) {
 	var updatedAt time.Time
+	plainText := toPlainText(newContent)
+	excerpt := buildExcerpt(plainText)
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the markdown belongs to the user
-		var markdown models.Markdown
-		result := tx.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
+		var document models.Document
+		result := tx.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return errors.New("文档不存在或无权访问")
@@ -148,90 +77,78 @@ func UpdateContent(userID uuid.UUID, markdownID uuid.UUID, newContent string) (*
 			return result.Error
 		}
 
-		// 2. Get the latest version number
-		var latestContent models.MarkdownContent
-		result = tx.Where("markdown_id = ?", markdownID).
-			Order("version DESC").
-			First(&latestContent)
-		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		now := time.Now()
+		result = tx.Model(&models.DocumentContent{}).
+			Where("document_id = ?", documentID).
+			Updates(map[string]any{
+				"content_markdown": newContent,
+				"plain_text":       plainText,
+				"updated_by":       userID,
+				"updated_at":       now,
+			})
+		if result.Error != nil {
 			return result.Error
 		}
-
-		// 3. Create a new version
-		newVersion = 1
-		if result.Error == nil {
-			newVersion = latestContent.Version + 1
+		if result.RowsAffected == 0 {
+			contentRecord := &models.DocumentContent{
+				ID:              uuid.New(),
+				DocumentID:      documentID,
+				ContentMarkdown: newContent,
+				PlainText:       plainText,
+				UpdatedBy:       userID,
+			}
+			if err := tx.Create(contentRecord).Error; err != nil {
+				return err
+			}
 		}
 
-		newContentRecord := &models.MarkdownContent{
-			ID:         uuid.New(),
-			MarkdownID: markdownID,
-			Version:    newVersion,
-			Content:    newContent,
-		}
-
-		if err := tx.Create(newContentRecord).Error; err != nil {
-			return err
-		}
-
-		// 4. Update the markdown's updated_at timestamp
-		if err := tx.Model(&markdown).Update("updated_at", time.Now()).Error; err != nil {
-			return err
-		}
-
-		updatedAt = time.Now()
-		return nil
+		updatedAt = now
+		return tx.Model(&document).Updates(map[string]any{
+			"excerpt":    excerpt,
+			"updated_at": now,
+			"updated_by": userID,
+		}).Error
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
 	return &UpdateContentResult{
 		Success:   true,
-		Version:   newVersion,
 		UpdatedAt: updatedAt,
 	}, nil
 }
 
-// CreateInitialContent creates the initial content (version 1) for a new document
-// This is called when creating a new markdown document
-func CreateInitialContent(tx *gorm.DB, markdownID uuid.UUID, content string) error {
-	contentRecord := &models.MarkdownContent{
-		ID:         uuid.New(),
-		MarkdownID: markdownID,
-		Version:    1,
-		Content:    content,
+// CreateInitialContent creates the first content row for a document.
+func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, content string) error {
+	contentRecord := &models.DocumentContent{
+		ID:              uuid.New(),
+		DocumentID:      documentID,
+		ContentMarkdown: content,
+		PlainText:       toPlainText(content),
+		UpdatedBy:       userID,
 	}
 
 	return tx.Create(contentRecord).Error
 }
 
-// DeleteContentByMarkdownID deletes all content versions for a document.
-// It verifies that the markdown document belongs to the provided userID before deleting.
-func DeleteContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
-	// 1. Verify the markdown exists and belongs to the user.
-	// We only need to know if it exists, so a count is efficient.
+// DeleteContentByDocumentID soft deletes the content row for a document.
+func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	var count int64
-	if err := tx.Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
-		return err // A database error occurred
+	if err := tx.Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
+		return err
 	}
 	if count == 0 {
-		// The document either doesn't exist or doesn't belong to the user.
-		// In either case, we should not proceed. We can return an error or just succeed silently.
-		// For batch operations, it may be better to not return an error and let the parent function decide.
-		// But for direct calls, an error is better. Let's return nil to avoid breaking batch deletes that might try to delete already-deleted items.
 		return nil
 	}
 
-	// 2. If the check passes, soft delete all content versions.
-	return tx.Where("markdown_id = ?", markdownID).Delete(&models.MarkdownContent{}).Error
+	return tx.Where("document_id = ?", documentID).Delete(&models.DocumentContent{}).Error
 }
 
-// RestoreContentByMarkdownID restores all soft-deleted content versions for a document.
-func RestoreContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
+// RestoreContentByDocumentID restores the content row for a document.
+func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	var count int64
-	if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
+	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
@@ -239,20 +156,48 @@ func RestoreContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error
 	}
 
 	return tx.Unscoped().
-		Model(&models.MarkdownContent{}).
-		Where("markdown_id = ?", markdownID).
+		Model(&models.DocumentContent{}).
+		Where("document_id = ?", documentID).
 		Update("deleted_at", nil).Error
 }
 
-// PermanentDeleteContentByMarkdownID permanently deletes all content versions for a document.
-func PermanentDeleteContentByMarkdownID(tx *gorm.DB, userID, markdownID uuid.UUID) error {
+// PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
+func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	var count int64
-	if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ? AND user_id = ?", markdownID, userID).Count(&count).Error; err != nil {
+	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
 		return nil
 	}
 
-	return tx.Unscoped().Where("markdown_id = ?", markdownID).Delete(&models.MarkdownContent{}).Error
+	return tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentContent{}).Error
+}
+
+func currentContentValue(content models.DocumentContent) string {
+	if content.ContentMarkdown != "" {
+		return content.ContentMarkdown
+	}
+	return content.ContentJSON
+}
+
+func toPlainText(content string) string {
+	plainText := content
+	plainText = strings.ReplaceAll(plainText, "# ", "")
+	plainText = strings.ReplaceAll(plainText, "## ", "")
+	plainText = strings.ReplaceAll(plainText, "### ", "")
+	plainText = strings.ReplaceAll(plainText, "**", "")
+	plainText = strings.ReplaceAll(plainText, "*", "")
+	plainText = strings.ReplaceAll(plainText, "[]()", "")
+	return strings.TrimSpace(plainText)
+}
+
+func buildExcerpt(plainText string) string {
+	if len(plainText) == 0 {
+		return ""
+	}
+	if len(plainText) > 100 {
+		return plainText[:100] + "..."
+	}
+	return plainText
 }

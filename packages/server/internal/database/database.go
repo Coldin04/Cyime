@@ -57,9 +57,9 @@ func Connect() {
 		&models.UserIdentityProvider{},
 		&models.UserRefreshToken{},
 		&models.Folder{},
-		&models.Markdown{},
-		&models.MarkdownContent{},
-		&models.Attachment{},
+		&models.Document{},
+		&models.DocumentContent{},
+		&models.Asset{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)

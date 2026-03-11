@@ -1,5 +1,5 @@
 <script lang="ts">
-	import FileMd from '~icons/ph/file-md';
+	import FileText from '~icons/ph/file-text';
 	import type { FileItem } from '$lib/api/workspace';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import Pencil from '~icons/ph/pencil';
@@ -38,7 +38,7 @@
 	let isEditing = $state(false);
 	let editingName = $state('');
 	let isMoving = $state(false);
-	const isMovingItem = $derived(isMoving && item.type === 'markdown');
+	const isMovingItem = $derived(isMoving && item.type === 'document');
 
 	function formatRelativeTime(dateString: string): string {
 		const date = new Date(dateString);
@@ -69,7 +69,7 @@
 		if (bulkMode) {
 			onToggle(item.id);
 		} else {
-			goto(`/edit/md/${item.id}`);
+			goto(`/edit/documents/${item.id}`);
 		}
 	}
 
@@ -101,8 +101,8 @@
 		}
 
 		try {
-			await updateFileName(item.id, 'markdown', editingName.trim());
-			toast.success(m.markdown_rename_success());
+			await updateFileName(item.id, 'document', editingName.trim());
+			toast.success(m.document_rename_success());
 			onRefresh?.();
 		} catch (error) {
 			console.error('Failed to rename:', error);
@@ -125,12 +125,12 @@
 	}
 
 	async function handleDelete() {
-		if (!confirm(m.markdown_delete_confirm())) {
+		if (!confirm(m.document_delete_confirm())) {
 			return;
 		}
 
 		try {
-			await deleteFile(item.id, 'markdown');
+			await deleteFile(item.id, 'document');
 			toast.success(m.folder_delete_success());
 			onRefresh?.();
 		} catch (error) {
@@ -173,7 +173,7 @@
 			onclick={(e) => e.stopPropagation()}
 			onchange={() => onToggle(item.id)}
 		/>
-		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		<FileText class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
 		<span
 			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
 		>
@@ -273,14 +273,14 @@
 			class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">{m.markdown_rename_title()}</h3>
+			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">{m.document_rename_title()}</h3>
 			<input
 				type="text"
 				value={editingName}
 				oninput={(e) => editingName = e.currentTarget.value}
 				onkeydown={handleEditingKeydown}
 				class="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-base text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100"
-				placeholder={m.markdown_name_placeholder()}
+				placeholder={m.document_name_placeholder()}
 			/>
 			<div class="flex justify-end gap-2">
 				<button

@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 	import { auth } from '$lib/stores/auth';
-	import { updateMarkdownTitle } from '$lib/api/workspace';
+	import { updateDocumentTitle } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -13,20 +13,20 @@
 	import User from '~icons/ph/user';
 	import SignOut from '~icons/ph/sign-out';
 	import Trash from '~icons/ph/trash';
-	import FileMd from '~icons/ph/file-md';
+	import FileText from '~icons/ph/file-text';
 	import Pencil from '~icons/ph/pencil';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
 
 	const {
-		markdownId,
+		documentId,
 		initialTitle,
 		isSaving,
 		lastSaved,
 		hasUnsavedChanges,
 		onTitleChange
 	}: {
-		markdownId: string;
+		documentId: string;
 		initialTitle: string;
 		isSaving: boolean;
 		lastSaved: Date | null;
@@ -64,7 +64,7 @@
 		}
 
 		try {
-			await updateMarkdownTitle(markdownId!, editingTitle.trim());
+			await updateDocumentTitle(documentId!, editingTitle.trim());
 			title = editingTitle.trim();
 			onTitleChange?.(title);
 			toast.success(m.editor_topbar_title_updated());
@@ -119,7 +119,7 @@
 
 	<!-- Center: Title Section -->
 	<div class="flex min-w-0 flex-1 items-center gap-2 px-0">
-		<FileMd class="h-5 w-5 shrink-0 text-zinc-400 self-center" />
+		<FileText class="h-5 w-5 shrink-0 text-zinc-400 self-center" />
 
 		<!-- Container for Title and Status -->
 		<div class="flex flex-col min-w-0">
@@ -133,7 +133,7 @@
 						onkeydown={handleTitleKeydown}
 						onblur={saveTitle}
 						class="w-full max-w-xl bg-transparent text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100 px-2 py-0"
-						placeholder={m.markdown_name_placeholder()}
+						placeholder={m.document_name_placeholder()}
 					/>
 					<button
 						onclick={saveTitle}

@@ -6,16 +6,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// CreatorInfo represents the creator information in responses
+// CreatorInfo represents the creator information in responses.
 type CreatorInfo struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName *string   `json:"displayName"`
 }
 
-// FileItem represents a unified file item (folder or markdown) in the response
+// FileItem represents a unified file item (folder or document) in the response.
 type FileItem struct {
 	ID          uuid.UUID   `json:"id"`
-	Type        string      `json:"type"` // "folder" | "markdown"
+	Type        string      `json:"type"` // "folder" | "document"
 	Name        string      `json:"name"`
 	Description *string     `json:"description,omitempty"`
 	ParentID    *uuid.UUID  `json:"parentId,omitempty"`
@@ -27,21 +27,18 @@ type FileItem struct {
 	Creator     CreatorInfo `json:"creator"`
 }
 
-// FileListResponse represents the response for the file list API
 type FileListResponse struct {
 	Items   []FileItem `json:"items"`
 	HasMore bool       `json:"hasMore"`
 	Total   int64      `json:"total"`
 }
 
-// CreateFolderRequest represents the request body for creating a folder
 type CreateFolderRequest struct {
 	Name        string     `json:"name"`
 	Description *string    `json:"description"`
 	ParentID    *uuid.UUID `json:"parentId"`
 }
 
-// CreateFolderResponse represents the response for creating a folder
 type CreateFolderResponse struct {
 	ID          uuid.UUID   `json:"id"`
 	Type        string      `json:"type"`
@@ -53,15 +50,13 @@ type CreateFolderResponse struct {
 	Creator     CreatorInfo `json:"creator"`
 }
 
-// CreateMarkdownRequest represents the request body for creating a markdown document
-type CreateMarkdownRequest struct {
+type CreateDocumentRequest struct {
 	Title    string     `json:"title"`
 	Content  string     `json:"content"`
 	FolderID *uuid.UUID `json:"folderId"`
 }
 
-// CreateMarkdownResponse represents the response for creating a markdown document
-type CreateMarkdownResponse struct {
+type CreateDocumentResponse struct {
 	ID        uuid.UUID   `json:"id"`
 	Type      string      `json:"type"`
 	Title     string      `json:"title"`
@@ -72,79 +67,66 @@ type CreateMarkdownResponse struct {
 	Creator   CreatorInfo `json:"creator"`
 }
 
-// DeleteResponse represents the response for delete operations
 type DeleteResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-// BatchDeleteRequest represents the request body for batch deleting files
 type BatchDeleteRequest struct {
 	Items []ItemToDelete `json:"items"`
 }
 
-// ItemToDelete represents an item to be deleted
 type ItemToDelete struct {
 	ID   uuid.UUID `json:"id"`
-	Type string    `json:"type"` // "folder" | "markdown"
+	Type string    `json:"type"` // "folder" | "document"
 }
 
-// BatchDeleteResponse represents the response for batch delete operations
 type BatchDeleteResponse struct {
-	Success    bool         `json:"success"`
-	Message    string       `json:"message"`
+	Success     bool         `json:"success"`
+	Message     string       `json:"message"`
 	FailedItems []FailedItem `json:"failedItems,omitempty"`
 }
 
-// FailedItem represents an item that failed to delete
 type FailedItem struct {
 	ID     uuid.UUID `json:"id"`
 	Type   string    `json:"type"`
 	Reason string    `json:"reason"`
 }
 
-// AncestorItem represents a single folder in a breadcrumb path
 type AncestorItem struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }
 
-// ErrorResponse represents a standard error response
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
 
-// MoveMarkdownRequest represents the request body for moving a markdown document
-type MoveMarkdownRequest struct {
-	FolderID *uuid.UUID `json:"folderId"` // null means move to root
+type MoveDocumentRequest struct {
+	FolderID *uuid.UUID `json:"folderId"`
 }
 
-// MoveFolderRequest represents the request body for moving a folder
 type MoveFolderRequest struct {
-	ParentID *uuid.UUID `json:"parentId"` // null means move to root
+	ParentID *uuid.UUID `json:"parentId"`
 }
 
-// MoveResponse represents the response for move operations
 type MoveResponse struct {
 	Success   bool      `json:"success"`
 	Message   string    `json:"message"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// BatchMoveRequest defines the request for moving multiple items.
 type BatchMoveRequest struct {
 	Items               []ItemToMove `json:"items"`
-	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"` // null for root
+	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"`
 }
 
-// ItemToMove represents a single item to be moved.
 type ItemToMove struct {
 	ID   uuid.UUID `json:"id"`
-	Type string    `json:"type"` // "folder" or "markdown"
+	Type string    `json:"type"` // "folder" or "document"
 }
 
-// BatchMoveResponse defines the response for a batch move operation.
 type BatchMoveResponse struct {
 	Success     bool         `json:"success"`
 	Message     string       `json:"message"`
