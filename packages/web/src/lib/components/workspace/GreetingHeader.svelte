@@ -73,7 +73,8 @@
 			const newDoc = await createDocument({
 				title: '',
 				content: '',
-				folderId: $workspaceContext.currentFolderId
+				folderId: $workspaceContext.currentFolderId,
+				documentType: 'rich_text'
 			});
 			goto(`/edit/documents/${newDoc.id}`);
 		} catch (error) {

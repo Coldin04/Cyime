@@ -98,7 +98,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		query.Count(&total)
 
 		var documents []models.Document
-		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
+		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "document_type", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
 			return nil, err
 		}
 
@@ -221,7 +221,14 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 }
 
 // CreateDocument creates a new document with unique title handling.
-func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID *uuid.UUID) (*models.Document, error) {
+func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
+	if documentType == "" {
+		documentType = "rich_text"
+	}
+	if documentType != "rich_text" && documentType != "table" {
+		return nil, errors.New("不支持的文档类型")
+	}
+
 	// Validate title length
 	if len(title) > 255 {
 		return nil, errors.New("文档标题不能超过 255 个字符")
@@ -288,7 +295,7 @@ func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID 
 			FolderID:     folderID,
 			Title:        newTitle,
 			Excerpt:      excerpt,
-			DocumentType: "rich_text",
+			DocumentType: documentType,
 			EditorType:   "tiptap",
 			CreatedBy:    userID,
 			UpdatedBy:    userID,
@@ -487,14 +494,15 @@ func folderToFileItem(folder models.Folder) FileItem {
 // documentToFileItem converts a Document model to FileItem DTO
 func documentToFileItem(document models.Document) FileItem {
 	return FileItem{
-		ID:        document.ID,
-		Type:      "document",
-		Name:      document.Title,
-		Title:     &document.Title,
-		Excerpt:   &document.Excerpt,
-		FolderID:  document.FolderID,
-		CreatedAt: document.CreatedAt,
-		UpdatedAt: document.UpdatedAt,
+		ID:           document.ID,
+		Type:         "document",
+		DocumentType: &document.DocumentType,
+		Name:         document.Title,
+		Title:        &document.Title,
+		Excerpt:      &document.Excerpt,
+		FolderID:     document.FolderID,
+		CreatedAt:    document.CreatedAt,
+		UpdatedAt:    document.UpdatedAt,
 		Creator: CreatorInfo{
 			ID:          document.CreatedBy,
 			DisplayName: nil,

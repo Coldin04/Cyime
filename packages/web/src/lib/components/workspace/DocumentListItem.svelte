@@ -1,5 +1,6 @@
 <script lang="ts">
 	import FileText from '~icons/ph/file-text';
+	import Table from '~icons/ph/table';
 	import type { FileItem } from '$lib/api/workspace';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import Pencil from '~icons/ph/pencil';
@@ -18,13 +19,15 @@
 		selectedItems,
 		bulkMode = false,
 		onToggle,
-		onRefresh
+		onRefresh,
+		iconKind = 'document'
 	}: {
 		item: FileItem;
 		selectedItems: { [key:string]: boolean };
 		bulkMode?: boolean;
 		onToggle: (id: string) => void;
 		onRefresh?: () => void;
+		iconKind?: 'document' | 'table';
 	} = $props();
 
 	const isSelected = $derived(!!selectedItems[item.id]);
@@ -173,7 +176,11 @@
 			onclick={(e) => e.stopPropagation()}
 			onchange={() => onToggle(item.id)}
 		/>
-		<FileText class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{#if iconKind === 'table'}
+			<Table class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{:else}
+			<FileText class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{/if}
 		<span
 			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
 		>

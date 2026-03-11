@@ -4,6 +4,7 @@
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
 	import FolderListItem from '$lib/components/workspace/FolderListItem.svelte';
 	import DocumentListItem from '$lib/components/workspace/DocumentListItem.svelte';
+	import TableDocumentListItem from '$lib/components/workspace/TableDocumentListItem.svelte';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import DocumentListItemSkeleton from '$lib/components/workspace/DocumentListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
@@ -298,13 +299,23 @@
 						onRefresh={() => refreshTrigger++}
 					/>
 				{:else if item.type === 'document'}
-					<DocumentListItem
-						{item}
-						{selectedItems}
-						{bulkMode}
-						onToggle={toggleItem}
-						onRefresh={() => refreshTrigger++}
-					/>
+					{#if item.documentType === 'table'}
+						<TableDocumentListItem
+							{item}
+							{selectedItems}
+							{bulkMode}
+							onToggle={toggleItem}
+							onRefresh={() => refreshTrigger++}
+						/>
+					{:else}
+						<DocumentListItem
+							{item}
+							{selectedItems}
+							{bulkMode}
+							onToggle={toggleItem}
+							onRefresh={() => refreshTrigger++}
+						/>
+					{/if}
 				{/if}
 			{/each}
 		{/if}

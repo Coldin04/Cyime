@@ -13,6 +13,7 @@
 
 	let title = $state('');
 	let content = $state('');
+	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
 	let isSaving = $state(false);
 	let lastSaved = $state<Date | null>(null);
 	let hasUnsavedChanges = $state(false);
@@ -88,6 +89,7 @@
 					content = data.content;
 					// Use the title from the API
 					title = details.title ?? '';
+					documentType = details.documentType ?? 'rich_text';
 					console.log('[Load] Title loaded:', title);
 					// Reset state for the new document
 					hasUnsavedChanges = false;
@@ -135,7 +137,13 @@
 	<main class="flex-1 overflow-hidden">
 		<div class="h-full w-full">
 			{#if browser && !isLoading}
-				<Editor {content} onContentChange={handleContentChange} />
+				{#if documentType === 'table'}
+					<div class="prose dark:prose-invert p-6">
+						<p>{m.edit_document_editor_under_construction()}</p>
+					</div>
+				{:else}
+					<Editor {content} onContentChange={handleContentChange} />
+				{/if}
 			{:else}
 				<div class="prose dark:prose-invert">
 					<p>{m.workspace_loading()}</p>

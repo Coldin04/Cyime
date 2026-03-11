@@ -3,6 +3,7 @@ import { apiFetch } from '$lib/api';
 export type FileItem = {
 	id: string;
 	type: 'folder' | 'document';
+	documentType?: 'rich_text' | 'table' | string;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
@@ -35,6 +36,7 @@ export type CreateDocumentRequest = {
 	title: string;
 	content: string;
 	folderId?: string | null;
+	documentType?: 'rich_text' | 'table';
 };
 
 export type CreateDocumentResponse = FileItem;

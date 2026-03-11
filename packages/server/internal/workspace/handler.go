@@ -225,10 +225,10 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 	}
 
 	// Create document
-	document, err := CreateDocument(userID, req.Title, req.Content, req.FolderID)
+	document, err := CreateDocument(userID, req.Title, req.Content, req.FolderID, req.DocumentType)
 	if err != nil {
 		// Handle known validation errors
-		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" {
+		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
@@ -258,14 +258,15 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 
 	// Build response
 	response := CreateDocumentResponse{
-		ID:        document.ID,
-		Type:      "document",
-		Title:     document.Title,
-		Excerpt:   document.Excerpt,
-		FolderID:  document.FolderID,
-		CreatedAt: document.CreatedAt,
-		UpdatedAt: document.UpdatedAt,
-		Creator:   *creatorInfo,
+		ID:           document.ID,
+		Type:         "document",
+		DocumentType: document.DocumentType,
+		Title:        document.Title,
+		Excerpt:      document.Excerpt,
+		FolderID:     document.FolderID,
+		CreatedAt:    document.CreatedAt,
+		UpdatedAt:    document.UpdatedAt,
+		Creator:      *creatorInfo,
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
