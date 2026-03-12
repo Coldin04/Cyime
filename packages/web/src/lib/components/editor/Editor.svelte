@@ -17,8 +17,11 @@
 	import FloppyDisk from '~icons/ph/floppy-disk';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
+	import { uploadDocumentAsset } from '$lib/api/editor';
+	import { toast } from 'svelte-sonner';
 
 	interface Props {
+		documentId: string;
 		content: JSONContent;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
@@ -26,7 +29,14 @@
 		onSave?: () => void | Promise<unknown>;
 	}
 
-	let { content, isSaving = false, hasUnsavedChanges = false, onContentChange, onSave }: Props = $props();
+	let {
+		documentId,
+		content,
+		isSaving = false,
+		hasUnsavedChanges = false,
+		onContentChange,
+		onSave
+	}: Props = $props();
 
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
@@ -37,6 +47,17 @@
 	let editor: Editor | null = null;
 	let lastSyncedContent = '';
 	let editorRevision = $state(0);
+
+	const allowedUploadMimeTypes = new Set([
+		'image/png',
+		'image/jpeg',
+		'image/webp',
+		'image/gif',
+		'video/mp4',
+		'video/webm'
+	]);
+
+	const allowedUploadExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm']);
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -118,6 +139,61 @@
 		return JSON.stringify(normalizeDoc(value));
 	}
 
+	function isSupportedUploadFile(file: File): boolean {
+		const type = file.type.trim().toLowerCase();
+		if (type && allowedUploadMimeTypes.has(type)) {
+			return true;
+		}
+
+		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
+		return ext !== '' && allowedUploadExtensions.has(ext);
+	}
+
+	function showUnsupportedUploadToast(file: File) {
+		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? 'unknown';
+		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF/MP4/WebM`);
+	}
+
+	async function uploadAndInsertImage(file: File) {
+		if (!editor) return;
+		if (!isSupportedUploadFile(file)) {
+			showUnsupportedUploadToast(file);
+			return;
+		}
+		try {
+			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			editor
+				.chain()
+				.focus()
+				.setImage({ src: uploaded.url, alt: file.name, title: file.name })
+				.run();
+		} catch (error) {
+			console.error('[Upload] Failed to upload image:', error);
+			toast.error(error instanceof Error ? error.message : '上传资源失败');
+		}
+	}
+
+	function extractImageSourcesFromHTML(html: string): string[] {
+		if (!html) return [];
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(html, 'text/html');
+		return Array.from(doc.querySelectorAll('img'))
+			.map((img) => img.getAttribute('src')?.trim() ?? '')
+			.filter((src) => src.length > 0);
+	}
+
+	async function srcToUploadFile(src: string): Promise<File | null> {
+		try {
+			const response = await fetch(src);
+			if (!response.ok) return null;
+			const blob = await response.blob();
+			const ext = blob.type.split('/')[1] || 'png';
+			return new File([blob], `pasted-image.${ext}`, { type: blob.type || 'image/png' });
+		} catch {
+			return null;
+		}
+	}
+
 	onMount(() => {
 		if (!editorElement) {
 			return;
@@ -144,6 +220,48 @@
 						const clipboardEvent = event as ClipboardEvent;
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
+
+						const imageFiles = [
+							...Array.from(clipboard.items)
+								.filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+								.map((item) => item.getAsFile())
+								.filter((file): file is File => file !== null),
+							...Array.from(clipboard.files).filter((file) => file.type.startsWith('image/'))
+						];
+
+						if (imageFiles.length > 0) {
+							clipboardEvent.preventDefault();
+							void (async () => {
+								for (const file of imageFiles) {
+									try {
+										await uploadAndInsertImage(file);
+									} catch (error) {
+										console.error('[Paste] Failed to upload pasted image file:', error);
+									}
+								}
+							})();
+							return true;
+						}
+
+						const html = clipboard.getData('text/html');
+						const imageSources = extractImageSourcesFromHTML(html).filter((src) =>
+							src.startsWith('data:image/') || src.startsWith('http://') || src.startsWith('https://')
+						);
+						if (imageSources.length > 0) {
+							clipboardEvent.preventDefault();
+							void (async () => {
+								for (const src of imageSources) {
+									const file = await srcToUploadFile(src);
+									if (!file) continue;
+									try {
+										await uploadAndInsertImage(file);
+									} catch (error) {
+										console.error('[Paste] Failed to upload pasted image element:', error);
+									}
+								}
+							})();
+							return true;
+						}
 
 						const text = clipboard.getData('text/plain');
 						if (!looksLikeMarkdown(text)) return false;

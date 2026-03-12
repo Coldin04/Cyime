@@ -6,8 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
@@ -19,14 +19,21 @@ import (
 )
 
 var tokenService *TokenService
+var tokenServiceMu sync.Mutex
 
-func init() {
-	var err error
-	tokenService, err = NewTokenService()
-	if err != nil {
-		// Using log.Fatalf will stop the application if the token service can't be initialized.
-		log.Fatalf("Failed to initialize TokenService: %v", err)
+func getTokenService() (*TokenService, error) {
+	tokenServiceMu.Lock()
+	defer tokenServiceMu.Unlock()
+
+	if tokenService != nil {
+		return tokenService, nil
 	}
+	svc, err := NewTokenService()
+	if err != nil {
+		return nil, err
+	}
+	tokenService = svc
+	return tokenService, nil
 }
 
 // Shared struct to store user info from any provider
@@ -98,6 +105,11 @@ func AuthLogin(c *fiber.Ctx) error {
 
 // AuthCallback handles the callback from the OIDC/OAuth2 provider.
 func AuthCallback(c *fiber.Ctx) error {
+	svc, err := getTokenService()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
 	providerName := c.Params("provider")
 	ctx := c.Context()
 
@@ -144,7 +156,7 @@ func AuthCallback(c *fiber.Ctx) error {
 		}
 
 		// Step 2: Generate and persist tokens for the user.
-		accessToken, refreshToken, txErr = tokenService.GenerateAndPersistTokens(tx, user)
+		accessToken, refreshToken, txErr = svc.GenerateAndPersistTokens(tx, user)
 		if txErr != nil {
 			return txErr
 		}
@@ -157,12 +169,16 @@ func AuthCallback(c *fiber.Ctx) error {
 	}
 
 	// Step 3: Deliver tokens to the client and redirect.
-	return tokenService.DeliverTokensAndRedirect(c, accessToken, refreshToken)
+	return svc.DeliverTokensAndRedirect(c, accessToken, refreshToken)
 }
 
 // HandleRefresh handles the token refresh endpoint by delegating to the token service.
 func HandleRefresh(c *fiber.Ctx) error {
-	return tokenService.HandleRefresh(c)
+	svc, err := getTokenService()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return svc.HandleRefresh(c)
 }
 
 // HandleLogout handles the user logout process.
@@ -173,9 +189,13 @@ func HandleLogout(c *fiber.Ctx) error {
 	// If the cookie is not present, there's nothing to do.
 	// The user is already effectively logged out from the server's perspective.
 	if rawRefreshToken != "" {
+		svc, err := getTokenService()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
 		// We don't need to block on the result.
 		// Fire-and-forget the revocation. The most important part is clearing the client-side cookie.
-		_ = tokenService.RevokeRefreshToken(rawRefreshToken)
+		_ = svc.RevokeRefreshToken(rawRefreshToken)
 	}
 
 	// Instruct the browser to clear the refresh token cookie.

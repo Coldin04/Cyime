@@ -6,22 +6,28 @@ import (
 	"strings"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/middleware"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/workspace"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
 func main() {
+	_ = config.LoadDotEnv(".env")
+
 	// Initialize database
 	database.Connect()
 	log.Println("Database initialization complete.")
 
 	// Create new Fiber app
 	app := fiber.New()
+	app.Use(recover.New())
 
 	// Add flexible CORS middleware
 	app.Use(cors.New(cors.Config{
@@ -83,6 +89,13 @@ func main() {
 	editRoutes := api.Group("/edit/documents", middleware.Protected())
 	editRoutes.Get("/:id/content", content.GetContentHandler)
 	editRoutes.Put("/:id/content", content.UpdateContentHandler)
+	editRoutes.Post("/:id/assets", media.UploadDocumentAssetHandler)
+
+	// Media read routes:
+	// - URL exchange is protected by JWT.
+	// - Content endpoint is public but protected by short-lived media token.
+	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
+	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

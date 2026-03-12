@@ -8,7 +8,7 @@
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { getDocumentContent, updateDocumentContent } from '$lib/api/editor';
+	import { getAssetReadURL, getDocumentContent, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
@@ -28,6 +28,67 @@
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
+
+	const assetPathPattern =
+		/\/api\/v1\/media\/assets\/([0-9a-fA-F-]{36})\/content(?:\?.*)?$/;
+
+	function extractAssetIdFromSrc(src: string): string | null {
+		try {
+			const parsed = new URL(src, browser ? window.location.origin : 'http://localhost');
+			const match = parsed.pathname.match(assetPathPattern);
+			return match?.[1] ?? null;
+		} catch {
+			const match = src.match(assetPathPattern);
+			return match?.[1] ?? null;
+		}
+	}
+
+	function cloneContentJson(value: JSONContent): JSONContent {
+		return JSON.parse(JSON.stringify(value)) as JSONContent;
+	}
+
+	function collectImageNodes(value: unknown, nodes: Array<Record<string, unknown>>) {
+		if (!value || typeof value !== 'object') {
+			return;
+		}
+		const node = value as Record<string, unknown>;
+		if (node.type === 'image') {
+			nodes.push(node);
+		}
+		const children = node.content;
+		if (Array.isArray(children)) {
+			for (const child of children) {
+				collectImageNodes(child, nodes);
+			}
+		}
+	}
+
+	async function refreshSignedImageSources(input: JSONContent): Promise<JSONContent> {
+		const cloned = cloneContentJson(input);
+		const imageNodes: Array<Record<string, unknown>> = [];
+		collectImageNodes(cloned, imageNodes);
+		if (imageNodes.length === 0) {
+			return cloned;
+		}
+
+		for (const node of imageNodes) {
+			const attrs = (node.attrs ?? {}) as Record<string, unknown>;
+			const src = typeof attrs.src === 'string' ? attrs.src : '';
+			if (!src) continue;
+			const assetId = extractAssetIdFromSrc(src);
+			if (!assetId) continue;
+
+			try {
+				const resolved = await getAssetReadURL(assetId);
+				attrs.src = resolved.url;
+				node.attrs = attrs;
+			} catch (error) {
+				console.error('[Load] Failed to refresh image URL for asset:', assetId, error);
+			}
+		}
+
+		return cloned;
+	}
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
@@ -120,7 +181,8 @@
 						getDocumentContent(documentId)
 					]);
 
-					content = data.contentJson ?? EMPTY_DOC;
+					const loadedContent = data.contentJson ?? EMPTY_DOC;
+					content = await refreshSignedImageSources(loadedContent);
 					// Use the title from the API
 					title = details.title ?? '';
 					documentType = details.documentType ?? 'rich_text';
@@ -191,6 +253,7 @@
 					</div>
 				{:else}
 					<Editor
+						documentId={documentId!}
 						{content}
 						{isSaving}
 						{hasUnsavedChanges}

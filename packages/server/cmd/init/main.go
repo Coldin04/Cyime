@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
@@ -54,6 +55,8 @@ var providerTemplates = map[string]ProviderTemplate{
 }
 
 func main() {
+	_ = config.LoadDotEnv(".env")
+
 	fmt.Println("🍋 CyimeWrite 初始化向导")
 	fmt.Println("========================")
 	fmt.Println()

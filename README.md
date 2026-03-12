@@ -46,6 +46,33 @@
     go run ./cmd/server/main.go
     ```
     后端服务将运行在 `http://localhost:8080`。
+    说明：后端启动会自动读取 `packages/server/.env`。
+
+    媒体模块环境变量：
+    - `MEDIA_TOKEN_SECRET=replace-with-strong-secret`（私有媒体签名必需）
+    - `MEDIA_SIGN_TTL_SECONDS=120`
+    - `MEDIA_STORAGE_PROVIDER=local|r2|s3|cos`（默认 `local`）
+    - `RESET_WORKSPACE_TABLES_ON_BOOT=false`（默认不清空业务表；仅调试时改为 `true`）
+
+    本地 provider（开发）：
+    - `MEDIA_LOCAL_ROOT_DIR=/tmp/cyimewrite-media`
+    - `MEDIA_LOCAL_BASE_URL=/media-files`
+
+    S3 兼容 provider（R2/COS/S3）：
+    - `MEDIA_S3_ENDPOINT=https://<endpoint>`
+    - `MEDIA_S3_BUCKET=<bucket>`
+    - `MEDIA_S3_REGION=auto`
+    - `MEDIA_S3_ACCESS_KEY_ID=<key>`
+    - `MEDIA_S3_SECRET_ACCESS_KEY=<secret>`
+    - `MEDIA_S3_PUBLIC_BASE_URL=https://<cdn-domain>`（可选）
+
+    R2 也可用同义变量（兼容）：
+    - `R2_ENDPOINT`
+    - `R2_BUCKET`
+    - `R2_REGION`
+    - `R2_ACCESS_KEY_ID`
+    - `R2_SECRET_ACCESS_KEY`
+    - `R2_PUBLIC_BASE_URL`
 
 3.  **启动前端服务**:
     ```bash
