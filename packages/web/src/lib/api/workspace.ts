@@ -34,7 +34,7 @@ export type CreateFolderResponse = FileItem;
 
 export type CreateDocumentRequest = {
 	title: string;
-	content: string;
+	contentJson: { [key: string]: unknown };
 	folderId?: string | null;
 	documentType?: 'rich_text' | 'table';
 };

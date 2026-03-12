@@ -221,7 +221,7 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 }
 
 // CreateDocument creates a new document with unique title handling.
-func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
+func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
 	if documentType == "" {
 		documentType = "rich_text"
 	}
@@ -282,8 +282,8 @@ func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID 
 		}
 	}
 
-	// Generate excerpt from content
-	excerpt := generateExcerpt(contentStr)
+	// Generate excerpt from canonical editor JSON.
+	excerpt := content.BuildExcerptFromContentJSON(contentJSON)
 
 	// Create the document in a transaction
 	var document *models.Document
@@ -305,7 +305,7 @@ func CreateDocument(userID uuid.UUID, title string, contentStr string, folderID 
 			return err
 		}
 
-		if err := content.CreateInitialContent(tx, document.ID, userID, contentStr); err != nil {
+		if err := content.CreateInitialContent(tx, document.ID, userID, contentJSON); err != nil {
 			return err
 		}
 

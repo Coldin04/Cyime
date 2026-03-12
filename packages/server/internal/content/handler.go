@@ -1,6 +1,8 @@
 package content
 
 import (
+	"encoding/json"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -13,7 +15,7 @@ type ErrorResponse struct {
 
 // UpdateContentRequest represents the request body for updating content.
 type UpdateContentRequest struct {
-	Content string `json:"content"`
+	ContentJSON json.RawMessage `json:"contentJson"`
 }
 
 // GetContentHandler handles GET /api/v1/edit/documents/:id/content.
@@ -97,12 +99,17 @@ func UpdateContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	result, err := UpdateContent(userID, documentID, req.Content)
+	result, err := UpdateContent(userID, documentID, req.ContentJSON)
 	if err != nil {
 		switch err.Error() {
 		case "文档不存在或无权访问":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "contentJson must be valid JSON":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
 				Message: err.Error(),
 			})
 		default:

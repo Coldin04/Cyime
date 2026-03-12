@@ -23,7 +23,7 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Document{},
-		&models.DocumentContent{},
+		&models.DocumentBody{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -32,14 +32,14 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedDocumentForContent(t *testing.T, db *gorm.DB, ownerID uuid.UUID, title, content string) (uuid.UUID, uuid.UUID) {
+func seedDocumentForContent(t *testing.T, db *gorm.DB, ownerID uuid.UUID, title, contentJSON string) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 
 	doc := models.Document{
 		ID:           uuid.New(),
 		OwnerUserID:  ownerID,
 		Title:        title,
-		Excerpt:      content,
+		Excerpt:      "seed",
 		DocumentType: "rich_text",
 		EditorType:   "tiptap",
 		CreatedBy:    ownerID,
@@ -49,12 +49,13 @@ func seedDocumentForContent(t *testing.T, db *gorm.DB, ownerID uuid.UUID, title,
 		t.Fatalf("create document: %v", err)
 	}
 
-	docContent := models.DocumentContent{
-		ID:              uuid.New(),
-		DocumentID:      doc.ID,
-		ContentMarkdown: content,
-		PlainText:       content,
-		UpdatedBy:       ownerID,
+	docContent := models.DocumentBody{
+		ID:             uuid.New(),
+		DocumentID:     doc.ID,
+		ContentJSON:    contentJSON,
+		PlainText:      "seed",
+		ContentVersion: 1,
+		UpdatedBy:      ownerID,
 	}
 	if err := db.Create(&docContent).Error; err != nil {
 		t.Fatalf("create document content: %v", err)
@@ -67,7 +68,7 @@ func TestGetContent_DeniesCrossUserAccess(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	attackerID := uuid.New()
-	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", "secret content")
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"secret"}]}]}`)
 
 	if _, err := GetContent(attackerID, docID); err == nil {
 		t.Fatal("expected cross-user get content to fail")
@@ -78,21 +79,21 @@ func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	attackerID := uuid.New()
-	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", "before")
+	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`)
 
-	if _, err := UpdateContent(attackerID, docID, "hacked"); err == nil {
+	if _, err := UpdateContent(attackerID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]}`)); err == nil {
 		t.Fatal("expected cross-user update content to fail")
 	}
 
-	var got models.DocumentContent
+	var got models.DocumentBody
 	if err := db.First(&got, "id = ?", contentID).Error; err != nil {
 		t.Fatalf("load content: %v", err)
 	}
-	if got.ContentMarkdown != "before" {
-		t.Fatalf("expected content unchanged, got: %q", got.ContentMarkdown)
+	expected := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`
+	if got.ContentJSON != expected {
+		t.Fatalf("expected content unchanged, got: %q", got.ContentJSON)
 	}
 	if got.UpdatedBy != ownerID {
 		t.Fatalf("expected updated_by unchanged, got: %s", got.UpdatedBy)
 	}
 }
-

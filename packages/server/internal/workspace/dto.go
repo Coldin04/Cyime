@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,10 +53,10 @@ type CreateFolderResponse struct {
 }
 
 type CreateDocumentRequest struct {
-	Title        string     `json:"title"`
-	Content      string     `json:"content"`
-	FolderID     *uuid.UUID `json:"folderId"`
-	DocumentType string     `json:"documentType"`
+	Title        string          `json:"title"`
+	ContentJSON  json.RawMessage `json:"contentJson"`
+	FolderID     *uuid.UUID      `json:"folderId"`
+	DocumentType string          `json:"documentType"`
 }
 
 type CreateDocumentResponse struct {

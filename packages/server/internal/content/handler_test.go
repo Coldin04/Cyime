@@ -26,7 +26,7 @@ func TestGetContentHandler_CrossUserDenied(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	attackerID := uuid.New()
-	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", "secret")
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"secret"}]}]}`)
 
 	app := newContentTestApp(attackerID)
 	req := httptest.NewRequest(http.MethodGet, "/documents/"+docID.String()+"/content", nil)
@@ -44,10 +44,10 @@ func TestUpdateContentHandler_CrossUserDeniedAndDataUnchanged(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	attackerID := uuid.New()
-	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", "before")
+	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`)
 
 	app := newContentTestApp(attackerID)
-	body := bytes.NewBufferString(`{"content":"hacked"}`)
+	body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]}}`)
 	req := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req, -1)
@@ -59,12 +59,12 @@ func TestUpdateContentHandler_CrossUserDeniedAndDataUnchanged(t *testing.T) {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 
-	var got models.DocumentContent
+	var got models.DocumentBody
 	if err := db.First(&got, "id = ?", contentID).Error; err != nil {
 		t.Fatalf("load content: %v", err)
 	}
-	if got.ContentMarkdown != "before" {
-		t.Fatalf("expected content unchanged, got %q", got.ContentMarkdown)
+	expected := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`
+	if got.ContentJSON != expected {
+		t.Fatalf("expected content unchanged, got %q", got.ContentJSON)
 	}
 }
-

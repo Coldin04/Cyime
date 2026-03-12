@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { JSONContent } from '@tiptap/core';
 	import { browser } from '$app/environment';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -13,7 +14,12 @@
 	import * as m from '$paraglide/messages';
 
 	let title = $state('');
-	let content = $state('');
+	const EMPTY_DOC: JSONContent = {
+		type: 'doc',
+		content: [{ type: 'paragraph' }]
+	};
+
+	let content = $state<JSONContent>(EMPTY_DOC);
 	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
 	let isSaving = $state(false);
 	let lastSaved = $state<Date | null>(null);
@@ -63,7 +69,7 @@
 		await handleConfirmLeave();
 	}
 
-	function handleContentChange(newContent: string) {
+	function handleContentChange(newContent: JSONContent) {
 		if (isLoading) return;
 		hasUnsavedChanges = true;
 		content = newContent;
@@ -114,8 +120,7 @@
 						getDocumentContent(documentId)
 					]);
 
-					console.log('[Load] Content loaded, length:', data.content?.length);
-					content = data.content;
+					content = data.contentJson ?? EMPTY_DOC;
 					// Use the title from the API
 					title = details.title ?? '';
 					documentType = details.documentType ?? 'rich_text';

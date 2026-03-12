@@ -72,7 +72,10 @@
 		try {
 			const newDoc = await createDocument({
 				title: '',
-				content: '',
+				contentJson: {
+					type: 'doc',
+					content: [{ type: 'paragraph' }]
+				},
 				folderId: $workspaceContext.currentFolderId,
 				documentType: 'rich_text'
 			});

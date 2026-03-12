@@ -225,7 +225,7 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 	}
 
 	// Create document
-	document, err := CreateDocument(userID, req.Title, req.Content, req.FolderID, req.DocumentType)
+	document, err := CreateDocument(userID, req.Title, string(req.ContentJSON), req.FolderID, req.DocumentType)
 	if err != nil {
 		// Handle known validation errors
 		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" {

@@ -24,7 +24,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.User{},
 		&models.Folder{},
 		&models.Document{},
-		&models.DocumentContent{},
+		&models.DocumentBody{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -50,12 +50,13 @@ func seedDocumentForWorkspace(t *testing.T, db *gorm.DB, ownerID uuid.UUID, titl
 		t.Fatalf("create document: %v", err)
 	}
 
-	content := models.DocumentContent{
-		ID:              uuid.New(),
-		DocumentID:      doc.ID,
-		ContentMarkdown: "seed",
-		PlainText:       "seed",
-		UpdatedBy:       ownerID,
+	content := models.DocumentBody{
+		ID:             uuid.New(),
+		DocumentID:     doc.ID,
+		ContentJSON:    `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"seed"}]}]}`,
+		PlainText:      "seed",
+		ContentVersion: 1,
+		UpdatedBy:      ownerID,
 	}
 	if err := db.Create(&content).Error; err != nil {
 		t.Fatalf("create document content: %v", err)
@@ -104,4 +105,3 @@ func TestDeleteFile_Document_DeniesCrossUserAccessAndKeepsRow(t *testing.T) {
 		t.Fatal("expected document to remain undeleted")
 	}
 }
-

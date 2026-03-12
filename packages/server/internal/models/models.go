@@ -123,39 +123,41 @@ func (d *Document) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Document represents an editable workspace document (metadata only).
 type Document struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primary_key"`
-	OwnerUserID  uuid.UUID      `gorm:"not null;index:idx_owner_folder"`
-	FolderID     *uuid.UUID     `gorm:"index:idx_owner_folder"`
-	Title        string         `gorm:"type:varchar(255);not null"`
-	Excerpt      string         `gorm:"type:text"`
-	DocumentType string         `gorm:"type:varchar(50);not null;default:'rich_text'"`
-	EditorType   string         `gorm:"type:varchar(50);not null;default:'tiptap'"`
-	CreatedBy    uuid.UUID      `gorm:"not null"`
-	UpdatedBy    uuid.UUID      `gorm:"not null"`
+	ID           uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID  uuid.UUID  `gorm:"not null;index:idx_owner_folder"`
+	FolderID     *uuid.UUID `gorm:"index:idx_owner_folder"`
+	Title        string     `gorm:"type:varchar(255);not null"`
+	Excerpt      string     `gorm:"type:text"`
+	DocumentType string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
+	EditorType   string     `gorm:"type:varchar(50);not null;default:'tiptap'"`
+	CreatedBy    uuid.UUID  `gorm:"not null"`
+	UpdatedBy    uuid.UUID  `gorm:"not null"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
-func (dc *DocumentContent) BeforeCreate(tx *gorm.DB) (err error) {
-	if dc.ID == uuid.Nil {
-		dc.ID = uuid.New()
+func (dbd *DocumentBody) BeforeCreate(tx *gorm.DB) (err error) {
+	if dbd.ID == uuid.Nil {
+		dbd.ID = uuid.New()
 	}
 	return
 }
 
-// DocumentContent stores the current content for a document.
-type DocumentContent struct {
-	ID              uuid.UUID      `gorm:"type:uuid;primary_key"`
-	DocumentID      uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
-	ContentJSON     string         `gorm:"type:longtext"`
-	ContentMarkdown string         `gorm:"type:longtext"`
-	PlainText       string         `gorm:"type:longtext"`
-	UpdatedBy       uuid.UUID      `gorm:"not null"`
-	CreatedAt       time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time      `gorm:"autoUpdateTime"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+// DocumentBody stores current canonical editor content for a document.
+type DocumentBody struct {
+	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
+	ContentJSON    string         `gorm:"type:text;not null"`
+	PlainText      string         `gorm:"type:text;not null;default:''"`
+	ContentVersion int64          `gorm:"not null;default:1"`
+	YjsState       string         `gorm:"type:text"`
+	YjsStateVector string         `gorm:"type:text"`
+	UpdatedBy      uuid.UUID      `gorm:"not null"`
+	CreatedAt      time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -168,20 +170,24 @@ func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Asset represents a stored binary resource such as an image, video, or file.
 type Asset struct {
-	ID              uuid.UUID      `gorm:"type:uuid;primary_key"`
-	OwnerUserID     uuid.UUID      `gorm:"not null;index:idx_owner_document"`
-	DocumentID      *uuid.UUID     `gorm:"type:uuid;index:idx_owner_document"`
-	Kind            string         `gorm:"type:varchar(50);not null;default:'file'"`
-	Filename        string         `gorm:"type:varchar(255);not null"`
-	FileHash        string         `gorm:"type:varchar(64);not null;index"`
-	FileSize        int64          `gorm:"not null"`
-	MimeType        string         `gorm:"type:varchar(100);not null"`
-	StorageProvider string         `gorm:"type:varchar(50);not null;default:'r2'"`
-	Bucket          string         `gorm:"type:varchar(255)"`
-	ObjectKey       string         `gorm:"type:varchar(255);not null;unique"`
-	URL             string         `gorm:"type:text;not null"`
-	ReferenceCount  int            `gorm:"not null;default:1;index"`
-	CreatedBy       uuid.UUID      `gorm:"not null"`
+	ID              uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID     uuid.UUID  `gorm:"not null;index:idx_owner_document"`
+	DocumentID      *uuid.UUID `gorm:"type:uuid;index:idx_owner_document"`
+	Kind            string     `gorm:"type:varchar(20);not null;default:'image'"`
+	Filename        string     `gorm:"type:varchar(255);not null"`
+	FileHash        string     `gorm:"type:varchar(64);not null;index"`
+	FileSize        int64      `gorm:"not null"`
+	MimeType        string     `gorm:"type:varchar(100);not null"`
+	StorageProvider string     `gorm:"type:varchar(50);not null;default:'r2'"`
+	Bucket          string     `gorm:"type:varchar(255)"`
+	ObjectKey       string     `gorm:"type:varchar(255);not null;unique"`
+	URL             string     `gorm:"type:text;not null"`
+	AltText         *string    `gorm:"type:text"`
+	Width           *int       `gorm:"type:int"`
+	Height          *int       `gorm:"type:int"`
+	Status          string     `gorm:"type:varchar(20);not null;default:'ready'"`
+	ReferenceCount  int        `gorm:"not null;default:1;index"`
+	CreatedBy       uuid.UUID  `gorm:"not null"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       gorm.DeletedAt `gorm:"index"`
@@ -212,8 +218,8 @@ func (Document) TableName() string {
 	return "documents"
 }
 
-func (DocumentContent) TableName() string {
-	return "document_contents"
+func (DocumentBody) TableName() string {
+	return "document_bodies"
 }
 
 func (Asset) TableName() string {

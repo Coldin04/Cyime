@@ -19,14 +19,19 @@
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
 
 	interface Props {
-		content: string;
+		content: JSONContent;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
-		onContentChange?: (content: string) => void;
+		onContentChange?: (content: JSONContent) => void;
 		onSave?: () => void | Promise<unknown>;
 	}
 
 	let { content, isSaving = false, hasUnsavedChanges = false, onContentChange, onSave }: Props = $props();
+
+	const EMPTY_DOC: JSONContent = {
+		type: 'doc',
+		content: [{ type: 'paragraph' }]
+	};
 
 	let editorElement: HTMLDivElement | null = null;
 	let editor: Editor | null = null;
@@ -95,41 +100,22 @@
 		return markdownPatterns.some((pattern) => pattern.test(sample));
 	}
 
-	function createParagraphNode(text: string): JSONContent {
-		if (!text) {
-			return { type: 'paragraph' };
+	function normalizeDoc(value: JSONContent | null | undefined): JSONContent {
+		if (!value || value.type !== 'doc') {
+			return EMPTY_DOC;
 		}
-
-		return {
-			type: 'paragraph',
-			content: [
-				{
-					type: 'text',
-					text
-				}
-			]
-		};
+		if (!Array.isArray(value.content) || value.content.length === 0) {
+			return EMPTY_DOC;
+		}
+		return value;
 	}
 
-	function toTiptapContent(value: string): Content {
-		const trimmed = value.trim();
+	function toTiptapContent(value: JSONContent): Content {
+		return normalizeDoc(value);
+	}
 
-		if (!trimmed) {
-			return {
-				type: 'doc',
-				content: [{ type: 'paragraph' }]
-			};
-		}
-
-		// Preserve existing HTML documents if they already come from a rich-text source.
-		if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-			return value;
-		}
-
-		return {
-			type: 'doc',
-			content: value.split(/\n{2,}/).map((block) => createParagraphNode(block.replace(/\n/g, ' ')))
-		};
+	function serializeDoc(value: JSONContent): string {
+		return JSON.stringify(normalizeDoc(value));
 	}
 
 	onMount(() => {
@@ -137,7 +123,7 @@
 			return;
 		}
 
-		lastSyncedContent = content;
+		lastSyncedContent = serializeDoc(content);
 		editor = new Editor({
 			element: editorElement,
 			extensions: [
@@ -184,8 +170,8 @@
 				}
 			},
 			onUpdate: ({ editor }) => {
-				const nextContent = editor.getHTML();
-				lastSyncedContent = nextContent;
+				const nextContent = editor.getJSON();
+				lastSyncedContent = serializeDoc(nextContent);
 				onContentChange?.(nextContent);
 				editorRevision += 1;
 			},
@@ -205,11 +191,11 @@
 			return;
 		}
 
-		if (content === lastSyncedContent) {
+		if (serializeDoc(content) === lastSyncedContent) {
 			return;
 		}
 
-		lastSyncedContent = content;
+		lastSyncedContent = serializeDoc(content);
 		editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
 	});
 
@@ -240,7 +226,9 @@
 
 <div class="flex h-full w-full flex-col">
 	<div class="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div class="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-center gap-2">
+		<div
+			class="mx-auto flex w-full max-w-4xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:flex-wrap md:justify-center md:overflow-visible md:whitespace-normal"
+		>
 			<button
 				type="button"
 				title={m.editor_toolbar_save_with_shortcut()}
@@ -277,8 +265,7 @@
 			>
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
-			<div class="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700"></div>
-			<div class="flex flex-wrap items-center gap-2">
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
 				title={m.editor_toolbar_heading_1()}
@@ -323,7 +310,7 @@
 			>
 				<Paragraph class="h-4 w-4" />
 			</button>
-			<div class="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700"></div>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
 				title={m.editor_toolbar_bold()}
@@ -356,7 +343,7 @@
 			>
 				<TextItalic class="h-4 w-4" />
 			</button>
-			<div class="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700"></div>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
 				title={m.editor_toolbar_bullet_list()}
@@ -389,7 +376,6 @@
 			>
 				<ListNumbers class="h-4 w-4" />
 			</button>
-			</div>
 		</div>
 	</div>
 

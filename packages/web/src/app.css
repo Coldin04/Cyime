@@ -9,6 +9,15 @@
 	}
 }
 
+.scrollbar-none {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
 .tiptap {
 	line-height: 1.85;
 	min-height: 100%;

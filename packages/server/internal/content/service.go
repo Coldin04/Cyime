@@ -1,8 +1,8 @@
 package content
 
 import (
+	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
@@ -11,22 +11,24 @@ import (
 	"gorm.io/gorm"
 )
 
+const defaultContentJSON = `{"type":"doc","content":[{"type":"paragraph"}]}`
+
 // GetContentResult represents the current content of a document.
 type GetContentResult struct {
-	ID              uuid.UUID `json:"id"`
-	DocumentID      uuid.UUID `json:"documentId"`
-	Content         string    `json:"content"`
-	ContentJSON     string    `json:"contentJson"`
-	ContentMarkdown string    `json:"contentMarkdown"`
-	PlainText       string    `json:"plainText"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID             uuid.UUID       `json:"id"`
+	DocumentID     uuid.UUID       `json:"documentId"`
+	ContentJSON    json.RawMessage `json:"contentJson"`
+	PlainText      string          `json:"plainText"`
+	ContentVersion int64           `json:"contentVersion"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
 // UpdateContentResult represents the result of updating document content.
 type UpdateContentResult struct {
-	Success   bool      `json:"success"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Success        bool      `json:"success"`
+	ContentVersion int64     `json:"contentVersion"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // GetContent retrieves the current content of a document.
@@ -40,7 +42,7 @@ func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, erro
 		return nil, result.Error
 	}
 
-	var content models.DocumentContent
+	var content models.DocumentBody
 	result = database.DB.Where("document_id = ?", documentID).First(&content)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -50,24 +52,31 @@ func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, erro
 	}
 
 	return &GetContentResult{
-		ID:              content.ID,
-		DocumentID:      content.DocumentID,
-		Content:         currentContentValue(content),
-		ContentJSON:     content.ContentJSON,
-		ContentMarkdown: content.ContentMarkdown,
-		PlainText:       content.PlainText,
-		CreatedAt:       content.CreatedAt,
-		UpdatedAt:       content.UpdatedAt,
+		ID:             content.ID,
+		DocumentID:     content.DocumentID,
+		ContentJSON:    json.RawMessage(content.ContentJSON),
+		PlainText:      content.PlainText,
+		ContentVersion: content.ContentVersion,
+		CreatedAt:      content.CreatedAt,
+		UpdatedAt:      content.UpdatedAt,
 	}, nil
 }
 
 // UpdateContent updates the current content of a document in place.
-func UpdateContent(userID uuid.UUID, documentID uuid.UUID, newContent string) (*UpdateContentResult, error) {
-	var updatedAt time.Time
-	plainText := toPlainText(newContent)
+func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte) (*UpdateContentResult, error) {
+	contentJSON, err := normalizeContentJSON(contentJSONRaw)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		updatedAt      time.Time
+		contentVersion int64
+	)
+	plainText := toPlainText(contentJSON)
 	excerpt := buildExcerpt(plainText)
 
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
 		var document models.Document
 		result := tx.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
 		if result.Error != nil {
@@ -78,28 +87,39 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, newContent string) (*
 		}
 
 		now := time.Now()
-		result = tx.Model(&models.DocumentContent{}).
+		result = tx.Model(&models.DocumentBody{}).
 			Where("document_id = ?", documentID).
 			Updates(map[string]any{
-				"content_markdown": newContent,
-				"plain_text":       plainText,
-				"updated_by":       userID,
-				"updated_at":       now,
+				"content_json":    contentJSON,
+				"plain_text":      plainText,
+				"updated_by":      userID,
+				"content_version": gorm.Expr("content_version + 1"),
+				"updated_at":      now,
 			})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			contentRecord := &models.DocumentContent{
-				ID:              uuid.New(),
-				DocumentID:      documentID,
-				ContentMarkdown: newContent,
-				PlainText:       plainText,
-				UpdatedBy:       userID,
+			contentRecord := &models.DocumentBody{
+				ID:             uuid.New(),
+				DocumentID:     documentID,
+				ContentJSON:    contentJSON,
+				PlainText:      plainText,
+				ContentVersion: 1,
+				UpdatedBy:      userID,
 			}
 			if err := tx.Create(contentRecord).Error; err != nil {
 				return err
 			}
+			contentVersion = contentRecord.ContentVersion
+		}
+
+		if contentVersion == 0 {
+			var body models.DocumentBody
+			if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
+				return err
+			}
+			contentVersion = body.ContentVersion
 		}
 
 		updatedAt = now
@@ -114,19 +134,26 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, newContent string) (*
 	}
 
 	return &UpdateContentResult{
-		Success:   true,
-		UpdatedAt: updatedAt,
+		Success:        true,
+		ContentVersion: contentVersion,
+		UpdatedAt:      updatedAt,
 	}, nil
 }
 
 // CreateInitialContent creates the first content row for a document.
-func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, content string) error {
-	contentRecord := &models.DocumentContent{
-		ID:              uuid.New(),
-		DocumentID:      documentID,
-		ContentMarkdown: content,
-		PlainText:       toPlainText(content),
-		UpdatedBy:       userID,
+func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSONRaw string) error {
+	contentJSON, err := normalizeContentJSON([]byte(contentJSONRaw))
+	if err != nil {
+		return err
+	}
+
+	contentRecord := &models.DocumentBody{
+		ID:             uuid.New(),
+		DocumentID:     documentID,
+		ContentJSON:    contentJSON,
+		PlainText:      toPlainText(contentJSON),
+		ContentVersion: 1,
+		UpdatedBy:      userID,
 	}
 
 	return tx.Create(contentRecord).Error
@@ -142,7 +169,7 @@ func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error 
 		return nil
 	}
 
-	return tx.Where("document_id = ?", documentID).Delete(&models.DocumentContent{}).Error
+	return tx.Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error
 }
 
 // RestoreContentByDocumentID restores the content row for a document.
@@ -156,7 +183,7 @@ func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error
 	}
 
 	return tx.Unscoped().
-		Model(&models.DocumentContent{}).
+		Model(&models.DocumentBody{}).
 		Where("document_id = ?", documentID).
 		Update("deleted_at", nil).Error
 }
@@ -171,25 +198,61 @@ func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUI
 		return nil
 	}
 
-	return tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentContent{}).Error
+	return tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error
 }
 
-func currentContentValue(content models.DocumentContent) string {
-	if content.ContentMarkdown != "" {
-		return content.ContentMarkdown
+func normalizeContentJSON(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return defaultContentJSON, nil
 	}
-	return content.ContentJSON
+	if !json.Valid(raw) {
+		return "", errors.New("contentJson must be valid JSON")
+	}
+	return string(raw), nil
 }
 
-func toPlainText(content string) string {
-	plainText := content
-	plainText = strings.ReplaceAll(plainText, "# ", "")
-	plainText = strings.ReplaceAll(plainText, "## ", "")
-	plainText = strings.ReplaceAll(plainText, "### ", "")
-	plainText = strings.ReplaceAll(plainText, "**", "")
-	plainText = strings.ReplaceAll(plainText, "*", "")
-	plainText = strings.ReplaceAll(plainText, "[]()", "")
-	return strings.TrimSpace(plainText)
+func toPlainText(contentJSON string) string {
+	var node any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 64)
+	collectText(node, &parts)
+	return joinWithSpace(parts)
+}
+
+func collectText(node any, out *[]string) {
+	switch v := node.(type) {
+	case map[string]any:
+		if text, ok := v["text"].(string); ok {
+			*out = append(*out, text)
+		}
+		if children, ok := v["content"].([]any); ok {
+			for _, child := range children {
+				collectText(child, out)
+			}
+		}
+	case []any:
+		for _, item := range v {
+			collectText(item, out)
+		}
+	}
+}
+
+func joinWithSpace(parts []string) string {
+	merged := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if merged == "" {
+			merged = p
+			continue
+		}
+		merged += " " + p
+	}
+	return merged
 }
 
 func buildExcerpt(plainText string) string {
@@ -200,4 +263,13 @@ func buildExcerpt(plainText string) string {
 		return plainText[:100] + "..."
 	}
 	return plainText
+}
+
+// BuildExcerptFromContentJSON derives a document excerpt from editor JSON.
+func BuildExcerptFromContentJSON(contentJSONRaw string) string {
+	contentJSON, err := normalizeContentJSON([]byte(contentJSONRaw))
+	if err != nil {
+		return ""
+	}
+	return buildExcerpt(toPlainText(contentJSON))
 }
