@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -49,20 +50,22 @@ func Connect() {
 
 	log.Println("Database connection established.")
 
-	// Development-phase hard reset:
-	// keep user/auth tables, rebuild workspace/content/media tables from scratch.
-	resetTables := []string{
-		"assets",
-		"document_bodies",
-		"documents",
-		"folders",
-		// Legacy table name from previous schema.
-		"document_contents",
-	}
-	for _, table := range resetTables {
-		if DB.Migrator().HasTable(table) {
-			if err := DB.Migrator().DropTable(table); err != nil {
-				log.Fatalf("Failed to drop table %s: %v", table, err)
+	// Optional development reset (disabled by default).
+	// Set RESET_WORKSPACE_TABLES_ON_BOOT=true to drop workspace/content/media tables.
+	if config.IsTrue(os.Getenv("RESET_WORKSPACE_TABLES_ON_BOOT")) {
+		resetTables := []string{
+			"assets",
+			"document_bodies",
+			"documents",
+			"folders",
+			// Legacy table name from previous schema.
+			"document_contents",
+		}
+		for _, table := range resetTables {
+			if DB.Migrator().HasTable(table) {
+				if err := DB.Migrator().DropTable(table); err != nil {
+					log.Fatalf("Failed to drop table %s: %v", table, err)
+				}
 			}
 		}
 	}

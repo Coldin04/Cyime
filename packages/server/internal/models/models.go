@@ -182,6 +182,7 @@ type Asset struct {
 	Bucket          string     `gorm:"type:varchar(255)"`
 	ObjectKey       string     `gorm:"type:varchar(255);not null;unique"`
 	URL             string     `gorm:"type:text;not null"`
+	Visibility      string     `gorm:"type:varchar(20);not null;default:'private'"`
 	AltText         *string    `gorm:"type:text"`
 	Width           *int       `gorm:"type:int"`
 	Height          *int       `gorm:"type:int"`
