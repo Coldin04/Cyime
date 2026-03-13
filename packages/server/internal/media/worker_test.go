@@ -237,10 +237,125 @@ func TestRunDueAssetGCJobs_MarksFailedOnDeleteError(t *testing.T) {
 	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if gotJob.Status != "failed" || gotJob.AttemptCount != 1 {
-		t.Fatalf("expected failed job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
+	if gotJob.Status != "pending" || gotJob.AttemptCount != 1 {
+		t.Fatalf("expected pending retry job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
 	}
 	if gotJob.LastError == nil || *gotJob.LastError != "boom" {
 		t.Fatalf("expected last_error=boom, got %+v", gotJob.LastError)
+	}
+	if !gotJob.RunAfter.After(now) {
+		t.Fatalf("expected retry run_after to be pushed forward, got %s", gotJob.RunAfter)
+	}
+}
+
+func TestRunDueAssetGCJobs_MarksFailedWhenMaxAttemptsReached(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+	now := time.Now()
+	t.Setenv("MEDIA_ASSET_GC_MAX_ATTEMPTS", "1")
+
+	mock := &mockStorageProvider{deleteErr: errors.New("boom-final")}
+	storageProvider = mock
+	t.Cleanup(func() { storageProvider = nil })
+
+	asset := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     userID,
+		DocumentID:      &docID,
+		Filename:        "broken-final.png",
+		FileHash:        "hash-broken-final",
+		FileSize:        3,
+		MimeType:        "image/png",
+		StorageProvider: "mock",
+		ObjectKey:       "owner/broken-final.png",
+		URL:             "http://example.test/broken-final.png",
+		Visibility:      "private",
+		Status:          "pending_delete",
+		ReferenceCount:  0,
+		CreatedBy:       userID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	job := models.AssetGCJob{
+		ID:       uuid.New(),
+		AssetID:  asset.ID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: now.Add(-time.Minute),
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	processed, err := RunDueAssetGCJobs(context.Background(), now, 10)
+	if err != nil {
+		t.Fatalf("run gc jobs: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected processed=1, got %d", processed)
+	}
+
+	var gotJob models.AssetGCJob
+	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if gotJob.Status != "failed" || gotJob.AttemptCount != 1 {
+		t.Fatalf("expected final failed job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
+	}
+	if gotJob.LastError == nil || *gotJob.LastError != "boom-final" {
+		t.Fatalf("expected last_error=boom-final, got %+v", gotJob.LastError)
+	}
+}
+
+func TestRunAssetReferenceReconcilePass_RepairsDriftedAssetState(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+	now := time.Now()
+
+	asset := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     userID,
+		DocumentID:      &docID,
+		Filename:        "drifted.png",
+		FileHash:        "hash-drifted",
+		FileSize:        3,
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "owner/drifted.png",
+		URL:             "http://example.test/drifted.png",
+		Visibility:      "private",
+		Status:          "ready",
+		ReferenceCount:  99,
+		CreatedBy:       userID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	reconciled, err := RunAssetReferenceReconcilePass(now, 10)
+	if err != nil {
+		t.Fatalf("reconcile pass: %v", err)
+	}
+	if reconciled != 1 {
+		t.Fatalf("expected reconciled=1, got %d", reconciled)
+	}
+
+	var gotAsset models.Asset
+	if err := db.First(&gotAsset, "id = ?", asset.ID).Error; err != nil {
+		t.Fatalf("load asset: %v", err)
+	}
+	if gotAsset.ReferenceCount != 0 || gotAsset.Status != "pending_delete" {
+		t.Fatalf("expected asset repaired to pending_delete with ref=0, got status=%s ref=%d", gotAsset.Status, gotAsset.ReferenceCount)
+	}
+
+	var pendingJobs []models.AssetGCJob
+	if err := db.Where("asset_id = ? AND status = ?", asset.ID, "pending").Find(&pendingJobs).Error; err != nil {
+		t.Fatalf("load pending jobs: %v", err)
+	}
+	if len(pendingJobs) != 1 || pendingJobs[0].JobType != "delete" {
+		t.Fatalf("expected one pending delete job, got %+v", pendingJobs)
 	}
 }
