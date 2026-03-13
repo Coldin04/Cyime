@@ -348,6 +348,10 @@
 		if (!editor) return false;
 		return editor.can().chain().focus().redo().run();
 	}
+
+	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
+	const inactiveToggleClass =
+		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
 </script>
 
 <div class="flex h-full w-full flex-col">
@@ -396,11 +400,9 @@
 				type="button"
 				title={m.editor_toolbar_heading_1()}
 				aria-label={m.editor_toolbar_heading_1()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('heading', { level: 1 })}
-				class:text-white={isActive('heading', { level: 1 })}
-				class:dark:bg-zinc-100={isActive('heading', { level: 1 })}
-				class:dark:text-zinc-900={isActive('heading', { level: 1 })}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('heading', { level: 1 }) ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleHeading({ level: 1 }).run();
@@ -412,11 +414,9 @@
 				type="button"
 				title={m.editor_toolbar_heading_2()}
 				aria-label={m.editor_toolbar_heading_2()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('heading', { level: 2 })}
-				class:text-white={isActive('heading', { level: 2 })}
-				class:dark:bg-zinc-100={isActive('heading', { level: 2 })}
-				class:dark:text-zinc-900={isActive('heading', { level: 2 })}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('heading', { level: 2 }) ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleHeading({ level: 2 }).run();
@@ -441,11 +441,9 @@
 				type="button"
 				title={m.editor_toolbar_bold()}
 				aria-label={m.editor_toolbar_bold()}
-				class="rounded-md px-2 py-1 text-xs font-semibold leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('bold')}
-				class:text-white={isActive('bold')}
-				class:dark:bg-zinc-100={isActive('bold')}
-				class:dark:text-zinc-900={isActive('bold')}
+				class={`rounded-md px-2 py-1 text-xs font-semibold leading-none transition-colors ${
+					isActive('bold') ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleBold().run();
@@ -457,11 +455,9 @@
 				type="button"
 				title={m.editor_toolbar_italic()}
 				aria-label={m.editor_toolbar_italic()}
-				class="rounded-md px-2 py-1 text-xs italic leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('italic')}
-				class:text-white={isActive('italic')}
-				class:dark:bg-zinc-100={isActive('italic')}
-				class:dark:text-zinc-900={isActive('italic')}
+				class={`rounded-md px-2 py-1 text-xs italic leading-none transition-colors ${
+					isActive('italic') ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleItalic().run();
@@ -474,11 +470,9 @@
 				type="button"
 				title={m.editor_toolbar_bullet_list()}
 				aria-label={m.editor_toolbar_bullet_list()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('bulletList')}
-				class:text-white={isActive('bulletList')}
-				class:dark:bg-zinc-100={isActive('bulletList')}
-				class:dark:text-zinc-900={isActive('bulletList')}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('bulletList') ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleBulletList().run();
@@ -490,11 +484,9 @@
 				type="button"
 				title={m.editor_toolbar_numbered_list()}
 				aria-label={m.editor_toolbar_numbered_list()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				class:bg-zinc-900={isActive('orderedList')}
-				class:text-white={isActive('orderedList')}
-				class:dark:bg-zinc-100={isActive('orderedList')}
-				class:dark:text-zinc-900={isActive('orderedList')}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('orderedList') ? activeToggleClass : inactiveToggleClass
+				}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().toggleOrderedList().run();
