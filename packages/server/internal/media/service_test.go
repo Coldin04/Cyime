@@ -342,6 +342,7 @@ func TestListOwnedAssets_FiltersAndMarksDeletable(t *testing.T) {
 		Status: "pending_delete",
 		Query:  "clip",
 		Limit:  10,
+		Offset: 0,
 	})
 	if err != nil {
 		t.Fatalf("list assets: %v", err)
@@ -356,6 +357,9 @@ func TestListOwnedAssets_FiltersAndMarksDeletable(t *testing.T) {
 	}
 	if !item.Deletable || item.ReferenceCount != 0 {
 		t.Fatalf("expected pending_delete asset to be deletable with ref=0, got %+v", item)
+	}
+	if result.Total != 1 || result.HasMore {
+		t.Fatalf("expected total=1 and hasMore=false, got total=%d hasMore=%v", result.Total, result.HasMore)
 	}
 }
 
@@ -389,6 +393,7 @@ func TestListOwnedAssets_IncludesDeletedWhenRequested(t *testing.T) {
 		UserID: userID,
 		Status: "deleted",
 		Limit:  10,
+		Offset: 0,
 	})
 	if err != nil {
 		t.Fatalf("list deleted assets: %v", err)
@@ -398,5 +403,82 @@ func TestListOwnedAssets_IncludesDeletedWhenRequested(t *testing.T) {
 	}
 	if result.Items[0].Deletable {
 		t.Fatalf("deleted asset should not be deletable again")
+	}
+}
+
+func TestListOwnedAssets_PaginatesLikeWorkspaceList(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+
+	assets := []models.Asset{
+		{
+			ID:              uuid.New(),
+			OwnerUserID:     userID,
+			Kind:            "image",
+			Filename:        "a.png",
+			FileHash:        "hash-a-page",
+			FileSize:        1,
+			MimeType:        "image/png",
+			StorageProvider: "local",
+			ObjectKey:       "owner/a.png",
+			URL:             "http://example.test/a.png",
+			Visibility:      "private",
+			Status:          "ready",
+			CreatedBy:       userID,
+		},
+		{
+			ID:              uuid.New(),
+			OwnerUserID:     userID,
+			Kind:            "image",
+			Filename:        "b.png",
+			FileHash:        "hash-b-page",
+			FileSize:        1,
+			MimeType:        "image/png",
+			StorageProvider: "local",
+			ObjectKey:       "owner/b.png",
+			URL:             "http://example.test/b.png",
+			Visibility:      "private",
+			Status:          "ready",
+			CreatedBy:       userID,
+		},
+		{
+			ID:              uuid.New(),
+			OwnerUserID:     userID,
+			Kind:            "image",
+			Filename:        "c.png",
+			FileHash:        "hash-c-page",
+			FileSize:        1,
+			MimeType:        "image/png",
+			StorageProvider: "local",
+			ObjectKey:       "owner/c.png",
+			URL:             "http://example.test/c.png",
+			Visibility:      "private",
+			Status:          "ready",
+			CreatedBy:       userID,
+		},
+	}
+	for _, asset := range assets {
+		if err := db.Create(&asset).Error; err != nil {
+			t.Fatalf("create asset %s: %v", asset.Filename, err)
+		}
+	}
+
+	result, err := ListOwnedAssets(ListAssetsRequest{
+		UserID: userID,
+		Limit:  2,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("list assets with pagination: %v", err)
+	}
+
+	if len(result.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(result.Items))
+	}
+	if result.Total != 3 {
+		t.Fatalf("expected total=3, got %d", result.Total)
+	}
+	if result.HasMore {
+		t.Fatalf("expected hasMore=false at offset 1 limit 2, got true")
 	}
 }

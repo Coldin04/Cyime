@@ -44,7 +44,9 @@ type AssetReferencesResponse struct {
 }
 
 type AssetListResponse struct {
-	Items []AssetListItem `json:"items"`
+	Items   []AssetListItem `json:"items"`
+	HasMore bool            `json:"hasMore"`
+	Total   int64           `json:"total"`
 }
 
 func GetAssetURLHandler(c *fiber.Ctx) error {
@@ -126,6 +128,7 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 		Status: c.Query("status"),
 		Query:  c.Query("q"),
 		Limit:  c.QueryInt("limit", 20),
+		Offset: c.QueryInt("offset", 0),
 	})
 	if err != nil {
 		switch err.Error() {
@@ -143,7 +146,9 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(AssetListResponse{
-		Items: result.Items,
+		Items:   result.Items,
+		HasMore: result.HasMore,
+		Total:   result.Total,
 	})
 }
 

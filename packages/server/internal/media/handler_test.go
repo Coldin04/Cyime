@@ -102,6 +102,9 @@ func TestListAssetsHandler_ReturnsOwnedFilteredAssets(t *testing.T) {
 	if len(payload.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(payload.Items))
 	}
+	if payload.Total != 1 || payload.HasMore {
+		t.Fatalf("expected total=1 and hasMore=false, got total=%d hasMore=%v", payload.Total, payload.HasMore)
+	}
 	item := payload.Items[0]
 	if item.ID != ownedAsset.ID || item.Filename != "poster.png" {
 		t.Fatalf("unexpected item: %+v", item)

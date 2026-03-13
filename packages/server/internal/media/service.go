@@ -50,6 +50,7 @@ type ListAssetsRequest struct {
 	Status string
 	Query  string
 	Limit  int
+	Offset int
 }
 
 type AssetListItem struct {
@@ -68,7 +69,9 @@ type AssetListItem struct {
 }
 
 type ListAssetsResult struct {
-	Items []AssetListItem `json:"items"`
+	Items   []AssetListItem `json:"items"`
+	HasMore bool            `json:"hasMore"`
+	Total   int64           `json:"total"`
 }
 
 var storageProvider StorageProvider
@@ -124,6 +127,10 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 	if limit > 100 {
 		limit = 100
 	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
 
 	query := database.DB.Model(&models.Asset{}).
 		Where("owner_user_id = ?", req.UserID)
@@ -155,10 +162,16 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 		query = query.Where("filename LIKE ?", like)
 	}
 
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
 	var assets []models.Asset
 	if err := query.
 		Order("created_at desc").
 		Limit(limit).
+		Offset(offset).
 		Find(&assets).Error; err != nil {
 		return nil, err
 	}
@@ -181,7 +194,11 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 		})
 	}
 
-	return &ListAssetsResult{Items: items}, nil
+	return &ListAssetsResult{
+		Items:   items,
+		HasMore: int64(offset+len(items)) < total,
+		Total:   total,
+	}, nil
 }
 
 func GetAssetByID(assetID uuid.UUID) (*models.Asset, error) {
