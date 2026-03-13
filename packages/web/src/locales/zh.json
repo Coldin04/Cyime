@@ -142,5 +142,21 @@
   "page_title_auth_callback": "跳转中... - 青柠写",
   "page_title_workspace": "工作台 - 青柠写",
   "page_title_trash": "回收站 - 青柠写",
-  "page_title_edit_document": "正在编辑：{title} - 青柠写"
+  "page_title_edit_document": "正在编辑：{title} - 青柠写",
+  "user_nav_overview": "概览",
+  "user_nav_profile": "个人资料",
+  "user_nav_security": "安全",
+  "user_nav_media_library": "媒体库",
+  "user_center_title": "个人中心",
+  "user_center_description": "你可以通过左侧导航进入个人资料、安全和媒体库设置。",
+  "user_profile_title": "个人资料",
+  "user_profile_description": "个人资料骨架已就绪。下一步可接入昵称编辑和头像上传。",
+  "user_security_title": "安全",
+  "user_security_description": "安全模块骨架已就绪。下一步可接入会话列表与账号绑定。",
+  "user_media_title": "媒体库",
+  "user_media_description": "媒体库骨架已就绪。下一步可接入分页列表和引用查询 API。",
+  "page_title_user_center": "个人中心 - 青柠写",
+  "page_title_user_profile": "个人资料 - 个人中心 - 青柠写",
+  "page_title_user_security": "安全 - 个人中心 - 青柠写",
+  "page_title_user_media": "媒体库 - 个人中心 - 青柠写"
 }

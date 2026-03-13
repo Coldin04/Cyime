@@ -143,5 +143,21 @@
   "page_title_auth_callback": "Redirecting... - CyimeWrite",
   "page_title_workspace": "Workspace - CyimeWrite",
   "page_title_trash": "Trash - CyimeWrite",
-  "page_title_edit_document": "Editing: {title} - CyimeWrite"
+  "page_title_edit_document": "Editing: {title} - CyimeWrite",
+  "user_nav_overview": "Overview",
+  "user_nav_profile": "Profile",
+  "user_nav_security": "Security",
+  "user_nav_media_library": "Media Library",
+  "user_center_title": "User Center",
+  "user_center_description": "Use the left sidebar to enter profile, security, and media settings.",
+  "user_profile_title": "Profile",
+  "user_profile_description": "Profile settings skeleton is ready. Next step can wire editable display name and avatar upload.",
+  "user_security_title": "Security",
+  "user_security_description": "Security section skeleton is ready. Next step can include session list and provider bindings.",
+  "user_media_title": "Media Library",
+  "user_media_description": "Media library skeleton is ready. Next step can connect list pagination and reference lookup APIs.",
+  "page_title_user_center": "User Center - CyimeWrite",
+  "page_title_user_profile": "Profile - User Center - CyimeWrite",
+  "page_title_user_security": "Security - User Center - CyimeWrite",
+  "page_title_user_media": "Media Library - User Center - CyimeWrite"
 }
