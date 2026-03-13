@@ -102,78 +102,138 @@ func (f *Folder) BeforeCreate(tx *gorm.DB) (err error) {
 // Folder represents a folder in the workspace
 type Folder struct {
 	ID          uuid.UUID  `gorm:"type:uuid;primary_key"`
-	UserID      uuid.UUID  `gorm:"not null;index:idx_user_parent"`
-	ParentID    *uuid.UUID `gorm:"index:idx_user_parent"`
+	OwnerUserID uuid.UUID  `gorm:"not null;index:idx_owner_parent"`
+	ParentID    *uuid.UUID `gorm:"index:idx_owner_parent"`
 	Name        string     `gorm:"type:varchar(255);not null"`
 	Description *string    `gorm:"type:text"`
 	CreatedBy   uuid.UUID  `gorm:"not null"`
+	UpdatedBy   uuid.UUID  `gorm:"not null"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
-func (m *Markdown) BeforeCreate(tx *gorm.DB) (err error) {
-	if m.ID == uuid.Nil {
-		m.ID = uuid.New()
+func (d *Document) BeforeCreate(tx *gorm.DB) (err error) {
+	if d.ID == uuid.Nil {
+		d.ID = uuid.New()
 	}
 	return
 }
 
-// Markdown represents a markdown document in the workspace (metadata only)
-type Markdown struct {
-	ID        uuid.UUID  `gorm:"type:uuid;primary_key"`
-	UserID    uuid.UUID  `gorm:"not null;index:idx_user_folder"`
-	FolderID  *uuid.UUID `gorm:"index:idx_user_folder"`
-	Title     string     `gorm:"type:varchar(255);not null"`
-	Excerpt   string     `gorm:"type:text"` // 纯文本摘要（前 100 字）
-	CreatedBy uuid.UUID  `gorm:"not null"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+// Document represents an editable workspace document (metadata only).
+type Document struct {
+	ID           uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID  uuid.UUID  `gorm:"not null;index:idx_owner_folder"`
+	FolderID     *uuid.UUID `gorm:"index:idx_owner_folder"`
+	Title        string     `gorm:"type:varchar(255);not null"`
+	Excerpt      string     `gorm:"type:text"`
+	DocumentType string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
+	EditorType   string     `gorm:"type:varchar(50);not null;default:'tiptap'"`
+	CreatedBy    uuid.UUID  `gorm:"not null"`
+	UpdatedBy    uuid.UUID  `gorm:"not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
-func (mc *MarkdownContent) BeforeCreate(tx *gorm.DB) (err error) {
-	if mc.ID == uuid.Nil {
-		mc.ID = uuid.New()
+func (dbd *DocumentBody) BeforeCreate(tx *gorm.DB) (err error) {
+	if dbd.ID == uuid.Nil {
+		dbd.ID = uuid.New()
 	}
 	return
 }
 
-// MarkdownContent represents the content of a markdown document (supports version history)
-type MarkdownContent struct {
-	ID         uuid.UUID      `gorm:"type:uuid;primary_key"`                         // 独立 UUID
-	MarkdownID uuid.UUID      `gorm:"type:uuid;not null;index:idx_markdown_version"` // 关联文档 ID
-	Version    int            `gorm:"not null;default:1;index:idx_markdown_version"` // 版本号
-	Content    string         `gorm:"type:longtext"`                                 // 完整 Markdown 内容
-	CreatedAt  time.Time      `gorm:"autoCreateTime"`                                // 版本创建时间
-	DeletedAt  gorm.DeletedAt `gorm:"index"`                                         // 软删除，便于回收站恢复正文
+// DocumentBody stores current canonical editor content for a document.
+type DocumentBody struct {
+	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
+	ContentJSON    string         `gorm:"type:text;not null"`
+	PlainText      string         `gorm:"type:text;not null;default:''"`
+	ContentVersion int64          `gorm:"not null;default:1"`
+	YjsState       string         `gorm:"type:text"`
+	YjsStateVector string         `gorm:"type:text"`
+	UpdatedBy      uuid.UUID      `gorm:"not null"`
+	CreatedAt      time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
-func (a *Attachment) BeforeCreate(tx *gorm.DB) (err error) {
+func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
 	}
 	return
 }
 
-// Attachment represents an attachment (image, file) uploaded by a user
-type Attachment struct {
-	ID             uuid.UUID  `gorm:"type:uuid;primary_key"`
-	UserID         uuid.UUID  `gorm:"not null;index:idx_user_markdown"`
-	MarkdownID     *uuid.UUID `gorm:"type:uuid;index:idx_user_markdown"` // 所属文档（NULL=未关联）
-	Filename       string     `gorm:"type:varchar(255);not null"`        // 原始文件名
-	FileHash       string     `gorm:"type:varchar(64);not null;index"`   // SHA256 Hash（去重用）
-	FileSize       int64      `gorm:"not null"`                          // 文件大小 (bytes)
-	MimeType       string     `gorm:"type:varchar(100);not null"`        // MIME 类型
-	R2Key          string     `gorm:"type:varchar(255);not null;unique"` // R2 对象键
-	R2URL          string     `gorm:"type:text;not null"`                // R2 公开访问 URL
-	ReferenceCount int        `gorm:"not null;default:1;index"`          // 引用计数（去重用）
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      gorm.DeletedAt `gorm:"index"` // 软删除，用于垃圾回收
+// Asset represents a stored binary resource such as an image, video, or file.
+type Asset struct {
+	ID              uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID     uuid.UUID  `gorm:"not null;index:idx_owner_document"`
+	DocumentID      *uuid.UUID `gorm:"type:uuid;index:idx_owner_document"`
+	Kind            string     `gorm:"type:varchar(20);not null;default:'image'"`
+	Filename        string     `gorm:"type:varchar(255);not null"`
+	FileHash        string     `gorm:"type:varchar(64);not null;index"`
+	FileSize        int64      `gorm:"not null"`
+	MimeType        string     `gorm:"type:varchar(100);not null"`
+	StorageProvider string     `gorm:"type:varchar(50);not null;default:'r2'"`
+	Bucket          string     `gorm:"type:varchar(255)"`
+	ObjectKey       string     `gorm:"type:varchar(255);not null;unique"`
+	URL             string     `gorm:"type:text;not null"`
+	Visibility      string     `gorm:"type:varchar(20);not null;default:'private'"`
+	AltText         *string    `gorm:"type:text"`
+	Width           *int       `gorm:"type:int"`
+	Height          *int       `gorm:"type:int"`
+	Status          string     `gorm:"type:varchar(20);not null;default:'ready'"`
+	ReferenceCount  int        `gorm:"not null;default:0;index"`
+	CreatedBy       uuid.UUID  `gorm:"not null"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (r *DocumentAssetRef) BeforeCreate(tx *gorm.DB) (err error) {
+	if r.ID == uuid.Nil {
+		r.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentAssetRef is the source of truth for whether a document references an asset.
+type DocumentAssetRef struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID  uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref"`
+	AssetID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref;index"`
+	OwnerUserID uuid.UUID      `gorm:"type:uuid;not null;index:idx_owner_document_asset_ref"`
+	RefType     string         `gorm:"type:varchar(50);not null;default:'editor_content';uniqueIndex:idx_document_asset_ref"`
+	CreatedAt   time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (j *AssetGCJob) BeforeCreate(tx *gorm.DB) (err error) {
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	return
+}
+
+// AssetGCJob stores delayed cleanup work for unused assets.
+type AssetGCJob struct {
+	ID           uuid.UUID      `gorm:"type:uuid;primary_key"`
+	AssetID      uuid.UUID      `gorm:"type:uuid;not null;index"`
+	JobType      string         `gorm:"type:varchar(20);not null;index"`
+	Status       string         `gorm:"type:varchar(20);not null;default:'pending';index"`
+	RunAfter     time.Time      `gorm:"not null;index"`
+	AttemptCount int            `gorm:"not null;default:0"`
+	LastError    *string        `gorm:"type:text"`
+	CreatedAt    time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // Set GORM table names to use snake_case
@@ -197,14 +257,22 @@ func (Folder) TableName() string {
 	return "folders"
 }
 
-func (Markdown) TableName() string {
-	return "markdowns"
+func (Document) TableName() string {
+	return "documents"
 }
 
-func (MarkdownContent) TableName() string {
-	return "markdown_contents"
+func (DocumentBody) TableName() string {
+	return "document_bodies"
 }
 
-func (Attachment) TableName() string {
-	return "attachments"
+func (Asset) TableName() string {
+	return "assets"
+}
+
+func (DocumentAssetRef) TableName() string {
+	return "document_asset_refs"
+}
+
+func (AssetGCJob) TableName() string {
+	return "asset_gc_jobs"
 }

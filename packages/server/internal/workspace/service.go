@@ -27,7 +27,7 @@ var ReservedFolderNames = []string{
 	".deleted",
 }
 
-// GetFiles retrieves a list of files (folders and markdowns) for a given user and parent folder
+// GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
 	// Default values
 	if limit <= 0 {
@@ -70,7 +70,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 	// Build the query based on filter type
 	if filterType == "folders" {
 		// Only folders
-		query := database.DB.Model(&models.Folder{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+		query := database.DB.Model(&models.Folder{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
 		if parentID != nil {
 			query = query.Where("parent_id = ?", parentID)
 		}
@@ -86,9 +86,9 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 			items = append(items, folderToFileItem(f))
 		}
 
-	} else if filterType == "markdowns" {
-		// Only markdowns
-		query := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	} else if filterType == "documents" {
+		// Only documents
+		query := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
 		if parentID != nil {
 			query = query.Where("folder_id = ?", parentID)
 		} else {
@@ -97,21 +97,21 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 
 		query.Count(&total)
 
-		var markdowns []models.Markdown
-		if err := query.Select("id", "user_id", "folder_id", "title", "excerpt", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&markdowns).Error; err != nil {
+		var documents []models.Document
+		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "document_type", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
 			return nil, err
 		}
 
-		for _, m := range markdowns {
-			items = append(items, markdownToFileItem(m))
+		for _, m := range documents {
+			items = append(items, documentToFileItem(m))
 		}
 
 	} else {
-		// UNION ALL for both folders and markdowns
+		// UNION ALL for both folders and documents
 		// Count total for both types
-		var folderCount, markdownCount int64
+		var folderCount, documentCount int64
 
-		folderQuery := database.DB.Model(&models.Folder{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+		folderQuery := database.DB.Model(&models.Folder{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
 		if parentID != nil {
 			folderQuery = folderQuery.Where("parent_id = ?", parentID)
 		} else {
@@ -119,15 +119,15 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		}
 		folderQuery.Count(&folderCount)
 
-		markdownQuery := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+		documentQuery := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
 		if parentID != nil {
-			markdownQuery = markdownQuery.Where("folder_id = ?", parentID)
+			documentQuery = documentQuery.Where("folder_id = ?", parentID)
 		} else {
-			markdownQuery = markdownQuery.Where("folder_id IS NULL")
+			documentQuery = documentQuery.Where("folder_id IS NULL")
 		}
-		markdownQuery.Count(&markdownCount)
+		documentQuery.Count(&documentCount)
 
-		total = folderCount + markdownCount
+		total = folderCount + documentCount
 
 		// Fetch folders
 		var folders []models.Folder
@@ -137,14 +137,14 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 			items = append(items, folderToFileItem(f))
 		}
 
-		// Fetch markdowns (adjust limit to account for already fetched folders)
+		// Fetch documents (adjust limit to account for already fetched folders)
 		remainingLimit := limit - len(folders)
 		if remainingLimit > 0 {
-			var markdowns []models.Markdown
-			markdownQuery.Order(sortBy + " " + order).Limit(remainingLimit).Offset(max(0, offset-len(folders))).Find(&markdowns)
+			var documents []models.Document
+			documentQuery.Order(sortBy + " " + order).Limit(remainingLimit).Offset(max(0, offset-len(folders))).Find(&documents)
 
-			for _, m := range markdowns {
-				items = append(items, markdownToFileItem(m))
+			for _, m := range documents {
+				items = append(items, documentToFileItem(m))
 			}
 		}
 	}
@@ -179,7 +179,7 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 	// Validate parent folder exists if provided
 	if parentID != nil {
 		var parent models.Folder
-		result := database.DB.Where("id = ? AND user_id = ?", parentID, userID).First(&parent)
+		result := database.DB.Where("id = ? AND owner_user_id = ?", parentID, userID).First(&parent)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("父文件夹不存在")
@@ -189,14 +189,14 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 
 		// Validate no duplicate name in same parent
 		var existing models.Folder
-		result = database.DB.Where("user_id = ? AND parent_id = ? AND name = ? AND deleted_at IS NULL", userID, parentID, name).First(&existing)
+		result = database.DB.Where("owner_user_id = ? AND parent_id = ? AND name = ? AND deleted_at IS NULL", userID, parentID, name).First(&existing)
 		if result.Error == nil {
 			return nil, errors.New("同名文件夹已存在")
 		}
 	} else {
 		// Validate no duplicate name in root
 		var existing models.Folder
-		result := database.DB.Where("user_id = ? AND parent_id IS NULL AND name = ? AND deleted_at IS NULL", userID, name).First(&existing)
+		result := database.DB.Where("owner_user_id = ? AND parent_id IS NULL AND name = ? AND deleted_at IS NULL", userID, name).First(&existing)
 		if result.Error == nil {
 			return nil, errors.New("同名文件夹已存在")
 		}
@@ -205,11 +205,12 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 	// Create the folder
 	folder := &models.Folder{
 		ID:          uuid.New(),
-		UserID:      userID,
+		OwnerUserID: userID,
 		ParentID:    parentID,
 		Name:        name,
 		Description: description,
 		CreatedBy:   userID,
+		UpdatedBy:   userID,
 	}
 
 	if err := database.DB.Create(folder).Error; err != nil {
@@ -219,8 +220,15 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 	return folder, nil
 }
 
-// CreateMarkdown creates a new markdown document with unique title handling
-func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID *uuid.UUID) (*models.Markdown, error) {
+// CreateDocument creates a new document with unique title handling.
+func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
+	if documentType == "" {
+		documentType = "rich_text"
+	}
+	if documentType != "rich_text" && documentType != "table" {
+		return nil, errors.New("不支持的文档类型")
+	}
+
 	// Validate title length
 	if len(title) > 255 {
 		return nil, errors.New("文档标题不能超过 255 个字符")
@@ -229,7 +237,7 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 	// Validate folder exists if provided
 	if folderID != nil {
 		var folder models.Folder
-		result := database.DB.Where("id = ? AND user_id = ?", folderID, userID).First(&folder)
+		result := database.DB.Where("id = ? AND owner_user_id = ?", folderID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("文件夹不存在")
@@ -245,7 +253,7 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 		baseTitleWithDate := "未命名文档" + datePrefix
 
 		var count int64
-		query := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND title LIKE ? AND deleted_at IS NULL", userID, baseTitleWithDate+"-%")
+		query := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND title LIKE ? AND deleted_at IS NULL", userID, baseTitleWithDate+"-%")
 		if folderID != nil {
 			query = query.Where("folder_id = ?", folderID)
 		} else {
@@ -256,8 +264,8 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 		newTitle = fmt.Sprintf("%s-%02d", baseTitleWithDate, count+1)
 	} else {
 		// For custom titles, check for duplicates in the same folder
-		var existing models.Markdown
-		query := database.DB.Model(&models.Markdown{}).Where("user_id = ? AND title = ? AND deleted_at IS NULL", userID, newTitle)
+		var existing models.Document
+		query := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND title = ? AND deleted_at IS NULL", userID, newTitle)
 		if folderID != nil {
 			query = query.Where("folder_id = ?", folderID)
 		} else {
@@ -274,28 +282,30 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 		}
 	}
 
-	// Generate excerpt from content
-	excerpt := generateExcerpt(contentStr)
+	// Generate excerpt from canonical editor JSON.
+	excerpt := content.BuildExcerptFromContentJSON(contentJSON)
 
-	// Create the markdown in a transaction
-	var markdown *models.Markdown
+	// Create the document in a transaction
+	var document *models.Document
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// Create markdown metadata
-		markdown = &models.Markdown{
-			ID:        uuid.New(),
-			UserID:    userID,
-			FolderID:  folderID,
-			Title:     newTitle,
-			Excerpt:   excerpt,
-			CreatedBy: userID,
+		// Create document metadata
+		document = &models.Document{
+			ID:           uuid.New(),
+			OwnerUserID:  userID,
+			FolderID:     folderID,
+			Title:        newTitle,
+			Excerpt:      excerpt,
+			DocumentType: documentType,
+			EditorType:   "tiptap",
+			CreatedBy:    userID,
+			UpdatedBy:    userID,
 		}
 
-		if err := tx.Create(markdown).Error; err != nil {
+		if err := tx.Create(document).Error; err != nil {
 			return err
 		}
 
-		// Create initial content (version 1)
-		if err := content.CreateInitialContent(tx, markdown.ID, contentStr); err != nil {
+		if err := content.CreateInitialContent(tx, document.ID, userID, contentJSON); err != nil {
 			return err
 		}
 
@@ -306,10 +316,10 @@ func CreateMarkdown(userID uuid.UUID, title string, contentStr string, folderID 
 		return nil, err
 	}
 
-	return markdown, nil
+	return document, nil
 }
 
-// BatchDeleteFiles soft deletes multiple files (folders and markdowns) in a single transaction
+// BatchDeleteFiles soft deletes multiple files (folders and documents) in a single transaction
 func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDeleteResponse, error) {
 	var successCount int
 	var failedItems []FailedItem
@@ -326,9 +336,9 @@ func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDel
 					continue
 				}
 				successCount++
-			} else if item.Type == "markdown" {
+			} else if item.Type == "document" {
 				// Delete content first
-				if err := content.DeleteContentByMarkdownID(tx, userID, item.ID); err != nil {
+				if err := content.DeleteContentByDocumentID(tx, userID, item.ID); err != nil {
 					failedItems = append(failedItems, FailedItem{
 						ID:     item.ID,
 						Type:   item.Type,
@@ -337,8 +347,8 @@ func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDel
 					continue
 				}
 
-				// Soft delete markdown metadata
-				result := tx.Where("id = ? AND user_id = ?", item.ID, userID).Delete(&models.Markdown{})
+				// Soft delete document metadata
+				result := tx.Where("id = ? AND owner_user_id = ?", item.ID, userID).Delete(&models.Document{})
 				if result.Error != nil {
 					failedItems = append(failedItems, FailedItem{
 						ID:     item.ID,
@@ -389,23 +399,23 @@ func buildBatchDeleteMessage(successCount, failedCount int) string {
 	return fmt.Sprintf("已成功删除 %d 个项目，%d 个失败", successCount, failedCount)
 }
 
-// DeleteFile soft deletes a file (folder or markdown)
+// DeleteFile soft deletes a file (folder or document)
 func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 	if fileType == "folder" {
 		// Start a single transaction for the entire recursive operation
 		return database.DB.Transaction(func(tx *gorm.DB) error {
 			return deleteFolderRecursive(tx, userID, fileID)
 		})
-	} else if fileType == "markdown" {
-		// Start a transaction to delete markdown and its content
+	} else if fileType == "document" {
+		// Start a transaction to delete document and its content
 		return database.DB.Transaction(func(tx *gorm.DB) error {
 			// Delete content first
-			if err := content.DeleteContentByMarkdownID(tx, userID, fileID); err != nil {
+			if err := content.DeleteContentByDocumentID(tx, userID, fileID); err != nil {
 				return err
 			}
 
-			// Soft delete markdown metadata
-			result := tx.Where("id = ? AND user_id = ?", fileID, userID).Delete(&models.Markdown{})
+			// Soft delete document metadata
+			result := tx.Where("id = ? AND owner_user_id = ?", fileID, userID).Delete(&models.Document{})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -423,7 +433,7 @@ func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 func deleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) error {
 	// Find all child folders within the transaction
 	var childFolders []models.Folder
-	if err := tx.Where("parent_id = ? AND user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
+	if err := tx.Where("parent_id = ? AND owner_user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
 		return err
 	}
 
@@ -434,26 +444,26 @@ func deleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) er
 		}
 	}
 
-	// Find all markdowns in this folder
-	var markdowns []models.Markdown
-	if err := tx.Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
+	// Find all documents in this folder
+	var documents []models.Document
+	if err := tx.Where("folder_id = ? AND owner_user_id = ?", folderID, userID).Find(&documents).Error; err != nil {
 		return err
 	}
 
-	// Delete content for each markdown, then soft delete the markdown
-	for _, md := range markdowns {
+	// Delete content for each document, then soft delete the document
+	for _, md := range documents {
 		// Delete content
-		if err := content.DeleteContentByMarkdownID(tx, userID, md.ID); err != nil {
+		if err := content.DeleteContentByDocumentID(tx, userID, md.ID); err != nil {
 			return err
 		}
-		// Soft delete markdown metadata
-		if err := tx.Where("id = ?", md.ID).Delete(&models.Markdown{}).Error; err != nil {
+		// Soft delete document metadata
+		if err := tx.Where("id = ?", md.ID).Delete(&models.Document{}).Error; err != nil {
 			return err
 		}
 	}
 
 	// Soft delete the folder itself within the transaction
-	result := tx.Where("id = ? AND user_id = ?", folderID, userID).Delete(&models.Folder{})
+	result := tx.Where("id = ? AND owner_user_id = ?", folderID, userID).Delete(&models.Folder{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -481,33 +491,34 @@ func folderToFileItem(folder models.Folder) FileItem {
 	}
 }
 
-// markdownToFileItem converts a Markdown model to FileItem DTO
-func markdownToFileItem(markdown models.Markdown) FileItem {
+// documentToFileItem converts a Document model to FileItem DTO
+func documentToFileItem(document models.Document) FileItem {
 	return FileItem{
-		ID:        markdown.ID,
-		Type:      "markdown",
-		Name:      markdown.Title,
-		Title:     &markdown.Title,
-		Excerpt:   &markdown.Excerpt,
-		FolderID:  markdown.FolderID,
-		CreatedAt: markdown.CreatedAt,
-		UpdatedAt: markdown.UpdatedAt,
+		ID:           document.ID,
+		Type:         "document",
+		DocumentType: &document.DocumentType,
+		Name:         document.Title,
+		Title:        &document.Title,
+		Excerpt:      &document.Excerpt,
+		FolderID:     document.FolderID,
+		CreatedAt:    document.CreatedAt,
+		UpdatedAt:    document.UpdatedAt,
 		Creator: CreatorInfo{
-			ID:          markdown.CreatedBy,
+			ID:          document.CreatedBy,
 			DisplayName: nil,
 		},
 	}
 }
 
-// generateExcerpt generates a plain text excerpt from markdown content
+// generateExcerpt generates a plain text excerpt from document content
 func generateExcerpt(content string) string {
 	// Simple excerpt generation: take first 100 characters of plain text
-	// In a real implementation, you might want to strip markdown syntax
+	// In a real implementation, you might want to strip document syntax
 	if len(content) == 0 {
 		return ""
 	}
 
-	// Remove markdown syntax (basic stripping)
+	// Remove document syntax (basic stripping)
 	plainText := content
 	// Remove headers
 	plainText = strings.ReplaceAll(plainText, "# ", "")
@@ -528,11 +539,11 @@ func generateExcerpt(content string) string {
 	return plainText
 }
 
-// GetFile retrieves a single file (folder or markdown) by ID
+// GetFile retrieves a single file (folder or document) by ID
 func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, error) {
 	if fileType == "folder" {
 		var folder models.Folder
-		result := database.DB.Where("id = ? AND user_id = ?", fileID, userID).First(&folder)
+		result := database.DB.Where("id = ? AND owner_user_id = ?", fileID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("文件不存在")
@@ -542,9 +553,9 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 
 		item := folderToFileItem(folder)
 		return &item, nil
-	} else if fileType == "markdown" {
-		var markdown models.Markdown
-		result := database.DB.Where("id = ? AND user_id = ?", fileID, userID).First(&markdown)
+	} else if fileType == "document" {
+		var document models.Document
+		result := database.DB.Where("id = ? AND owner_user_id = ?", fileID, userID).First(&document)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("文件不存在")
@@ -552,15 +563,15 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 			return nil, result.Error
 		}
 
-		item := markdownToFileItem(markdown)
+		item := documentToFileItem(document)
 		return &item, nil
 	}
 
 	return nil, errors.New("无效的文件类型")
 }
 
-// UpdateMarkdownTitle updates the title of a markdown document
-func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) error {
+// UpdateDocumentTitle updates the title of a document.
+func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) error {
 	trimmedTitle := strings.TrimSpace(title)
 
 	// Validate title length
@@ -571,9 +582,9 @@ func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) e
 		return errors.New("文档标题不能超过 255 个字符")
 	}
 
-	// Verify the markdown exists and belongs to the user
-	var markdown models.Markdown
-	result := database.DB.Where("id = ? AND user_id = ?", markdownID, userID).First(&markdown)
+	// Verify the document exists and belongs to the user
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return errors.New("文档不存在")
@@ -582,16 +593,16 @@ func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) e
 	}
 
 	// Same title is treated as a no-op.
-	if markdown.Title == trimmedTitle {
+	if document.Title == trimmedTitle {
 		return nil
 	}
 
 	// Check duplicate title in the same folder.
 	var conflictCount int64
-	query := database.DB.Model(&models.Markdown{}).
-		Where("user_id = ? AND id <> ? AND title = ? AND deleted_at IS NULL", userID, markdownID, trimmedTitle)
-	if markdown.FolderID != nil {
-		query = query.Where("folder_id = ?", markdown.FolderID)
+	query := database.DB.Model(&models.Document{}).
+		Where("owner_user_id = ? AND id <> ? AND title = ? AND deleted_at IS NULL", userID, documentID, trimmedTitle)
+	if document.FolderID != nil {
+		query = query.Where("folder_id = ?", document.FolderID)
 	} else {
 		query = query.Where("folder_id IS NULL")
 	}
@@ -603,7 +614,7 @@ func UpdateMarkdownTitle(userID uuid.UUID, markdownID uuid.UUID, title string) e
 	}
 
 	// Update the title
-	return database.DB.Model(&markdown).Update("title", trimmedTitle).Error
+	return database.DB.Model(&document).Update("title", trimmedTitle).Error
 }
 
 // UpdateFolderName updates the name of a folder
@@ -627,7 +638,7 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 
 	// Verify the folder exists and belongs to the user
 	var folder models.Folder
-	result := database.DB.Where("id = ? AND user_id = ?", folderID, userID).First(&folder)
+	result := database.DB.Where("id = ? AND owner_user_id = ?", folderID, userID).First(&folder)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return errors.New("文件夹不存在")
@@ -642,7 +653,7 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 
 	var conflictCount int64
 	query := database.DB.Model(&models.Folder{}).
-		Where("user_id = ? AND id <> ? AND name = ? AND deleted_at IS NULL", userID, folderID, trimmedName)
+		Where("owner_user_id = ? AND id <> ? AND name = ? AND deleted_at IS NULL", userID, folderID, trimmedName)
 	if folder.ParentID != nil {
 		query = query.Where("parent_id = ?", folder.ParentID)
 	} else {
@@ -659,11 +670,11 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 	return database.DB.Model(&folder).Update("name", trimmedName).Error
 }
 
-// MoveMarkdown moves a markdown document to a different folder (or root)
-func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (*time.Time, error) {
-	// 1. Verify the markdown exists, belongs to the user, and is not deleted
-	var markdown models.Markdown
-	result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", markdownID, userID).First(&markdown)
+// MoveDocument moves a document to a different folder (or root).
+func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (*time.Time, error) {
+	// 1. Verify the document exists, belongs to the user, and is not deleted
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, userID).First(&document)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("文档不存在或已被删除")
@@ -674,7 +685,7 @@ func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (
 	// 2. Validate target folder if provided
 	if folderID != nil {
 		var folder models.Folder
-		result = database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
+		result = database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("目标文件夹不存在或已被删除")
@@ -685,7 +696,7 @@ func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (
 
 	// 3. Check for naming conflict in the destination
 	var conflictCount int64
-	query := database.DB.Model(&models.Markdown{}).Where("title = ? AND user_id = ? AND deleted_at IS NULL", markdown.Title, userID)
+	query := database.DB.Model(&models.Document{}).Where("title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.Title, userID)
 	if folderID != nil {
 		query = query.Where("folder_id = ?", folderID)
 	} else {
@@ -700,14 +711,14 @@ func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (
 	var updatedAt time.Time
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// Update folder_id
-		if err := tx.Model(&markdown).Update("folder_id", folderID).Error; err != nil {
+		if err := tx.Model(&document).Update("folder_id", folderID).Error; err != nil {
 			return err
 		}
 
 		// Update updated_at timestamp
 		now := time.Now()
 		updatedAt = now
-		return tx.Model(&markdown).Update("updated_at", now).Error
+		return tx.Model(&document).Update("updated_at", now).Error
 	})
 
 	if err != nil {
@@ -721,7 +732,7 @@ func MoveMarkdown(userID uuid.UUID, markdownID uuid.UUID, folderID *uuid.UUID) (
 func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*time.Time, error) {
 	// 1. Verify the folder exists, belongs to the user, and is not deleted
 	var folder models.Folder
-	result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
+	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("文件夹不存在或已被删除")
@@ -738,7 +749,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 	if parentID != nil {
 		// Check if parent folder exists and belongs to user
 		var parentFolder models.Folder
-		result = database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", parentID, userID).First(&parentFolder)
+		result = database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", parentID, userID).First(&parentFolder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("目标父文件夹不存在或已被删除")
@@ -754,7 +765,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 
 	// 5. Check for naming conflict in the destination
 	var conflictCount int64
-	query := database.DB.Model(&models.Folder{}).Where("name = ? AND user_id = ? AND deleted_at IS NULL", folder.Name, userID)
+	query := database.DB.Model(&models.Folder{}).Where("name = ? AND owner_user_id = ? AND deleted_at IS NULL", folder.Name, userID)
 	if parentID != nil {
 		query = query.Where("parent_id = ?", parentID)
 	} else {
@@ -799,7 +810,7 @@ func checkCircularDependency(db *gorm.DB, userID uuid.UUID, sourceFolderID, targ
 
 		// Get the parent folder
 		var parent models.Folder
-		result := db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", currentID, userID).First(&parent)
+		result := db.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", currentID, userID).First(&parent)
 		if result.Error != nil {
 			// If parent doesn't exist, we've reached an invalid state, but not a cycle
 			break
@@ -840,7 +851,7 @@ func GetFolderAncestors(userID uuid.UUID, folderID uuid.UUID) ([]AncestorItem, e
 	// Loop up to 100 times to prevent infinite loops in case of data cycles
 	for i := 0; i < 100 && currentID != nil; i++ {
 		var folder models.Folder
-		result := database.DB.Where("id = ? AND user_id = ? AND deleted_at IS NULL", currentID, userID).First(&folder)
+		result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", currentID, userID).First(&folder)
 
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -902,14 +913,14 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 	// 1. Find all soft-deleted folder IDs, correctly using Unscoped
 	var deletedFolderIDs []uuid.UUID
 	db.Unscoped().Model(&models.Folder{}).
-		Where("user_id = ? AND deleted_at IS NOT NULL", userID).
+		Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).
 		Pluck("id", &deletedFolderIDs)
 
 	// 2. Find top-level soft-deleted folders
 	// A folder is top-level if its parent_id is NULL or its parent is NOT in the set of deleted folders
 	var topLevelFolders []models.Folder
 	queryFolders := db.Unscoped().Model(&models.Folder{}).
-		Where("user_id = ? AND deleted_at IS NOT NULL", userID)
+		Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID)
 
 	// We only want to see items whose parent is not also in the trash.
 	// If no folders are in the trash, this condition is not needed.
@@ -918,16 +929,16 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 	}
 	queryFolders.Find(&topLevelFolders)
 
-	// 3. Find top-level soft-deleted markdowns
-	// A markdown is top-level if its folder_id is NULL or its folder is NOT in the set of deleted folders
-	var topLevelMarkdowns []models.Markdown
-	queryMarkdowns := db.Unscoped().Model(&models.Markdown{}).
-		Where("user_id = ? AND deleted_at IS NOT NULL", userID)
+	// 3. Find top-level soft-deleted documents
+	// A document is top-level if its folder_id is NULL or its folder is NOT in the set of deleted folders
+	var topLevelDocuments []models.Document
+	queryDocuments := db.Unscoped().Model(&models.Document{}).
+		Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID)
 
 	if len(deletedFolderIDs) > 0 {
-		queryMarkdowns = queryMarkdowns.Where("folder_id IS NULL OR folder_id NOT IN ?", deletedFolderIDs)
+		queryDocuments = queryDocuments.Where("folder_id IS NULL OR folder_id NOT IN ?", deletedFolderIDs)
 	}
-	queryMarkdowns.Find(&topLevelMarkdowns)
+	queryDocuments.Find(&topLevelDocuments)
 
 	// 4. Combine and convert to TrashItem DTO
 	var items []TrashItem
@@ -939,10 +950,10 @@ func GetTrashedFiles(userID uuid.UUID, limit, offset int, sortBy, order string) 
 			DeletedAt: f.DeletedAt,
 		})
 	}
-	for _, m := range topLevelMarkdowns {
+	for _, m := range topLevelDocuments {
 		items = append(items, TrashItem{
 			ID:        m.ID,
-			Type:      "markdown",
+			Type:      "document",
 			Name:      m.Title,
 			DeletedAt: m.DeletedAt,
 		})
@@ -1017,14 +1028,14 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 			if item.Type == "folder" {
 				var folder models.Folder
 				// Find the folder, including soft-deleted ones
-				if err := tx.Unscoped().Where("id = ? AND user_id = ?", item.ID, userID).First(&folder).Error; err != nil {
+				if err := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).First(&folder).Error; err != nil {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "项目不存在。"})
 					continue
 				}
 
 				// Check for naming conflict in parent directory
 				var conflictCount int64
-				tx.Model(&models.Folder{}).Where("parent_id = ? AND name = ? AND user_id = ? AND deleted_at IS NULL", folder.ParentID, folder.Name, userID).Count(&conflictCount)
+				tx.Model(&models.Folder{}).Where("parent_id = ? AND name = ? AND owner_user_id = ? AND deleted_at IS NULL", folder.ParentID, folder.Name, userID).Count(&conflictCount)
 				if conflictCount > 0 {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "恢复失败，目标位置已存在同名文件夹。"})
 					continue
@@ -1035,26 +1046,26 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 					return err // Rollback transaction on error
 				}
 				restoredCount++
-			} else if item.Type == "markdown" {
-				var markdown models.Markdown
-				if err := tx.Unscoped().Where("id = ? AND user_id = ?", item.ID, userID).First(&markdown).Error; err != nil {
+			} else if item.Type == "document" {
+				var document models.Document
+				if err := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).First(&document).Error; err != nil {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "项目不存在。"})
 					continue
 				}
 
 				// Check for naming conflict
 				var conflictCount int64
-				tx.Model(&models.Markdown{}).Where("folder_id = ? AND title = ? AND user_id = ? AND deleted_at IS NULL", markdown.FolderID, markdown.Title, userID).Count(&conflictCount)
+				tx.Model(&models.Document{}).Where("folder_id = ? AND title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.FolderID, document.Title, userID).Count(&conflictCount)
 				if conflictCount > 0 {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "恢复失败，目标位置已存在同名文档。"})
 					continue
 				}
 
-				// Restore the markdown
-				if err := tx.Unscoped().Model(&models.Markdown{}).Where("id = ?", item.ID).Update("deleted_at", nil).Error; err != nil {
+				// Restore the document
+				if err := tx.Unscoped().Model(&models.Document{}).Where("id = ?", item.ID).Update("deleted_at", nil).Error; err != nil {
 					return err
 				}
-				if err := content.RestoreContentByMarkdownID(tx, userID, item.ID); err != nil {
+				if err := content.RestoreContentByDocumentID(tx, userID, item.ID); err != nil {
 					return err
 				}
 				restoredCount++
@@ -1078,27 +1089,27 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 // restoreFolderRecursive recursively restores a folder and its contents
 func restoreFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) error {
 	// Restore the folder itself
-	if err := tx.Unscoped().Model(&models.Folder{}).Where("id = ? AND user_id = ?", folderID, userID).Update("deleted_at", nil).Error; err != nil {
+	if err := tx.Unscoped().Model(&models.Folder{}).Where("id = ? AND owner_user_id = ?", folderID, userID).Update("deleted_at", nil).Error; err != nil {
 		return err
 	}
 
-	// Restore all markdowns in this folder
-	if err := tx.Unscoped().Model(&models.Markdown{}).Where("folder_id = ? AND user_id = ?", folderID, userID).Update("deleted_at", nil).Error; err != nil {
+	// Restore all documents in this folder
+	if err := tx.Unscoped().Model(&models.Document{}).Where("folder_id = ? AND owner_user_id = ?", folderID, userID).Update("deleted_at", nil).Error; err != nil {
 		return err
 	}
-	var markdowns []models.Markdown
-	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
+	var documents []models.Document
+	if err := tx.Unscoped().Where("folder_id = ? AND owner_user_id = ?", folderID, userID).Find(&documents).Error; err != nil {
 		return err
 	}
-	for _, markdown := range markdowns {
-		if err := content.RestoreContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+	for _, document := range documents {
+		if err := content.RestoreContentByDocumentID(tx, userID, document.ID); err != nil {
 			return err
 		}
 	}
 
 	// Find all soft-deleted child folders that were deleted at the same time or after the parent
 	var childFolders []models.Folder
-	if err := tx.Unscoped().Where("parent_id = ? AND user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
+	if err := tx.Unscoped().Where("parent_id = ? AND owner_user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
 		return err
 	}
 
@@ -1127,7 +1138,7 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 		// If no items are specified, empty the entire trash for the user
 		if len(itemsToDelete) == 0 {
 			var folders []models.Folder
-			tx.Unscoped().Where("user_id = ? AND deleted_at IS NOT NULL", userID).Find(&folders)
+			tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&folders)
 			for _, f := range folders {
 				if err := permanentDeleteFolderRecursive(tx, userID, f.ID); err != nil {
 					return err
@@ -1135,14 +1146,14 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 				deletedCount++
 			}
 
-			var markdowns []models.Markdown
-			tx.Unscoped().Where("user_id = ? AND deleted_at IS NOT NULL", userID).Find(&markdowns)
-			for _, markdown := range markdowns {
-				if err := content.PermanentDeleteContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+			var documents []models.Document
+			tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&documents)
+			for _, document := range documents {
+				if err := content.PermanentDeleteContentByDocumentID(tx, userID, document.ID); err != nil {
 					return err
 				}
 			}
-			result := tx.Unscoped().Delete(&markdowns)
+			result := tx.Unscoped().Delete(&documents)
 			if result.Error != nil {
 				return result.Error
 			}
@@ -1158,11 +1169,11 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 					return err
 				}
 				deletedCount++ // This only counts the top-level folder
-			} else if item.Type == "markdown" {
-				if err := content.PermanentDeleteContentByMarkdownID(tx, userID, item.ID); err != nil {
+			} else if item.Type == "document" {
+				if err := content.PermanentDeleteContentByDocumentID(tx, userID, item.ID); err != nil {
 					return err
 				}
-				result := tx.Unscoped().Where("id = ? AND user_id = ?", item.ID, userID).Delete(&models.Markdown{})
+				result := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).Delete(&models.Document{})
 				if result.Error != nil {
 					return result.Error
 				}
@@ -1187,7 +1198,7 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 func permanentDeleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid.UUID) error {
 	// Find all child folders (including soft-deleted ones)
 	var childFolders []models.Folder
-	if err := tx.Unscoped().Where("parent_id = ? AND user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
+	if err := tx.Unscoped().Where("parent_id = ? AND owner_user_id = ?", folderID, userID).Find(&childFolders).Error; err != nil {
 		return err
 	}
 
@@ -1198,22 +1209,22 @@ func permanentDeleteFolderRecursive(tx *gorm.DB, userID uuid.UUID, folderID uuid
 		}
 	}
 
-	// Permanently delete all markdowns in this folder
-	var markdowns []models.Markdown
-	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&markdowns).Error; err != nil {
+	// Permanently delete all documents in this folder
+	var documents []models.Document
+	if err := tx.Unscoped().Where("folder_id = ? AND owner_user_id = ?", folderID, userID).Find(&documents).Error; err != nil {
 		return err
 	}
-	for _, markdown := range markdowns {
-		if err := content.PermanentDeleteContentByMarkdownID(tx, userID, markdown.ID); err != nil {
+	for _, document := range documents {
+		if err := content.PermanentDeleteContentByDocumentID(tx, userID, document.ID); err != nil {
 			return err
 		}
 	}
-	if err := tx.Unscoped().Where("folder_id = ? AND user_id = ?", folderID, userID).Delete(&models.Markdown{}).Error; err != nil {
+	if err := tx.Unscoped().Where("folder_id = ? AND owner_user_id = ?", folderID, userID).Delete(&models.Document{}).Error; err != nil {
 		return err
 	}
 
 	// Permanently delete the folder itself
-	if err := tx.Unscoped().Where("id = ? AND user_id = ?", folderID, userID).Delete(&models.Folder{}).Error; err != nil {
+	if err := tx.Unscoped().Where("id = ? AND owner_user_id = ?", folderID, userID).Delete(&models.Folder{}).Error; err != nil {
 		return err
 	}
 
@@ -1232,7 +1243,7 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		// Validate destination folder exists and belongs to the user
 		if destFolderID != nil {
 			var destFolder models.Folder
-			if err := tx.Where("id = ? AND user_id = ? AND deleted_at IS NULL", destFolderID, userID).First(&destFolder).Error; err != nil {
+			if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", destFolderID, userID).First(&destFolder).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return errors.New("目标文件夹不存在或已被删除")
 				}
@@ -1242,19 +1253,19 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 
 		// Separate items by type and deduplicate IDs.
 		var foldersToMove []uuid.UUID
-		var markdownsToMove []uuid.UUID
+		var documentsToMove []uuid.UUID
 		seenFolders := make(map[uuid.UUID]bool)
-		seenMarkdowns := make(map[uuid.UUID]bool)
+		seenDocuments := make(map[uuid.UUID]bool)
 		for _, item := range itemsToMove {
 			if item.Type == "folder" {
 				if !seenFolders[item.ID] {
 					seenFolders[item.ID] = true
 					foldersToMove = append(foldersToMove, item.ID)
 				}
-			} else if item.Type == "markdown" {
-				if !seenMarkdowns[item.ID] {
-					seenMarkdowns[item.ID] = true
-					markdownsToMove = append(markdownsToMove, item.ID)
+			} else if item.Type == "document" {
+				if !seenDocuments[item.ID] {
+					seenDocuments[item.ID] = true
+					documentsToMove = append(documentsToMove, item.ID)
 				}
 			} else {
 				failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "无效的文件类型"})
@@ -1264,12 +1275,12 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		// Items that fail validation will be added to this map.
 		itemsToExclude := make(map[uuid.UUID]bool)
 		folderMap := make(map[uuid.UUID]models.Folder)
-		markdownMap := make(map[uuid.UUID]models.Markdown)
+		documentMap := make(map[uuid.UUID]models.Document)
 
 		// Validate all source folders belong to the current user and are not deleted.
 		if len(foldersToMove) > 0 {
 			var folders []models.Folder
-			if err := tx.Where("id IN ? AND user_id = ? AND deleted_at IS NULL", foldersToMove, userID).Find(&folders).Error; err != nil {
+			if err := tx.Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", foldersToMove, userID).Find(&folders).Error; err != nil {
 				return err
 			}
 			for _, f := range folders {
@@ -1283,19 +1294,19 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 			}
 		}
 
-		// Validate all source markdowns belong to the current user and are not deleted.
-		if len(markdownsToMove) > 0 {
-			var markdowns []models.Markdown
-			if err := tx.Where("id IN ? AND user_id = ? AND deleted_at IS NULL", markdownsToMove, userID).Find(&markdowns).Error; err != nil {
+		// Validate all source documents belong to the current user and are not deleted.
+		if len(documentsToMove) > 0 {
+			var documents []models.Document
+			if err := tx.Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", documentsToMove, userID).Find(&documents).Error; err != nil {
 				return err
 			}
-			for _, m := range markdowns {
-				markdownMap[m.ID] = m
+			for _, m := range documents {
+				documentMap[m.ID] = m
 			}
-			for _, markdownID := range markdownsToMove {
-				if _, ok := markdownMap[markdownID]; !ok {
-					failedItems = append(failedItems, FailedItem{ID: markdownID, Type: "markdown", Reason: "文档不存在或无权操作"})
-					itemsToExclude[markdownID] = true
+			for _, documentID := range documentsToMove {
+				if _, ok := documentMap[documentID]; !ok {
+					failedItems = append(failedItems, FailedItem{ID: documentID, Type: "document", Reason: "文档不存在或无权操作"})
+					itemsToExclude[documentID] = true
 				}
 			}
 		}
@@ -1321,21 +1332,21 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		// B. Naming conflict checks
 		// Get existing names in destination
 		var existingFolders []models.Folder
-		var existingMarkdowns []models.Markdown
-		destQueryFolder := tx.Model(&models.Folder{}).Where("user_id = ? AND deleted_at IS NULL", userID)
-		destQueryMarkdown := tx.Model(&models.Markdown{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+		var existingDocuments []models.Document
+		destQueryFolder := tx.Model(&models.Folder{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
+		destQueryDocument := tx.Model(&models.Document{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
 
 		if destFolderID != nil {
 			destQueryFolder = destQueryFolder.Where("parent_id = ?", destFolderID)
-			destQueryMarkdown = destQueryMarkdown.Where("folder_id = ?", destFolderID)
+			destQueryDocument = destQueryDocument.Where("folder_id = ?", destFolderID)
 		} else {
 			destQueryFolder = destQueryFolder.Where("parent_id IS NULL")
-			destQueryMarkdown = destQueryMarkdown.Where("folder_id IS NULL")
+			destQueryDocument = destQueryDocument.Where("folder_id IS NULL")
 		}
 		if err := destQueryFolder.Find(&existingFolders).Error; err != nil {
 			return err
 		}
-		if err := destQueryMarkdown.Find(&existingMarkdowns).Error; err != nil {
+		if err := destQueryDocument.Find(&existingDocuments).Error; err != nil {
 			return err
 		}
 
@@ -1343,8 +1354,8 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		for _, f := range existingFolders {
 			existingNames["folder_"+f.Name] = true
 		}
-		for _, m := range existingMarkdowns {
-			existingNames["markdown_"+m.Title] = true
+		for _, m := range existingDocuments {
+			existingNames["document_"+m.Title] = true
 		}
 
 		// Check for conflicts
@@ -1364,19 +1375,19 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 				}
 			}
 		}
-		if len(markdownsToMove) > 0 {
-			for _, markdownID := range markdownsToMove {
+		if len(documentsToMove) > 0 {
+			for _, documentID := range documentsToMove {
 				// Don't check items that already failed validation
-				if itemsToExclude[markdownID] {
+				if itemsToExclude[documentID] {
 					continue
 				}
-				m := markdownMap[markdownID]
-				if existingNames["markdown_"+m.Title] {
-					failedItems = append(failedItems, FailedItem{ID: m.ID, Type: "markdown", Reason: "目标位置已存在同名文档"})
+				m := documentMap[documentID]
+				if existingNames["document_"+m.Title] {
+					failedItems = append(failedItems, FailedItem{ID: m.ID, Type: "document", Reason: "目标位置已存在同名文档"})
 					itemsToExclude[m.ID] = true
 				} else {
 					// Add to map to check for self-conflicts within the moved items
-					existingNames["markdown_"+m.Title] = true
+					existingNames["document_"+m.Title] = true
 				}
 			}
 		}
@@ -1389,17 +1400,17 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 				finalFoldersToMove = append(finalFoldersToMove, id)
 			}
 		}
-		finalMarkdownsToMove := []uuid.UUID{}
-		for _, id := range markdownsToMove {
+		finalDocumentsToMove := []uuid.UUID{}
+		for _, id := range documentsToMove {
 			if !itemsToExclude[id] {
-				finalMarkdownsToMove = append(finalMarkdownsToMove, id)
+				finalDocumentsToMove = append(finalDocumentsToMove, id)
 			}
 		}
 
 		now := time.Now()
 		if len(finalFoldersToMove) > 0 {
 			result := tx.Model(&models.Folder{}).
-				Where("id IN ? AND user_id = ? AND deleted_at IS NULL", finalFoldersToMove, userID).
+				Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", finalFoldersToMove, userID).
 				Updates(map[string]interface{}{"parent_id": destFolderID, "updated_at": now})
 			if result.Error != nil {
 				// If this fails, it's a serious DB error, rollback everything
@@ -1410,14 +1421,14 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 			}
 			movedCount += int(result.RowsAffected)
 		}
-		if len(finalMarkdownsToMove) > 0 {
-			result := tx.Model(&models.Markdown{}).
-				Where("id IN ? AND user_id = ? AND deleted_at IS NULL", finalMarkdownsToMove, userID).
+		if len(finalDocumentsToMove) > 0 {
+			result := tx.Model(&models.Document{}).
+				Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", finalDocumentsToMove, userID).
 				Updates(map[string]interface{}{"folder_id": destFolderID, "updated_at": now})
 			if result.Error != nil {
 				return result.Error
 			}
-			if int(result.RowsAffected) != len(finalMarkdownsToMove) {
+			if int(result.RowsAffected) != len(finalDocumentsToMove) {
 				return errors.New("部分文档状态已变更，请重试")
 			}
 			movedCount += int(result.RowsAffected)

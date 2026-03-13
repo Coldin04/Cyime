@@ -1,97 +1,128 @@
 import { apiFetch } from '$lib/api';
+import type { JSONContent } from '@tiptap/core';
 
-export type MarkdownContent = {
+export type DocumentContent = {
 	id: string;
-	markdownId: string;
-	version: number;
-	content: string;
+	documentId: string;
+	contentJson: JSONContent;
+	plainText: string;
+	contentVersion: number;
 	createdAt: string;
-};
-
-export type UpdateContentRequest = {
-	content: string;
+	updatedAt: string;
 };
 
 export type UpdateContentResponse = {
 	success: boolean;
-	version: number;
+	contentVersion: number;
 	updatedAt: string;
 };
 
-export type VersionInfo = {
+export type UploadAssetResponse = {
 	id: string;
-	version: number;
-	createdAt: string;
+	assetId: string;
+	documentId: string;
+	kind: 'image' | 'video' | 'file' | string;
+	filename: string;
+	mimeType: string;
+	fileSize: number;
+	storageProvider: string;
+	objectKey: string;
+	url: string;
+	expiresAt?: string;
+	visibility: 'private' | 'public' | string;
 };
 
-export type VersionsResponse = {
-	versions: VersionInfo[];
+export type AssetReadURLResponse = {
+	assetId: string;
+	url: string;
+	expiresAt: string;
 };
 
-/**
- * Get the latest content of a markdown document
- */
-export async function getMarkdownContent(markdownId: string): Promise<MarkdownContent> {
-	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/content`);
-
-	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.message || 'Failed to fetch markdown content');
+async function parseJSONResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+	const raw = await response.text();
+	if (!raw) {
+		throw new Error(`${fallbackMessage} (status ${response.status}, empty response body)`);
 	}
 
-	return response.json();
+	try {
+		return JSON.parse(raw) as T;
+	} catch {
+		throw new Error(
+			`${fallbackMessage} (status ${response.status}, body: ${raw.slice(0, 240)})`
+		);
+	}
 }
 
-/**
- * Update markdown content (creates a new version)
- */
-export async function updateMarkdownContent(
-	markdownId: string,
-	content: string
+export async function getDocumentContent(documentId: string): Promise<DocumentContent> {
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/content`);
+
+	if (!response.ok) {
+		const error = await parseJSONResponse<{ message?: string }>(
+			response,
+			'Failed to fetch document content'
+		);
+		throw new Error(error.message || 'Failed to fetch document content');
+	}
+
+	return parseJSONResponse<DocumentContent>(response, 'Failed to parse document content response');
+}
+
+export async function updateDocumentContent(
+	documentId: string,
+	contentJson: JSONContent
 ): Promise<UpdateContentResponse> {
-	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/content`, {
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/content`, {
 		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json'
 		},
-		body: JSON.stringify({ content })
+		body: JSON.stringify({ contentJson })
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.message || 'Failed to update markdown content');
+		const error = await parseJSONResponse<{ message?: string }>(
+			response,
+			'Failed to update document content'
+		);
+		throw new Error(error.message || 'Failed to update document content');
 	}
 
-	return response.json();
+	return parseJSONResponse<UpdateContentResponse>(
+		response,
+		'Failed to parse document update response'
+	);
 }
 
-/**
- * Get all versions of a markdown document
- */
-export async function getMarkdownVersions(markdownId: string): Promise<VersionsResponse> {
-	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/versions`);
+export async function uploadDocumentAsset(
+	documentId: string,
+	file: File,
+	visibility: 'private' | 'public' = 'private'
+): Promise<UploadAssetResponse> {
+	const formData = new FormData();
+	formData.append('file', file);
+	formData.append('visibility', visibility);
+
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/assets`, {
+		method: 'POST',
+		body: formData
+	});
 
 	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.message || 'Failed to fetch markdown versions');
+		const error = await parseJSONResponse<{ message?: string }>(response, 'Failed to upload asset');
+		throw new Error(error.message || 'Failed to upload asset');
 	}
 
-	return response.json();
+	return parseJSONResponse<UploadAssetResponse>(response, 'Failed to parse upload response');
 }
 
-/**
- * Get a specific version of markdown content
- */
-export async function getMarkdownContentByVersion(
-	markdownId: string,
-	version: number
-): Promise<MarkdownContent> {
-	const response = await apiFetch(`/api/v1/edit/md/${markdownId}/versions/${version}`);
-
+export async function getAssetReadURL(assetId: string): Promise<AssetReadURLResponse> {
+	const response = await apiFetch(`/api/v1/media/assets/${assetId}/url`);
 	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.message || 'Failed to fetch markdown content by version');
+		const error = await parseJSONResponse<{ message?: string }>(
+			response,
+			'Failed to get asset read URL'
+		);
+		throw new Error(error.message || 'Failed to get asset read URL');
 	}
-
-	return response.json();
+	return parseJSONResponse<AssetReadURLResponse>(response, 'Failed to parse asset read URL response');
 }

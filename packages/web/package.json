@@ -36,12 +36,12 @@
 		"vite": "^7.3.1"
 	},
 	"dependencies": {
-		"@milkdown/core": "^7.19.0",
-		"@milkdown/crepe": "^7.19.0",
-		"@milkdown/plugin-listener": "^7.19.0",
-		"@milkdown/preset-gfm": "^7.19.0",
-		"@milkdown/theme-nord": "^7.19.0",
-		"@milkdown/utils": "^7.19.0",
+		"@tiptap/core": "^3.20.1",
+		"@tiptap/extension-image": "^3.20.1",
+		"@tiptap/extension-placeholder": "^3.20.1",
+		"@tiptap/pm": "^3.20.1",
+		"@tiptap/starter-kit": "^3.20.1",
+		"marked": "^17.0.4",
 		"phosphor-svelte": "^3.1.0",
 		"svelte-sonner": "^1.0.8"
 	}

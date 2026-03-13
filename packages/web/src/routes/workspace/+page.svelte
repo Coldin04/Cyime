@@ -3,9 +3,10 @@
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
 	import FolderListItem from '$lib/components/workspace/FolderListItem.svelte';
-	import MarkdownListItem from '$lib/components/workspace/MarkdownListItem.svelte';
+	import DocumentListItem from '$lib/components/workspace/DocumentListItem.svelte';
+	import TableDocumentListItem from '$lib/components/workspace/TableDocumentListItem.svelte';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
-	import MarkdownListItemSkeleton from '$lib/components/workspace/MarkdownListItemSkeleton.svelte';
+	import DocumentListItemSkeleton from '$lib/components/workspace/DocumentListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
 	import { getFiles, getFolderAncestors, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
@@ -17,7 +18,7 @@
 	let hasMore = $state(false);
 	let sortBy = $state('updated_at');
 	let order = $state('desc');
-	let filterType = $state<'all' | 'folders' | 'markdowns'>('all');
+	let filterType = $state<'all' | 'folders' | 'documents'>('all');
 	let isLoading = $state(true);
 	let refreshTrigger = $state(0);
 	let isMoveDialogOpen = $state(false);
@@ -192,7 +193,7 @@
 				const fileItem = items.find((i) => i.id === id);
 				return fileItem ? { id: fileItem.id, type: fileItem.type } : null;
 			})
-			.filter((item): item is { id: string; type: 'folder' | 'markdown' } => item !== null);
+			.filter((item): item is { id: string; type: 'folder' | 'document' } => item !== null);
 	}
 
 	function handleBulkMove() {
@@ -257,7 +258,7 @@
 		<!-- 文件列表 -->
 		{#if showSkeleton}
 			<FolderListItemSkeleton />
-			<MarkdownListItemSkeleton />
+			<DocumentListItemSkeleton />
 		{:else if items.length === 0}
 			<div class="flex flex-col items-center justify-center py-12 text-center">
 				<svg
@@ -297,14 +298,24 @@
 						}}
 						onRefresh={() => refreshTrigger++}
 					/>
-				{:else if item.type === 'markdown'}
-					<MarkdownListItem
-						{item}
-						{selectedItems}
-						{bulkMode}
-						onToggle={toggleItem}
-						onRefresh={() => refreshTrigger++}
-					/>
+				{:else if item.type === 'document'}
+					{#if item.documentType === 'table'}
+						<TableDocumentListItem
+							{item}
+							{selectedItems}
+							{bulkMode}
+							onToggle={toggleItem}
+							onRefresh={() => refreshTrigger++}
+						/>
+					{:else}
+						<DocumentListItem
+							{item}
+							{selectedItems}
+							{bulkMode}
+							onToggle={toggleItem}
+							onRefresh={() => refreshTrigger++}
+						/>
+					{/if}
 				{/if}
 			{/each}
 		{/if}

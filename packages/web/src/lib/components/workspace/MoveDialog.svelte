@@ -7,7 +7,7 @@
 
 	type ItemToMove = {
 		id: string;
-		type: 'folder' | 'markdown';
+		type: 'folder' | 'document';
 	};
 
 	let {

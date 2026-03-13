@@ -90,14 +90,14 @@ func GetFileHandler(c *fiber.Ctx) error {
 	if fileType == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
-			Message: "type parameter is required (must be 'folder' or 'markdown')",
+			Message: "type parameter is required (must be 'folder' or 'document')",
 		})
 	}
 
-	if fileType != "folder" && fileType != "markdown" {
+	if fileType != "folder" && fileType != "document" {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
-			Message: "type parameter must be either 'folder' or 'markdown'",
+			Message: "type parameter must be either 'folder' or 'document'",
 		})
 	}
 
@@ -196,8 +196,8 @@ func CreateFolderHandler(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(response)
 }
 
-// CreateMarkdownHandler handles POST /api/v1/workspace/markdowns
-func CreateMarkdownHandler(c *fiber.Ctx) error {
+// CreateDocumentHandler handles POST /api/v1/workspace/documents
+func CreateDocumentHandler(c *fiber.Ctx) error {
 	// Get user ID from locals
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -216,7 +216,7 @@ func CreateMarkdownHandler(c *fiber.Ctx) error {
 	}
 
 	// Parse request body
-	var req CreateMarkdownRequest
+	var req CreateDocumentRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
@@ -224,11 +224,11 @@ func CreateMarkdownHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create markdown
-	markdown, err := CreateMarkdown(userID, req.Title, req.Content, req.FolderID)
+	// Create document
+	document, err := CreateDocument(userID, req.Title, string(req.ContentJSON), req.FolderID, req.DocumentType)
 	if err != nil {
 		// Handle known validation errors
-		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" {
+		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
@@ -257,15 +257,16 @@ func CreateMarkdownHandler(c *fiber.Ctx) error {
 	}
 
 	// Build response
-	response := CreateMarkdownResponse{
-		ID:        markdown.ID,
-		Type:      "markdown",
-		Title:     markdown.Title,
-		Excerpt:   markdown.Excerpt,
-		FolderID:  markdown.FolderID,
-		CreatedAt: markdown.CreatedAt,
-		UpdatedAt: markdown.UpdatedAt,
-		Creator:   *creatorInfo,
+	response := CreateDocumentResponse{
+		ID:           document.ID,
+		Type:         "document",
+		DocumentType: document.DocumentType,
+		Title:        document.Title,
+		Excerpt:      document.Excerpt,
+		FolderID:     document.FolderID,
+		CreatedAt:    document.CreatedAt,
+		UpdatedAt:    document.UpdatedAt,
+		Creator:      *creatorInfo,
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
@@ -353,10 +354,10 @@ func DeleteFileHandler(c *fiber.Ctx) error {
 
 	// Get file type from query parameter
 	fileType := c.Query("type")
-	if fileType != "folder" && fileType != "markdown" {
+	if fileType != "folder" && fileType != "document" {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
-			Message: "type parameter must be either 'folder' or 'markdown'",
+			Message: "type parameter must be either 'folder' or 'document'",
 		})
 	}
 
@@ -546,8 +547,8 @@ func PermanentDeleteHandler(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
-// UpdateMarkdownTitleHandler handles PUT /api/v1/workspace/markdowns/:id/title
-func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
+// UpdateDocumentTitleHandler handles PUT /api/v1/workspace/documents/:id/title
+func UpdateDocumentTitleHandler(c *fiber.Ctx) error {
 	// Get user ID from locals
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -565,13 +566,13 @@ func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	// Parse markdown ID from path
-	markdownIDStr := c.Params("id")
-	markdownID, err := uuid.Parse(markdownIDStr)
+	// Parse document ID from path
+	documentIDStr := c.Params("id")
+	documentID, err := uuid.Parse(documentIDStr)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Invalid Markdown ID",
-			Message: "Markdown ID must be a valid UUID",
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
 		})
 	}
 
@@ -594,7 +595,7 @@ func UpdateMarkdownTitleHandler(c *fiber.Ctx) error {
 	}
 
 	// Update title
-	err = UpdateMarkdownTitle(userID, markdownID, req.Title)
+	err = UpdateDocumentTitle(userID, documentID, req.Title)
 	if err != nil {
 		switch err.Error() {
 		case "文档不存在":
@@ -694,8 +695,8 @@ func UpdateFolderNameHandler(c *fiber.Ctx) error {
 	})
 }
 
-// MoveMarkdownHandler handles PUT /api/v1/workspace/markdowns/:id/move
-func MoveMarkdownHandler(c *fiber.Ctx) error {
+// MoveDocumentHandler handles PUT /api/v1/workspace/documents/:id/move
+func MoveDocumentHandler(c *fiber.Ctx) error {
 	// Get user ID from locals
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -713,18 +714,18 @@ func MoveMarkdownHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	// Parse markdown ID from path
-	markdownIDStr := c.Params("id")
-	markdownID, err := uuid.Parse(markdownIDStr)
+	// Parse document ID from path
+	documentIDStr := c.Params("id")
+	documentID, err := uuid.Parse(documentIDStr)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Invalid Markdown ID",
-			Message: "Markdown ID must be a valid UUID",
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
 		})
 	}
 
 	// Parse request body
-	var req MoveMarkdownRequest
+	var req MoveDocumentRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
@@ -732,8 +733,8 @@ func MoveMarkdownHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	// Move the markdown
-	updatedAt, err := MoveMarkdown(userID, markdownID, req.FolderID)
+	// Move the document
+	updatedAt, err := MoveDocument(userID, documentID, req.FolderID)
 	if err != nil {
 		switch err.Error() {
 		case "文档不存在或已被删除":

@@ -9,6 +9,7 @@
 	import File from '~icons/ph/file';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { toast } from 'svelte-sonner';
 	import ClockClockwise from '~icons/ph/clock-clockwise';
 	import TrashSimple from '~icons/ph/trash-simple';
@@ -17,6 +18,8 @@
 	let items = $state<TrashItem[]>([]);
 	let isLoading = $state(true);
 	let refreshTrigger = $state(0);
+	let pendingDeleteItem = $state<TrashItem | null>(null);
+	let isEmptyTrashConfirmOpen = $state(false);
 
 	$effect(() => {
 		const trigger = refreshTrigger;
@@ -48,32 +51,35 @@ async function handleRestore(item: TrashItem) {
 }
 
 async function handlePermanentDelete(item: TrashItem) {
-	if (!confirm(m.trash_delete_permanent_confirm({ name: item.name }))) {
-		return;
-	}
+	pendingDeleteItem = item;
+}
+
+async function confirmPermanentDelete() {
+	if (!pendingDeleteItem) return;
 	try {
-		await permanentDeleteItems([{ id: item.id, type: item.type }]);
-		toast.success(m.trash_delete_permanent_success({ name: item.name }));
+		await permanentDeleteItems([{ id: pendingDeleteItem.id, type: pendingDeleteItem.type }]);
+		toast.success(m.trash_delete_permanent_success({ name: pendingDeleteItem.name }));
 		refreshTrigger++;
 	} catch (error) {
 		toast.error(m.trash_delete_permanent_failed({ error: error instanceof Error ? error.message : '未知错误' }));
+	} finally {
+		pendingDeleteItem = null;
 	}
 }
 
-async function handleEmptyTrash() {
-	if (
-		!confirm(
-			m.trash_empty_confirm({ count: items.length })
-		)
-	) {
-		return;
-	}
+function handleEmptyTrash() {
+	isEmptyTrashConfirmOpen = true;
+}
+
+async function confirmEmptyTrash() {
 	try {
 		await permanentDeleteItems([]); // Pass empty array to delete all
 		toast.success(m.trash_empty_success());
 		refreshTrigger++;
 	} catch (error) {
 		toast.error(m.trash_empty_failed({ error: error instanceof Error ? error.message : '未知错误' }));
+	} finally {
+		isEmptyTrashConfirmOpen = false;
 	}
 }
 </script>
@@ -172,3 +178,21 @@ async function handleEmptyTrash() {
 		{/if}
 	</div>
 </div>
+
+<ConfirmDialog
+	open={pendingDeleteItem !== null}
+	title={m.common_permanent_delete()}
+	message={pendingDeleteItem ? m.trash_delete_permanent_confirm({ name: pendingDeleteItem.name }) : ''}
+	confirmText={m.common_permanent_delete()}
+	onCancel={() => (pendingDeleteItem = null)}
+	onConfirm={confirmPermanentDelete}
+/>
+
+<ConfirmDialog
+	open={isEmptyTrashConfirmOpen}
+	title={m.trash_empty_button()}
+	message={m.trash_empty_confirm({ count: items.length })}
+	confirmText={m.trash_empty_button()}
+	onCancel={() => (isEmptyTrashConfirmOpen = false)}
+	onConfirm={confirmEmptyTrash}
+/>

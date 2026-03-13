@@ -1,5 +1,6 @@
 <script lang="ts">
-	import FileMd from '~icons/ph/file-md';
+	import FileText from '~icons/ph/file-text';
+	import Table from '~icons/ph/table';
 	import type { FileItem } from '$lib/api/workspace';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
 	import Pencil from '~icons/ph/pencil';
@@ -9,6 +10,7 @@
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
 	import { getLocale } from '$paraglide/runtime';
@@ -18,13 +20,15 @@
 		selectedItems,
 		bulkMode = false,
 		onToggle,
-		onRefresh
+		onRefresh,
+		iconKind = 'document'
 	}: {
 		item: FileItem;
 		selectedItems: { [key:string]: boolean };
 		bulkMode?: boolean;
 		onToggle: (id: string) => void;
 		onRefresh?: () => void;
+		iconKind?: 'document' | 'table';
 	} = $props();
 
 	const isSelected = $derived(!!selectedItems[item.id]);
@@ -36,9 +40,10 @@
 
 	let showMenu = $state(false);
 	let isEditing = $state(false);
+	let isDeleteConfirmOpen = $state(false);
 	let editingName = $state('');
 	let isMoving = $state(false);
-	const isMovingItem = $derived(isMoving && item.type === 'markdown');
+	const isMovingItem = $derived(isMoving && item.type === 'document');
 
 	function formatRelativeTime(dateString: string): string {
 		const date = new Date(dateString);
@@ -69,7 +74,7 @@
 		if (bulkMode) {
 			onToggle(item.id);
 		} else {
-			goto(`/edit/md/${item.id}`);
+			goto(`/edit/documents/${item.id}`);
 		}
 	}
 
@@ -101,8 +106,8 @@
 		}
 
 		try {
-			await updateFileName(item.id, 'markdown', editingName.trim());
-			toast.success(m.markdown_rename_success());
+			await updateFileName(item.id, 'document', editingName.trim());
+			toast.success(m.document_rename_success());
 			onRefresh?.();
 		} catch (error) {
 			console.error('Failed to rename:', error);
@@ -124,20 +129,26 @@
 		}
 	}
 
-	async function handleDelete() {
-		if (!confirm(m.markdown_delete_confirm())) {
-			return;
-		}
+	function openDeleteConfirm() {
+		isDeleteConfirmOpen = true;
+		showMenu = false;
+	}
 
+	function closeDeleteConfirm() {
+		isDeleteConfirmOpen = false;
+	}
+
+	async function confirmDelete() {
 		try {
-			await deleteFile(item.id, 'markdown');
+			await deleteFile(item.id, 'document');
 			toast.success(m.folder_delete_success());
 			onRefresh?.();
 		} catch (error) {
 			console.error('Failed to delete:', error);
 			toast.error(m.folder_delete_failed());
+		} finally {
+			isDeleteConfirmOpen = false;
 		}
-		showMenu = false;
 	}
 
 	function startMoving() {
@@ -173,7 +184,11 @@
 			onclick={(e) => e.stopPropagation()}
 			onchange={() => onToggle(item.id)}
 		/>
-		<FileMd class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{#if iconKind === 'table'}
+			<Table class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{:else}
+			<FileText class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+		{/if}
 		<span
 			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
 		>
@@ -235,7 +250,7 @@
 						<span>{m.common_move_to()}</span>
 					</button>
 					<button
-						onclick={handleDelete}
+						onclick={openDeleteConfirm}
 						class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
 						role="menuitem"
 					>
@@ -273,14 +288,14 @@
 			class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">{m.markdown_rename_title()}</h3>
+			<h3 class="mb-4 text-lg font-medium text-zinc-900 dark:text-zinc-100">{m.document_rename_title()}</h3>
 			<input
 				type="text"
 				value={editingName}
 				oninput={(e) => editingName = e.currentTarget.value}
 				onkeydown={handleEditingKeydown}
 				class="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-base text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100"
-				placeholder={m.markdown_name_placeholder()}
+				placeholder={m.document_name_placeholder()}
 			/>
 			<div class="flex justify-end gap-2">
 				<button
@@ -299,3 +314,12 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmDialog
+	open={isDeleteConfirmOpen}
+	title={m.common_delete()}
+	message={m.document_delete_confirm()}
+	confirmText={m.common_delete()}
+	onCancel={closeDeleteConfirm}
+	onConfirm={confirmDelete}
+/>
