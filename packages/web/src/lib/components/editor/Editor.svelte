@@ -165,7 +165,15 @@
 			editor
 				.chain()
 				.focus()
-				.setImage({ src: uploaded.url, alt: file.name, title: file.name })
+				.insertContent({
+					type: 'image',
+					attrs: {
+						src: uploaded.url,
+						alt: file.name,
+						title: file.name,
+						assetId: uploaded.assetId
+					}
+				})
 				.run();
 		} catch (error) {
 			console.error('[Upload] Failed to upload image:', error);

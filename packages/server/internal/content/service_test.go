@@ -24,6 +24,9 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 		&models.User{},
 		&models.Document{},
 		&models.DocumentBody{},
+		&models.Asset{},
+		&models.DocumentAssetRef{},
+		&models.AssetGCJob{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -95,5 +98,202 @@ func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	}
 	if got.UpdatedBy != ownerID {
 		t.Fatalf("expected updated_by unchanged, got: %s", got.UpdatedBy)
+	}
+}
+
+func TestUpdateContent_SyncsDocumentAssetRefsAndAssetState(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+
+	assetA := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     ownerID,
+		Filename:        "a.png",
+		FileHash:        "hash-a",
+		FileSize:        10,
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "owner/a.png",
+		URL:             "http://example.test/a.png",
+		Visibility:      "private",
+		Status:          "ready",
+		ReferenceCount:  0,
+		CreatedBy:       ownerID,
+	}
+	assetB := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     ownerID,
+		Filename:        "b.png",
+		FileHash:        "hash-b",
+		FileSize:        11,
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "owner/b.png",
+		URL:             "http://example.test/b.png",
+		Visibility:      "private",
+		Status:          "ready",
+		ReferenceCount:  0,
+		CreatedBy:       ownerID,
+	}
+	if err := db.Create(&assetA).Error; err != nil {
+		t.Fatalf("create assetA: %v", err)
+	}
+	if err := db.Create(&assetB).Error; err != nil {
+		t.Fatalf("create assetB: %v", err)
+	}
+
+	firstPayload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"src":"http://localhost/api/v1/media/assets/%s/content?token=x","assetId":"%s"}}]}`, assetA.ID, assetA.ID))
+	if _, err := UpdateContent(ownerID, docID, firstPayload); err != nil {
+		t.Fatalf("first update: %v", err)
+	}
+
+	var refs []models.DocumentAssetRef
+	if err := db.Order("asset_id asc").Find(&refs).Error; err != nil {
+		t.Fatalf("load refs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].AssetID != assetA.ID {
+		t.Fatalf("expected only assetA ref, got %+v", refs)
+	}
+
+	var gotAssetA models.Asset
+	if err := db.First(&gotAssetA, "id = ?", assetA.ID).Error; err != nil {
+		t.Fatalf("load assetA: %v", err)
+	}
+	if gotAssetA.ReferenceCount != 1 || gotAssetA.Status != "ready" {
+		t.Fatalf("expected assetA ready with ref=1, got status=%s ref=%d", gotAssetA.Status, gotAssetA.ReferenceCount)
+	}
+
+	secondPayload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"src":"http://localhost/api/v1/media/assets/%s/content","assetId":"%s"}}]}`, assetB.ID, assetB.ID))
+	if _, err := UpdateContent(ownerID, docID, secondPayload); err != nil {
+		t.Fatalf("second update: %v", err)
+	}
+
+	refs = nil
+	if err := db.Order("asset_id asc").Find(&refs).Error; err != nil {
+		t.Fatalf("reload refs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].AssetID != assetB.ID {
+		t.Fatalf("expected only assetB ref after replacement, got %+v", refs)
+	}
+
+	if err := db.First(&gotAssetA, "id = ?", assetA.ID).Error; err != nil {
+		t.Fatalf("reload assetA: %v", err)
+	}
+	if gotAssetA.ReferenceCount != 0 || gotAssetA.Status != "pending_delete" {
+		t.Fatalf("expected assetA pending_delete with ref=0, got status=%s ref=%d", gotAssetA.Status, gotAssetA.ReferenceCount)
+	}
+
+	var deleteJobs []models.AssetGCJob
+	if err := db.Where("asset_id = ? AND job_type = ?", assetA.ID, "delete").Find(&deleteJobs).Error; err != nil {
+		t.Fatalf("load delete jobs: %v", err)
+	}
+	if len(deleteJobs) != 1 || deleteJobs[0].Status != "pending" {
+		t.Fatalf("expected one pending delete job for assetA, got %+v", deleteJobs)
+	}
+}
+
+func TestUpdateContent_RejectsForeignAssetReference(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	otherUserID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+
+	foreignAsset := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     otherUserID,
+		Filename:        "foreign.png",
+		FileHash:        "hash-foreign",
+		FileSize:        99,
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "other/foreign.png",
+		URL:             "http://example.test/foreign.png",
+		Visibility:      "private",
+		Status:          "ready",
+		CreatedBy:       otherUserID,
+	}
+	if err := db.Create(&foreignAsset).Error; err != nil {
+		t.Fatalf("create foreign asset: %v", err)
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, foreignAsset.ID))
+	if _, err := UpdateContent(ownerID, docID, payload); err == nil || err.Error() != "content references invalid assets" {
+		t.Fatalf("expected invalid asset error, got: %v", err)
+	}
+}
+
+func TestDeleteAndRestoreContent_ReconcilesDocumentAssetRefs(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+
+	asset := models.Asset{
+		ID:              uuid.New(),
+		OwnerUserID:     ownerID,
+		Filename:        "asset.png",
+		FileHash:        "hash-asset",
+		FileSize:        42,
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "owner/asset.png",
+		URL:             "http://example.test/asset.png",
+		Visibility:      "private",
+		Status:          "ready",
+		ReferenceCount:  0,
+		CreatedBy:       ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, asset.ID))
+	if _, err := UpdateContent(ownerID, docID, payload); err != nil {
+		t.Fatalf("update content: %v", err)
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return DeleteContentByDocumentID(tx, ownerID, docID)
+	}); err != nil {
+		t.Fatalf("delete content: %v", err)
+	}
+
+	var refCount int64
+	if err := db.Model(&models.DocumentAssetRef{}).Where("document_id = ?", docID).Count(&refCount).Error; err != nil {
+		t.Fatalf("count refs after delete: %v", err)
+	}
+	if refCount != 0 {
+		t.Fatalf("expected refs removed after delete, got %d", refCount)
+	}
+
+	var gotAsset models.Asset
+	if err := db.First(&gotAsset, "id = ?", asset.ID).Error; err != nil {
+		t.Fatalf("load asset after delete: %v", err)
+	}
+	if gotAsset.ReferenceCount != 0 || gotAsset.Status != "pending_delete" {
+		t.Fatalf("expected asset pending_delete after content delete, got status=%s ref=%d", gotAsset.Status, gotAsset.ReferenceCount)
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Model(&models.Document{}).Where("id = ?", docID).Update("deleted_at", nil).Error; err != nil {
+			return err
+		}
+		return RestoreContentByDocumentID(tx, ownerID, docID)
+	}); err != nil {
+		t.Fatalf("restore content: %v", err)
+	}
+
+	if err := db.Model(&models.DocumentAssetRef{}).Where("document_id = ?", docID).Count(&refCount).Error; err != nil {
+		t.Fatalf("count refs after restore: %v", err)
+	}
+	if refCount != 1 {
+		t.Fatalf("expected refs restored, got %d", refCount)
+	}
+
+	if err := db.First(&gotAsset, "id = ?", asset.ID).Error; err != nil {
+		t.Fatalf("load asset after restore: %v", err)
+	}
+	if gotAsset.ReferenceCount != 1 || gotAsset.Status != "ready" {
+		t.Fatalf("expected asset ready after restore, got status=%s ref=%d", gotAsset.Status, gotAsset.ReferenceCount)
 	}
 }

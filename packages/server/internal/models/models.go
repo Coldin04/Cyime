@@ -187,11 +187,53 @@ type Asset struct {
 	Width           *int       `gorm:"type:int"`
 	Height          *int       `gorm:"type:int"`
 	Status          string     `gorm:"type:varchar(20);not null;default:'ready'"`
-	ReferenceCount  int        `gorm:"not null;default:1;index"`
+	ReferenceCount  int        `gorm:"not null;default:0;index"`
 	CreatedBy       uuid.UUID  `gorm:"not null"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (r *DocumentAssetRef) BeforeCreate(tx *gorm.DB) (err error) {
+	if r.ID == uuid.Nil {
+		r.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentAssetRef is the source of truth for whether a document references an asset.
+type DocumentAssetRef struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID  uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref"`
+	AssetID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref;index"`
+	OwnerUserID uuid.UUID      `gorm:"type:uuid;not null;index:idx_owner_document_asset_ref"`
+	RefType     string         `gorm:"type:varchar(50);not null;default:'editor_content';uniqueIndex:idx_document_asset_ref"`
+	CreatedAt   time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (j *AssetGCJob) BeforeCreate(tx *gorm.DB) (err error) {
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	return
+}
+
+// AssetGCJob stores delayed cleanup work for unused assets.
+type AssetGCJob struct {
+	ID           uuid.UUID      `gorm:"type:uuid;primary_key"`
+	AssetID      uuid.UUID      `gorm:"type:uuid;not null;index"`
+	JobType      string         `gorm:"type:varchar(20);not null;index"`
+	Status       string         `gorm:"type:varchar(20);not null;default:'pending';index"`
+	RunAfter     time.Time      `gorm:"not null;index"`
+	AttemptCount int            `gorm:"not null;default:0"`
+	LastError    *string        `gorm:"type:text"`
+	CreatedAt    time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // Set GORM table names to use snake_case
@@ -225,4 +267,12 @@ func (DocumentBody) TableName() string {
 
 func (Asset) TableName() string {
 	return "assets"
+}
+
+func (DocumentAssetRef) TableName() string {
+	return "document_asset_refs"
+}
+
+func (AssetGCJob) TableName() string {
+	return "asset_gc_jobs"
 }

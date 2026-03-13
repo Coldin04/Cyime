@@ -11,6 +11,7 @@ import (
 	"log"
 	"mime/multipart"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,45 @@ type UploadAssetRequest struct {
 
 type UploadAssetResult struct {
 	Asset *models.Asset
+}
+
+type AssetReferenceDocument struct {
+	DocumentID uuid.UUID `json:"documentId"`
+	Title      string    `json:"title"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type AssetReferencesResult struct {
+	AssetID        uuid.UUID                `json:"assetId"`
+	ReferenceCount int                      `json:"referenceCount"`
+	Documents      []AssetReferenceDocument `json:"documents"`
+}
+
+type ListAssetsRequest struct {
+	UserID uuid.UUID
+	Kind   string
+	Status string
+	Query  string
+	Limit  int
+}
+
+type AssetListItem struct {
+	ID             uuid.UUID  `json:"id"`
+	Kind           string     `json:"kind"`
+	Filename       string     `json:"filename"`
+	MimeType       string     `json:"mimeType"`
+	FileSize       int64      `json:"fileSize"`
+	Visibility     string     `json:"visibility"`
+	Status         string     `json:"status"`
+	ReferenceCount int        `json:"referenceCount"`
+	Deletable      bool       `json:"deletable"`
+	DocumentID     *uuid.UUID `json:"documentId,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+}
+
+type ListAssetsResult struct {
+	Items []AssetListItem `json:"items"`
 }
 
 var storageProvider StorageProvider
@@ -74,6 +114,74 @@ func GetOwnedAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 		return nil, result.Error
 	}
 	return &asset, nil
+}
+
+func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := database.DB.Model(&models.Asset{}).
+		Where("owner_user_id = ?", req.UserID)
+
+	status := strings.TrimSpace(req.Status)
+	switch status {
+	case "", "all":
+	case "ready", "pending_delete", "deleted", "failed":
+		if status == "deleted" {
+			query = query.Unscoped().Where("owner_user_id = ? AND status = ?", req.UserID, status)
+		} else {
+			query = query.Where("status = ?", status)
+		}
+	default:
+		return nil, errors.New("invalid asset status")
+	}
+
+	kind := strings.TrimSpace(req.Kind)
+	switch kind {
+	case "", "all":
+	case "image", "video", "file":
+		query = query.Where("kind = ?", kind)
+	default:
+		return nil, errors.New("invalid asset kind")
+	}
+
+	if q := strings.TrimSpace(req.Query); q != "" {
+		like := "%" + q + "%"
+		query = query.Where("filename LIKE ?", like)
+	}
+
+	var assets []models.Asset
+	if err := query.
+		Order("created_at desc").
+		Limit(limit).
+		Find(&assets).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]AssetListItem, 0, len(assets))
+	for _, asset := range assets {
+		items = append(items, AssetListItem{
+			ID:             asset.ID,
+			Kind:           asset.Kind,
+			Filename:       asset.Filename,
+			MimeType:       asset.MimeType,
+			FileSize:       asset.FileSize,
+			Visibility:     asset.Visibility,
+			Status:         asset.Status,
+			ReferenceCount: asset.ReferenceCount,
+			Deletable:      asset.ReferenceCount == 0 && asset.Status != "deleted",
+			DocumentID:     asset.DocumentID,
+			CreatedAt:      asset.CreatedAt,
+			UpdatedAt:      asset.UpdatedAt,
+		})
+	}
+
+	return &ListAssetsResult{Items: items}, nil
 }
 
 func GetAssetByID(assetID uuid.UUID) (*models.Asset, error) {
@@ -128,9 +236,6 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 		return nil, err
 	} else if existing != nil {
 		log.Printf("[media.upload.service] deduplicated existing asset=%s", existing.ID)
-		if err := incrementReference(existing.ID); err != nil {
-			return nil, err
-		}
 		return &UploadAssetResult{Asset: existing}, nil
 	}
 
@@ -167,7 +272,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 		URL:             uploadResult.URL,
 		Visibility:      visibility,
 		Status:          "ready",
-		ReferenceCount:  1,
+		ReferenceCount:  0,
 		CreatedBy:       req.UserID,
 	}
 
@@ -228,13 +333,111 @@ func findDeduplicatedAsset(userID uuid.UUID, fileHash string, fileSize int64) (*
 	return &asset, nil
 }
 
-func incrementReference(assetID uuid.UUID) error {
-	return database.DB.Model(&models.Asset{}).
-		Where("id = ?", assetID).
-		Updates(map[string]any{
-			"reference_count": gorm.Expr("reference_count + 1"),
-			"updated_at":      time.Now(),
-		}).Error
+func GetOwnedAssetReferences(userID, assetID uuid.UUID) (*AssetReferencesResult, error) {
+	asset, err := GetOwnedAsset(userID, assetID)
+	if err != nil {
+		return nil, err
+	}
+
+	var refs []models.DocumentAssetRef
+	if err := database.DB.
+		Where("owner_user_id = ? AND asset_id = ? AND ref_type = ?", userID, assetID, "editor_content").
+		Find(&refs).Error; err != nil {
+		return nil, err
+	}
+
+	documents := make([]AssetReferenceDocument, 0, len(refs))
+	if len(refs) > 0 {
+		documentIDs := make([]uuid.UUID, 0, len(refs))
+		for _, ref := range refs {
+			documentIDs = append(documentIDs, ref.DocumentID)
+		}
+
+		var docs []models.Document
+		if err := database.DB.
+			Where("owner_user_id = ? AND id IN ? AND deleted_at IS NULL", userID, documentIDs).
+			Find(&docs).Error; err != nil {
+			return nil, err
+		}
+
+		docByID := make(map[uuid.UUID]models.Document, len(docs))
+		for _, doc := range docs {
+			docByID[doc.ID] = doc
+		}
+
+		for _, ref := range refs {
+			doc, ok := docByID[ref.DocumentID]
+			if !ok {
+				continue
+			}
+			documents = append(documents, AssetReferenceDocument{
+				DocumentID: doc.ID,
+				Title:      doc.Title,
+				UpdatedAt:  doc.UpdatedAt,
+			})
+		}
+	}
+
+	sort.Slice(documents, func(i, j int) bool {
+		return documents[i].UpdatedAt.After(documents[j].UpdatedAt)
+	})
+
+	return &AssetReferencesResult{
+		AssetID:        asset.ID,
+		ReferenceCount: len(documents),
+		Documents:      documents,
+	}, nil
+}
+
+func DeleteOwnedUnusedAsset(ctx context.Context, userID, assetID uuid.UUID) error {
+	asset, err := GetOwnedAsset(userID, assetID)
+	if err != nil {
+		return err
+	}
+	if asset.ReferenceCount > 0 {
+		return errors.New("asset is still referenced by documents")
+	}
+	if asset.Status == "deleted" {
+		return errors.New("asset already deleted")
+	}
+	if err := initStorageProvider(); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var refCount int64
+		if err := tx.Model(&models.DocumentAssetRef{}).
+			Where("asset_id = ? AND ref_type = ?", assetID, "editor_content").
+			Count(&refCount).Error; err != nil {
+			return err
+		}
+		if refCount > 0 {
+			return errors.New("asset is still referenced by documents")
+		}
+
+		if err := storageProvider.DeleteObject(ctx, asset.ObjectKey); err != nil {
+			return err
+		}
+
+		if err := tx.Model(&models.Asset{}).
+			Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", assetID, userID).
+			Updates(map[string]any{
+				"status":          "deleted",
+				"reference_count": 0,
+				"updated_at":      now,
+				"deleted_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.AssetGCJob{}).
+			Where("asset_id = ? AND status = ?", assetID, "pending").
+			Updates(map[string]any{
+				"status":     "cancelled",
+				"updated_at": now,
+			}).Error
+	})
 }
 
 func buildObjectKey(userID uuid.UUID, filename string) string {

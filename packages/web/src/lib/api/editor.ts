@@ -19,6 +19,7 @@ export type UpdateContentResponse = {
 
 export type UploadAssetResponse = {
 	id: string;
+	assetId: string;
 	documentId: string;
 	kind: 'image' | 'video' | 'file' | string;
 	filename: string;

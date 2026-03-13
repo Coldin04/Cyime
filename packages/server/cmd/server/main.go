@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ func main() {
 	// Initialize database
 	database.Connect()
 	log.Println("Database initialization complete.")
+	media.StartAssetGCWorker(context.Background())
 
 	// Create new Fiber app
 	app := fiber.New()
@@ -94,7 +96,10 @@ func main() {
 	// Media read routes:
 	// - URL exchange is protected by JWT.
 	// - Content endpoint is public but protected by short-lived media token.
+	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
+	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
+	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
 
 	// Simple root route to check if server is up

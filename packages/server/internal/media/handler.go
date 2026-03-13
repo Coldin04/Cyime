@@ -24,6 +24,7 @@ type AssetURLResponse struct {
 
 type UploadAssetResponse struct {
 	ID              uuid.UUID `json:"id"`
+	AssetID         uuid.UUID `json:"assetId"`
 	DocumentID      uuid.UUID `json:"documentId"`
 	Kind            string    `json:"kind"`
 	Filename        string    `json:"filename"`
@@ -34,6 +35,16 @@ type UploadAssetResponse struct {
 	URL             string    `json:"url"`
 	ExpiresAt       string    `json:"expiresAt,omitempty"`
 	Visibility      string    `json:"visibility"`
+}
+
+type AssetReferencesResponse struct {
+	AssetID        uuid.UUID                `json:"assetId"`
+	ReferenceCount int                      `json:"referenceCount"`
+	Documents      []AssetReferenceDocument `json:"documents"`
+}
+
+type AssetListResponse struct {
+	Items []AssetListItem `json:"items"`
 }
 
 func GetAssetURLHandler(c *fiber.Ctx) error {
@@ -89,6 +100,50 @@ func GetAssetURLHandler(c *fiber.Ctx) error {
 		AssetID:   assetID,
 		URL:       readURL,
 		ExpiresAt: expiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+	})
+}
+
+func ListAssetsHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	result, err := ListOwnedAssets(ListAssetsRequest{
+		UserID: userID,
+		Kind:   c.Query("kind"),
+		Status: c.Query("status"),
+		Query:  c.Query("q"),
+		Limit:  c.QueryInt("limit", 20),
+	})
+	if err != nil {
+		switch err.Error() {
+		case "invalid asset status", "invalid asset kind":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(AssetListResponse{
+		Items: result.Items,
 	})
 }
 
@@ -176,6 +231,100 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		})
 	}
 	return c.Send(data)
+}
+
+func GetAssetReferencesHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	assetID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid asset id",
+		})
+	}
+
+	result, err := GetOwnedAssetReferences(userID, assetID)
+	if err != nil {
+		if err.Error() == "资源不存在或无权访问" {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(AssetReferencesResponse{
+		AssetID:        result.AssetID,
+		ReferenceCount: result.ReferenceCount,
+		Documents:      result.Documents,
+	})
+}
+
+func DeleteAssetHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	assetID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid asset id",
+		})
+	}
+
+	if err := DeleteOwnedUnusedAsset(context.Background(), userID, assetID); err != nil {
+		switch err.Error() {
+		case "资源不存在或无权访问":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "asset is still referenced by documents", "asset already deleted":
+			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
+				Error:   "Conflict",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func ValidateVisibility(visibility string) error {
@@ -287,6 +436,7 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, asset.StorageProvider, asset.ObjectKey)
 	return c.Status(fiber.StatusCreated).JSON(UploadAssetResponse{
 		ID:              asset.ID,
+		AssetID:         asset.ID,
 		DocumentID:      docID,
 		Kind:            asset.Kind,
 		Filename:        asset.Filename,

@@ -108,6 +108,7 @@ func UpdateContentHandler(c *fiber.Ctx) error {
 				Message: err.Error(),
 			})
 		case "contentJson must be valid JSON":
+		case "content references invalid assets":
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),

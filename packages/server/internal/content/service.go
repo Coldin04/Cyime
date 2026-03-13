@@ -3,6 +3,8 @@ package content
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
+	"regexp"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
@@ -12,6 +14,15 @@ import (
 )
 
 const defaultContentJSON = `{"type":"doc","content":[{"type":"paragraph"}]}`
+
+const (
+	editorContentRefType = "editor_content"
+	assetStatusReady     = "ready"
+	assetStatusPending   = "pending_delete"
+	assetDeleteDelay     = 24 * time.Hour
+)
+
+var assetContentPathPattern = regexp.MustCompile(`/api/v1/media/assets/([0-9a-fA-F-]{36})/content(?:\?.*)?$`)
 
 // GetContentResult represents the current content of a document.
 type GetContentResult struct {
@@ -65,6 +76,10 @@ func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, erro
 // UpdateContent updates the current content of a document in place.
 func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte) (*UpdateContentResult, error) {
 	contentJSON, err := normalizeContentJSON(contentJSONRaw)
+	if err != nil {
+		return nil, err
+	}
+	assetIDs, err := extractAssetIDsFromContentJSON(contentJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +137,10 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 			contentVersion = body.ContentVersion
 		}
 
+		if err := syncDocumentAssetRefs(tx, userID, documentID, assetIDs, now); err != nil {
+			return err
+		}
+
 		updatedAt = now
 		return tx.Model(&document).Updates(map[string]any{
 			"excerpt":    excerpt,
@@ -146,6 +165,10 @@ func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSON
 	if err != nil {
 		return err
 	}
+	assetIDs, err := extractAssetIDsFromContentJSON(contentJSON)
+	if err != nil {
+		return err
+	}
 
 	contentRecord := &models.DocumentBody{
 		ID:             uuid.New(),
@@ -156,7 +179,11 @@ func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSON
 		UpdatedBy:      userID,
 	}
 
-	return tx.Create(contentRecord).Error
+	if err := tx.Create(contentRecord).Error; err != nil {
+		return err
+	}
+
+	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
 }
 
 // DeleteContentByDocumentID soft deletes the content row for a document.
@@ -169,7 +196,11 @@ func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error 
 		return nil
 	}
 
-	return tx.Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error
+	if err := tx.Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {
+		return err
+	}
+
+	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
 }
 
 // RestoreContentByDocumentID restores the content row for a document.
@@ -182,10 +213,27 @@ func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error
 		return nil
 	}
 
-	return tx.Unscoped().
+	if err := tx.Unscoped().
 		Model(&models.DocumentBody{}).
 		Where("document_id = ?", documentID).
-		Update("deleted_at", nil).Error
+		Update("deleted_at", nil).Error; err != nil {
+		return err
+	}
+
+	var body models.DocumentBody
+	if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	assetIDs, err := extractAssetIDsFromContentJSON(body.ContentJSON)
+	if err != nil {
+		return err
+	}
+
+	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
 }
 
 // PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
@@ -198,7 +246,11 @@ func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUI
 		return nil
 	}
 
-	return tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error
+	if err := tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {
+		return err
+	}
+
+	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
 }
 
 func normalizeContentJSON(raw []byte) (string, error) {
@@ -272,4 +324,258 @@ func BuildExcerptFromContentJSON(contentJSONRaw string) string {
 		return ""
 	}
 	return buildExcerpt(toPlainText(contentJSON))
+}
+
+func extractAssetIDsFromContentJSON(contentJSON string) ([]uuid.UUID, error) {
+	var node any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return nil, errors.New("contentJson must be valid JSON")
+	}
+
+	seen := make(map[uuid.UUID]struct{})
+	assetIDs := make([]uuid.UUID, 0)
+	collectAssetIDs(node, seen, &assetIDs)
+	return assetIDs, nil
+}
+
+func collectAssetIDs(node any, seen map[uuid.UUID]struct{}, out *[]uuid.UUID) {
+	switch v := node.(type) {
+	case map[string]any:
+		if attrs, ok := v["attrs"].(map[string]any); ok {
+			if assetID, ok := extractAssetIDFromAttrs(attrs); ok {
+				if _, exists := seen[assetID]; !exists {
+					seen[assetID] = struct{}{}
+					*out = append(*out, assetID)
+				}
+			}
+		}
+		if children, ok := v["content"].([]any); ok {
+			for _, child := range children {
+				collectAssetIDs(child, seen, out)
+			}
+		}
+	case []any:
+		for _, item := range v {
+			collectAssetIDs(item, seen, out)
+		}
+	}
+}
+
+func extractAssetIDFromAttrs(attrs map[string]any) (uuid.UUID, bool) {
+	if rawAssetID, ok := attrs["assetId"].(string); ok {
+		if assetID, err := uuid.Parse(rawAssetID); err == nil {
+			return assetID, true
+		}
+	}
+
+	rawSrc, ok := attrs["src"].(string)
+	if !ok || rawSrc == "" {
+		return uuid.Nil, false
+	}
+
+	if parsed, err := url.Parse(rawSrc); err == nil {
+		if match := assetContentPathPattern.FindStringSubmatch(parsed.Path); len(match) == 2 {
+			if assetID, err := uuid.Parse(match[1]); err == nil {
+				return assetID, true
+			}
+		}
+	}
+	if match := assetContentPathPattern.FindStringSubmatch(rawSrc); len(match) == 2 {
+		if assetID, err := uuid.Parse(match[1]); err == nil {
+			return assetID, true
+		}
+	}
+
+	return uuid.Nil, false
+}
+
+func syncDocumentAssetRefs(tx *gorm.DB, userID, documentID uuid.UUID, assetIDs []uuid.UUID, now time.Time) error {
+	validAssetIDs, err := filterOwnedAssetIDs(tx, userID, assetIDs)
+	if err != nil {
+		return err
+	}
+	if len(validAssetIDs) != len(assetIDs) {
+		return errors.New("content references invalid assets")
+	}
+
+	var existingRefs []models.DocumentAssetRef
+	if err := tx.
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Find(&existingRefs).Error; err != nil {
+		return err
+	}
+
+	existingSet := make(map[uuid.UUID]models.DocumentAssetRef, len(existingRefs))
+	affectedSet := make(map[uuid.UUID]struct{}, len(validAssetIDs)+len(existingRefs))
+	for _, ref := range existingRefs {
+		existingSet[ref.AssetID] = ref
+		affectedSet[ref.AssetID] = struct{}{}
+	}
+
+	desiredSet := make(map[uuid.UUID]struct{}, len(validAssetIDs))
+	for _, assetID := range validAssetIDs {
+		desiredSet[assetID] = struct{}{}
+		affectedSet[assetID] = struct{}{}
+		if ref, ok := existingSet[assetID]; ok {
+			if err := tx.Model(&models.DocumentAssetRef{}).
+				Where("id = ?", ref.ID).
+				Update("updated_at", now).Error; err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := tx.Create(&models.DocumentAssetRef{
+			ID:          uuid.New(),
+			DocumentID:  documentID,
+			AssetID:     assetID,
+			OwnerUserID: userID,
+			RefType:     editorContentRefType,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	for _, ref := range existingRefs {
+		if _, keep := desiredSet[ref.AssetID]; keep {
+			continue
+		}
+		if err := tx.Unscoped().Delete(&models.DocumentAssetRef{}, "id = ?", ref.ID).Error; err != nil {
+			return err
+		}
+	}
+
+	affectedAssetIDs := make([]uuid.UUID, 0, len(affectedSet))
+	for assetID := range affectedSet {
+		affectedAssetIDs = append(affectedAssetIDs, assetID)
+	}
+
+	return reconcileAssetRefs(tx, affectedAssetIDs, now)
+}
+
+func filterOwnedAssetIDs(tx *gorm.DB, userID uuid.UUID, assetIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if len(assetIDs) == 0 {
+		return nil, nil
+	}
+
+	var assets []models.Asset
+	if err := tx.
+		Where("owner_user_id = ? AND id IN ? AND deleted_at IS NULL", userID, assetIDs).
+		Find(&assets).Error; err != nil {
+		return nil, err
+	}
+
+	validSet := make(map[uuid.UUID]struct{}, len(assets))
+	for _, asset := range assets {
+		validSet[asset.ID] = struct{}{}
+	}
+
+	validAssetIDs := make([]uuid.UUID, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if _, ok := validSet[assetID]; ok {
+			validAssetIDs = append(validAssetIDs, assetID)
+		}
+	}
+	return validAssetIDs, nil
+}
+
+func reconcileAssetRefs(tx *gorm.DB, assetIDs []uuid.UUID, now time.Time) error {
+	for _, assetID := range assetIDs {
+		var refCount int64
+		if err := tx.Model(&models.DocumentAssetRef{}).
+			Where("asset_id = ? AND ref_type = ?", assetID, editorContentRefType).
+			Count(&refCount).Error; err != nil {
+			return err
+		}
+
+		status := assetStatusReady
+		if refCount == 0 {
+			status = assetStatusPending
+		}
+
+		if err := tx.Model(&models.Asset{}).
+			Where("id = ? AND deleted_at IS NULL", assetID).
+			Updates(map[string]any{
+				"reference_count": int(refCount),
+				"status":          status,
+				"updated_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+
+		if refCount == 0 {
+			if err := ensurePendingDeleteJob(tx, assetID, now); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := cancelPendingDeleteJobs(tx, assetID, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensurePendingDeleteJob(tx *gorm.DB, assetID uuid.UUID, now time.Time) error {
+	var existing models.AssetGCJob
+	err := tx.
+		Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").
+		First(&existing).Error
+	switch {
+	case err == nil:
+		return tx.Model(&models.AssetGCJob{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{
+				"run_after":  now.Add(assetDeleteDelay),
+				"updated_at": now,
+			}).Error
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return tx.Create(&models.AssetGCJob{
+			ID:       uuid.New(),
+			AssetID:  assetID,
+			JobType:  "delete",
+			Status:   "pending",
+			RunAfter: now.Add(assetDeleteDelay),
+		}).Error
+	default:
+		return err
+	}
+}
+
+func cancelPendingDeleteJobs(tx *gorm.DB, assetID uuid.UUID, now time.Time) error {
+	return tx.Model(&models.AssetGCJob{}).
+		Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").
+		Updates(map[string]any{
+			"status":     "cancelled",
+			"updated_at": now,
+		}).Error
+}
+
+func removeDocumentAssetRefs(tx *gorm.DB, userID, documentID uuid.UUID, now time.Time) error {
+	var refs []models.DocumentAssetRef
+	if err := tx.
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Find(&refs).Error; err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+
+	assetIDs := make([]uuid.UUID, 0, len(refs))
+	for _, ref := range refs {
+		assetIDs = append(assetIDs, ref.AssetID)
+	}
+
+	if err := tx.Unscoped().
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Delete(&models.DocumentAssetRef{}).Error; err != nil {
+		return err
+	}
+
+	return reconcileAssetRefs(tx, assetIDs, now)
 }

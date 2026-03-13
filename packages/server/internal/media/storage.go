@@ -41,6 +41,7 @@ type StorageProvider interface {
 	ProviderName() string
 	PutObject(ctx context.Context, input PutObjectInput) (*PutObjectResult, error)
 	GetObject(ctx context.Context, objectKey string) (*GetObjectResult, error)
+	DeleteObject(ctx context.Context, objectKey string) error
 }
 
 func newStorageProviderFromEnv() (StorageProvider, error) {
@@ -212,6 +213,30 @@ func (p *s3CompatibleProvider) GetObject(ctx context.Context, objectKey string) 
 		ContentType: contentType,
 		Body:        resp.Body,
 	}, nil
+}
+
+func (p *s3CompatibleProvider) DeleteObject(ctx context.Context, objectKey string) error {
+	if objectKey == "" {
+		return errors.New("object key is required")
+	}
+
+	req, err := p.newSignedRequest(ctx, http.MethodDelete, objectKey, nil, "")
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("s3 delete object failed: status=%d body=%s", resp.StatusCode, string(msg))
+	}
+
+	return nil
 }
 
 func (p *s3CompatibleProvider) newSignedRequest(ctx context.Context, method string, objectKey string, body []byte, contentType string) (*http.Request, error) {
@@ -427,4 +452,17 @@ func (p *localStorageProvider) GetObject(_ context.Context, objectKey string) (*
 		ContentType: contentType,
 		Body:        f,
 	}, nil
+}
+
+func (p *localStorageProvider) DeleteObject(_ context.Context, objectKey string) error {
+	if objectKey == "" {
+		return errors.New("object key is required")
+	}
+
+	filePath := filepath.Join(p.rootDir, filepath.FromSlash(objectKey))
+	if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return nil
 }
