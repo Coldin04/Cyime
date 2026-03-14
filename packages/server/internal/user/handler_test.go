@@ -153,6 +153,37 @@ func TestUploadAvatarHandler_StoresAvatarAndUpdatesUser(t *testing.T) {
 	}
 }
 
+func TestUploadAvatarHandler_RejectsTooLargeAvatar(t *testing.T) {
+	db := setupUserTestDB(t)
+	user := seedUser(t, db)
+
+	rootDir := t.TempDir()
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", rootDir)
+	t.Setenv("MEDIA_LOCAL_BASE_URL", "/media-files")
+	t.Setenv("MEDIA_AVATAR_MAX_BYTES", "4")
+	t.Setenv("JWT_SECRET_KEY", "test-secret")
+	media.ResetStorageProviderForTesting()
+
+	app := newUserTestApp(user.ID)
+	req := multipartAvatarRequest(t, http.MethodPost, "/user/avatar", "file", "avatar.png", "image/png", []byte("12345678"))
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(payload["error"], "avatar file too large") {
+		t.Fatalf("unexpected error payload: %+v", payload)
+	}
+}
+
 func TestUpdateGitHubAvatarHandler_ClearsStoredObjectKeyAndDeletesOldUpload(t *testing.T) {
 	db := setupUserTestDB(t)
 	user := seedUser(t, db)
