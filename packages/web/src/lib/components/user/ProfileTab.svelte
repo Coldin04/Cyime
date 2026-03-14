@@ -1,17 +1,33 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
+	import { setLocale } from '$paraglide/runtime';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { auth } from '$lib/stores/auth';
 	import { updateDisplayName } from '$lib/api/user';
 	import AvatarEditDialog from '$lib/components/user/AvatarEditDialog.svelte';
+	import {
+		clearManualLocaleCookie,
+		getManualLocaleFromDocument,
+		setManualLocaleCookie
+	} from '$lib/i18n/manual-locale-cookie';
 
 	let displayName = $state('');
 	let avatarDialogOpen = $state(false);
 	let savingDisplayName = $state(false);
+	type LocalePreference = 'system' | 'en' | 'zh';
+	let localePreference = $state<LocalePreference>('system');
+	let switchingLocale = $state(false);
 
 	$effect(() => {
 		displayName = $auth.user?.displayName ?? '';
+	});
+
+	onMount(() => {
+		const manualLocale = getManualLocaleFromDocument();
+		localePreference = manualLocale === 'en' || manualLocale === 'zh' ? manualLocale : 'system';
 	});
 
 	async function handleDisplayNameSubmit(event?: SubmitEvent) {
@@ -31,6 +47,32 @@
 			toast.error(error instanceof Error ? error.message : m.user_profile_display_name_update_failed());
 		} finally {
 			savingDisplayName = false;
+		}
+	}
+
+	async function handleLocaleChange(event: Event) {
+		const next = (event.currentTarget as HTMLSelectElement | null)?.value;
+		if (next !== 'system' && next !== 'en' && next !== 'zh') return;
+		if (next === localePreference) return;
+
+		switchingLocale = true;
+		try {
+			if (next === 'system') {
+				clearManualLocaleCookie();
+				localePreference = 'system';
+				if (browser) {
+					window.location.reload();
+				}
+				return;
+			}
+
+			setManualLocaleCookie(next);
+			localePreference = next;
+			await setLocale(next);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : m.user_profile_language_update_failed());
+		} finally {
+			switchingLocale = false;
 		}
 	}
 </script>
@@ -74,6 +116,26 @@
 				{savingDisplayName ? m.common_saving() : m.common_save()}
 			</button>
 		</form>
+	</div>
+
+	<!-- Language Row -->
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4">
+		<div class="space-y-1 sm:w-1/3">
+			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">{m.user_profile_language_title()}</h2>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">{m.user_profile_language_description()}</p>
+		</div>
+		<div class="flex w-full flex-1 gap-3 sm:max-w-md">
+			<select
+				value={localePreference}
+				onchange={handleLocaleChange}
+				disabled={switchingLocale}
+				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+			>
+				<option value="system">{m.user_profile_language_option_system()}</option>
+				<option value="zh">{m.user_profile_language_option_zh()}</option>
+				<option value="en">{m.user_profile_language_option_en()}</option>
+			</select>
+		</div>
 	</div>
 
 	<!-- Email Row -->
