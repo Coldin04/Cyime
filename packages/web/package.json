@@ -43,6 +43,7 @@
 		"@tiptap/starter-kit": "^3.20.1",
 		"marked": "^17.0.4",
 		"phosphor-svelte": "^3.1.0",
+		"svelte-easy-crop": "^5.0.0",
 		"svelte-sonner": "^1.0.8"
 	}
 }
