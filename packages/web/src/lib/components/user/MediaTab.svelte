@@ -1,8 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import * as m from '$paraglide/messages';
 	import type { MediaAssetItem, MediaAssetReferencesResponse } from '$lib/api/media';
-	import { deleteMediaAsset, getMediaAssetReferences, listMediaAssets } from '$lib/api/media';
+	import { deleteMediaAsset, getMediaAssetReferences, getMediaAssetURL, listMediaAssets } from '$lib/api/media';
+	import CopySimple from '~icons/ph/copy-simple';
+	import Check from '~icons/ph/check';
+	import FileImage from '~icons/ph/file-image';
+	import FileVideo from '~icons/ph/file-video';
+	import File from '~icons/ph/file';
 
 	const PAGE_SIZE = 20;
 
@@ -21,10 +27,15 @@
 	let referencesOpen = $state(false);
 	let referencesLoading = $state(false);
 	let referencesError = $state('');
+	let referencesHint = $state('');
 	let referencesAsset: MediaAssetItem | null = $state(null);
 	let referencesData: MediaAssetReferencesResponse | null = $state(null);
 	let listRequestId = 0;
 	let refsRequestId = 0;
+	let copiedDocumentID = $state('');
+	let previewURLByAssetID = $state<Record<string, string>>({});
+	let previewLoadingByAssetID = $state<Record<string, boolean>>({});
+	let previewFailedByAssetID = $state<Record<string, boolean>>({});
 
 	onMount(() => {
 		void loadAssets();
@@ -51,16 +62,64 @@
 	function statusLabel(statusValue: string): string {
 		switch (statusValue) {
 			case 'ready':
-				return '正常';
+				return m.user_media_status_ready();
 			case 'pending_delete':
-				return '待清理';
+				return m.user_media_status_pending_delete();
 			case 'deleted':
-				return '已删除';
+				return m.user_media_status_deleted();
 			case 'failed':
-				return '异常';
+				return m.user_media_status_failed();
 			default:
 				return statusValue;
 		}
+	}
+
+	function isImageAsset(item: MediaAssetItem): boolean {
+		return item.kind === 'image' && item.status !== 'deleted';
+	}
+
+	function hasReferences(item: MediaAssetItem): boolean {
+		return item.referenceCount > 0;
+	}
+
+	async function loadPreviewURL(item: MediaAssetItem) {
+		if (!isImageAsset(item)) return;
+		if (previewURLByAssetID[item.id] || previewLoadingByAssetID[item.id]) return;
+
+		previewLoadingByAssetID = { ...previewLoadingByAssetID, [item.id]: true };
+		try {
+			const result = await getMediaAssetURL(item.id);
+			previewURLByAssetID = { ...previewURLByAssetID, [item.id]: result.url };
+			if (previewFailedByAssetID[item.id]) {
+				const next = { ...previewFailedByAssetID };
+				delete next[item.id];
+				previewFailedByAssetID = next;
+			}
+		} catch (error) {
+			console.error('load media preview failed', error);
+			previewFailedByAssetID = { ...previewFailedByAssetID, [item.id]: true };
+		} finally {
+			const next = { ...previewLoadingByAssetID };
+			delete next[item.id];
+			previewLoadingByAssetID = next;
+		}
+	}
+
+	function onPreviewImageError(itemID: string) {
+		previewFailedByAssetID = { ...previewFailedByAssetID, [itemID]: true };
+	}
+
+	function deleteDisabledReason(item: MediaAssetItem): string {
+		if (item.deletable) return '';
+		if (item.status === 'deleted') return m.user_media_delete_disabled_deleted();
+		if (item.referenceCount > 0) return m.user_media_delete_disabled_referenced();
+		return m.user_media_delete_disabled_unavailable();
+	}
+
+	function deleteButtonLabel(item: MediaAssetItem): string {
+		if (item.status === 'deleted') return m.user_media_status_deleted();
+		if (item.deletable) return m.user_media_action_delete_permanently();
+		return m.user_media_action_delete();
 	}
 
 	async function loadAssets() {
@@ -79,9 +138,12 @@
 			items = result.items;
 			total = result.total;
 			hasMore = result.hasMore;
+			for (const item of result.items.slice(0, 6)) {
+				void loadPreviewURL(item);
+			}
 		} catch (error) {
 			if (requestId !== listRequestId) return;
-			errorMessage = error instanceof Error ? error.message : '加载媒体资源失败';
+			errorMessage = error instanceof Error ? error.message : m.user_media_error_load_assets();
 			items = [];
 			total = 0;
 			hasMore = false;
@@ -109,12 +171,13 @@
 		await loadAssets();
 	}
 
-	async function openReferences(asset: MediaAssetItem) {
+	async function openReferences(asset: MediaAssetItem, hint = '') {
 		const requestId = ++refsRequestId;
 		referencesOpen = true;
 		referencesAsset = asset;
 		referencesLoading = true;
 		referencesError = '';
+		referencesHint = hint;
 		referencesData = null;
 		try {
 			const data = await getMediaAssetReferences(asset.id);
@@ -122,7 +185,7 @@
 			referencesData = data;
 		} catch (error) {
 			if (requestId !== refsRequestId) return;
-			referencesError = error instanceof Error ? error.message : '加载引用失败';
+			referencesError = error instanceof Error ? error.message : m.user_media_error_load_references();
 		} finally {
 			if (requestId !== refsRequestId) return;
 			referencesLoading = false;
@@ -135,22 +198,43 @@
 		referencesAsset = null;
 		referencesData = null;
 		referencesError = '';
+		referencesHint = '';
+	}
+
+	async function copyDocumentID(documentID: string) {
+		try {
+			await navigator.clipboard.writeText(documentID);
+			copiedDocumentID = documentID;
+			toast.success(m.user_media_toast_document_id_copied());
+			setTimeout(() => {
+				if (copiedDocumentID === documentID) copiedDocumentID = '';
+			}, 1200);
+		} catch {
+			toast.error(m.user_media_toast_copy_failed());
+		}
 	}
 
 	async function handleDeleteAsset(asset: MediaAssetItem) {
+		if (asset.status === 'deleted') return;
 		if (!asset.deletable) return;
-		const ok = confirm(`确认删除资源 "${asset.filename}" 吗？此操作不可恢复。`);
+		const ok = confirm(m.user_media_confirm_delete_asset({ filename: asset.filename }));
 		if (!ok) return;
 
 		try {
 			await deleteMediaAsset(asset.id);
-			toast.success('资源已删除');
+			toast.success(m.user_media_toast_deleted());
 			if (items.length === 1 && offset > 0) {
 				offset = Math.max(0, offset - PAGE_SIZE);
 			}
 			await loadAssets();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '删除失败');
+			const message = error instanceof Error ? error.message : m.user_media_toast_delete_failed();
+			if (message.includes('referenced')) {
+				toast.error(m.user_media_toast_cannot_delete_referenced());
+				await loadAssets();
+				return;
+			}
+			toast.error(message);
 		}
 	}
 </script>
@@ -160,7 +244,7 @@
 		<input
 			bind:value={queryInput}
 			type="text"
-			placeholder="搜索文件名"
+			placeholder={m.user_media_search_placeholder()}
 			class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 			onkeydown={async (e) => {
 				if (e.key === 'Enter') {
@@ -174,28 +258,28 @@
 			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 			onchange={applyFilters}
 		>
-			<option value="all">全部类型</option>
-			<option value="image">图片</option>
-			<option value="video">视频</option>
-			<option value="file">文件</option>
+			<option value="all">{m.user_media_filter_kind_all()}</option>
+			<option value="image">{m.user_media_filter_kind_image()}</option>
+			<option value="video">{m.user_media_filter_kind_video()}</option>
+			<option value="file">{m.user_media_filter_kind_file()}</option>
 		</select>
 		<select
 			bind:value={status}
 			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 			onchange={applyFilters}
 		>
-			<option value="all">全部状态</option>
-			<option value="ready">正常</option>
-			<option value="pending_delete">待清理</option>
-			<option value="deleted">已删除</option>
-			<option value="failed">异常</option>
+			<option value="all">{m.user_media_filter_status_all()}</option>
+			<option value="ready">{m.user_media_status_ready()}</option>
+			<option value="pending_delete">{m.user_media_status_pending_delete()}</option>
+			<option value="deleted">{m.user_media_status_deleted()}</option>
+			<option value="failed">{m.user_media_status_failed()}</option>
 		</select>
 		<button
 			type="button"
 			class="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 			onclick={applyFilters}
 		>
-			搜索
+			{m.user_media_action_search()}
 		</button>
 	</div>
 
@@ -207,38 +291,82 @@
 
 	<div class="rounded-xl border border-zinc-200 dark:border-zinc-700/50">
 		{#if loading}
-			<div class="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">加载中...</div>
+			<div class="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_loading()}</div>
 		{:else if items.length === 0}
-			<div class="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">暂无媒体资源</div>
+			<div class="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_empty()}</div>
 		{:else}
 			<div class="divide-y divide-zinc-100 dark:divide-zinc-800/70">
 				{#each items as item (item.id)}
-					<div class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-						<div class="min-w-0">
-							<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{item.filename}</p>
-							<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-								{item.kind.toUpperCase()} · {formatBytes(item.fileSize)} · {item.mimeType}
-							</p>
-							<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-								状态：{statusLabel(item.status)} · 引用：{item.referenceCount} · 上传时间：{formatDate(item.createdAt)}
-							</p>
+					<div class="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_240px] sm:items-center sm:gap-4">
+						<div class="min-w-0 flex items-start gap-3">
+							<div class="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
+								{#if isImageAsset(item) && previewURLByAssetID[item.id] && !previewFailedByAssetID[item.id]}
+									<img
+										src={previewURLByAssetID[item.id]}
+										alt={item.filename}
+										class="h-full w-full object-cover"
+										loading="lazy"
+										onerror={() => onPreviewImageError(item.id)}
+									/>
+								{:else}
+									<div class="grid h-full w-full place-content-center text-zinc-500 dark:text-zinc-400">
+										{#if item.kind === 'image'}
+											<FileImage class="h-5 w-5" />
+										{:else if item.kind === 'video'}
+											<FileVideo class="h-5 w-5" />
+										{:else}
+											<File class="h-5 w-5" />
+										{/if}
+									</div>
+								{/if}
+							</div>
+
+							<div class="min-w-0">
+								<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{item.filename}</p>
+								<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+									{item.kind === 'image'
+										? m.user_media_filter_kind_image()
+										: item.kind === 'video'
+											? m.user_media_filter_kind_video()
+											: item.kind === 'file'
+												? m.user_media_filter_kind_file()
+												: item.kind.toUpperCase()} · {formatBytes(item.fileSize)} · {item.mimeType}
+								</p>
+								<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+									{m.user_media_meta_status()}：{statusLabel(item.status)} · {m.user_media_meta_reference()}：{item.referenceCount} · {m.user_media_meta_uploaded_at()}：{formatDate(item.createdAt)}
+								</p>
+							</div>
 						</div>
-						<div class="flex flex-wrap items-center gap-2">
-							<button
-								type="button"
-								class="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-								onclick={() => openReferences(item)}
-							>
-								查看引用
-							</button>
-							<button
-								type="button"
-								class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-								disabled={!item.deletable}
-								onclick={() => handleDeleteAsset(item)}
-							>
-								删除
-							</button>
+						<div class="flex flex-wrap items-center gap-2 sm:justify-end sm:pl-2">
+							{#if isImageAsset(item) && !previewURLByAssetID[item.id] && !previewLoadingByAssetID[item.id]}
+								<button
+									type="button"
+									class="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+									onclick={() => loadPreviewURL(item)}
+								>
+									{m.user_media_action_load_preview()}
+								</button>
+							{/if}
+							{#if hasReferences(item)}
+								<button
+									type="button"
+									class="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+									onclick={() => openReferences(item, m.user_media_delete_hint_remove_references())}
+								>
+									{m.user_media_action_view_references()}
+								</button>
+							{/if}
+							{#if !hasReferences(item)}
+								<button
+									type="button"
+									class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+									disabled={item.status === 'deleted'}
+									title={item.status === 'deleted' ? deleteDisabledReason(item) : m.user_media_action_delete()}
+									onclick={() => handleDeleteAsset(item)}
+								>
+									{deleteButtonLabel(item)}
+								</button>
+							{/if}
 						</div>
 					</div>
 				{/each}
@@ -247,7 +375,7 @@
 	</div>
 
 	<div class="flex items-center justify-between text-sm">
-		<p class="text-zinc-500 dark:text-zinc-400">共 {total} 项</p>
+		<p class="text-zinc-500 dark:text-zinc-400">{m.user_media_total_items({ count: total })}</p>
 		<div class="flex gap-2">
 			<button
 				type="button"
@@ -255,7 +383,7 @@
 				disabled={offset === 0 || loading}
 				onclick={goPrevPage}
 			>
-				上一页
+				{m.user_media_action_previous_page()}
 			</button>
 			<button
 				type="button"
@@ -263,7 +391,7 @@
 				disabled={!hasMore || loading}
 				onclick={goNextPage}
 			>
-				下一页
+				{m.user_media_action_next_page()}
 			</button>
 		</div>
 	</div>
@@ -274,7 +402,7 @@
 		<div class="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
 			<div class="flex items-start justify-between gap-3">
 				<div>
-					<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">资源引用</h3>
+					<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.user_media_references_title()}</h3>
 					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400 truncate">
 						{referencesAsset?.filename}
 					</p>
@@ -289,14 +417,19 @@
 			</div>
 
 			<div class="mt-4">
+				{#if referencesHint}
+					<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
+						{referencesHint}
+					</p>
+				{/if}
 				{#if referencesLoading}
-					<p class="text-sm text-zinc-500 dark:text-zinc-400">加载中...</p>
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_loading()}</p>
 				{:else if referencesError}
 					<p class="text-sm text-red-600 dark:text-red-300">{referencesError}</p>
 				{:else if referencesData}
-					<p class="text-sm text-zinc-600 dark:text-zinc-300">被 {referencesData.referenceCount} 篇文档引用</p>
+					<p class="text-sm text-zinc-600 dark:text-zinc-300">{m.user_media_references_count({ count: referencesData.referenceCount })}</p>
 					{#if referencesData.documents.length === 0}
-						<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">暂无引用文档</p>
+						<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_references_empty()}</p>
 					{:else}
 						<ul class="mt-3 space-y-2">
 							{#each referencesData.documents as doc (doc.documentId)}
@@ -306,12 +439,27 @@
 											<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{doc.title}</p>
 											<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{formatDate(doc.updatedAt)}</p>
 										</div>
-										<a
-											href={`/edit/documents/${doc.documentId}`}
-											class="shrink-0 text-xs font-medium text-riptide-700 hover:underline dark:text-riptide-300"
-										>
-											前往文档
-										</a>
+										<div class="shrink-0 flex items-center gap-2">
+											<button
+												type="button"
+												class="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+												onclick={() => copyDocumentID(doc.documentId)}
+											>
+												{#if copiedDocumentID === doc.documentId}
+													<Check class="h-3.5 w-3.5" />
+													{m.user_media_action_copied()}
+												{:else}
+													<CopySimple class="h-3.5 w-3.5" />
+													{m.user_media_action_copy_id()}
+												{/if}
+											</button>
+											<a
+												href={`/edit/documents/${doc.documentId}`}
+												class="text-xs font-medium text-riptide-700 hover:underline dark:text-riptide-300"
+											>
+												{m.user_media_action_open_document()}
+											</a>
+										</div>
 									</div>
 								</li>
 							{/each}

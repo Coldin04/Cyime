@@ -56,9 +56,9 @@
 					<UserAvatar size={40} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
 					<div class="min-w-0">
 						<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-							{$auth.user?.displayName || 'User'}
+							{$auth.user?.displayName || m.user_common_default_name()}
 						</p>
-						<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{$auth.user?.email || 'No email'}</p>
+						<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{$auth.user?.email || m.user_common_no_email()}</p>
 					</div>
 				</div>
 				<CaretDown class={`h-4 w-4 text-zinc-500 transition-transform ${mobileNavOpen ? 'rotate-180' : ''}`} />
@@ -86,9 +86,9 @@
 				<UserAvatar size={44} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
 				<div class="min-w-0">
 					<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{$auth.user?.displayName || 'User'}
+						{$auth.user?.displayName || m.user_common_default_name()}
 					</p>
-					<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{$auth.user?.email || 'No email'}</p>
+					<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{$auth.user?.email || m.user_common_no_email()}</p>
 				</div>
 			</div>
 			<nav class="space-y-1">

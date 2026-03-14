@@ -33,6 +33,12 @@ export type MediaAssetReferencesResponse = {
 	documents: MediaAssetReferenceDocument[];
 };
 
+export type MediaAssetURLResponse = {
+	assetId: string;
+	url: string;
+	expiresAt: string;
+};
+
 type ListMediaAssetsParams = {
 	kind?: 'all' | 'image' | 'video' | 'file';
 	status?: 'all' | 'ready' | 'pending_delete' | 'deleted' | 'failed';
@@ -64,6 +70,11 @@ export async function listMediaAssets(params: ListMediaAssetsParams): Promise<Me
 export async function getMediaAssetReferences(assetId: string): Promise<MediaAssetReferencesResponse> {
 	const response = await apiFetch(`/api/v1/media/assets/${assetId}/references`);
 	return parseJSONOrThrow<MediaAssetReferencesResponse>(response, 'Failed to fetch asset references');
+}
+
+export async function getMediaAssetURL(assetId: string): Promise<MediaAssetURLResponse> {
+	const response = await apiFetch(`/api/v1/media/assets/${assetId}/url`);
+	return parseJSONOrThrow<MediaAssetURLResponse>(response, 'Failed to fetch media url');
 }
 
 export async function deleteMediaAsset(assetId: string): Promise<void> {

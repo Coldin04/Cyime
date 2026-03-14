@@ -201,10 +201,10 @@
 						<UserAvatar size={64} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
 						<div class="min-w-0">
 							<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{$auth.user?.displayName || 'User'}
+								{$auth.user?.displayName || m.user_common_default_name()}
 							</p>
 							<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">
-								{$auth.user?.email || 'No email'}
+								{$auth.user?.email || m.user_common_no_email()}
 							</p>
 						</div>
 					</div>

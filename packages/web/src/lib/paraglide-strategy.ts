@@ -1,34 +1,29 @@
 import { defineCustomClientStrategy } from '../paraglide/runtime.js';
 import { browser } from '$app/environment';
+import { getCookieValue, MANUAL_LOCALE_COOKIE_NAME } from '$lib/i18n/manual-locale-cookie';
 
 if (browser) {
 
-
 	/**
-	 * A custom cookie strategy that only writes the cookie after the initial, automatic
-	 * `setLocale` call. This prevents the browser's preferred language from being
-	 * immediately persisted on a user's first visit, allowing for proper language
-	 * detection on subsequent visits until a language is explicitly chosen.
+	 * A custom cookie strategy that only reads a manually-managed cookie.
+	 * It intentionally does not persist cookie on `setLocale`.
 	 */
 	defineCustomClientStrategy('custom-manual-cookie', {
 		/**
-		 * Reads the locale from the 'PARAGLIDE_LOCALE' cookie.
+		 * Reads locale from manually managed cookie `cyime-locale`.
 		 * @returns The locale string or `undefined` if the cookie is not set.
 		 */
 		getLocale: () => {
-			const match = document.cookie.match(/CYIMEWRITE_LOCALE=([^;]+)/);
-			return match ? match[1] : undefined;
+			return getCookieValue(document.cookie, MANUAL_LOCALE_COOKIE_NAME);
 		},
 
 		/**
-		 * Sets the 'PARAGLIDE_LOCALE' cookie, but skips the very first call.
+		 * Intentionally no-op:
+		 * locale cookie is written by manual app logic only.
 		 * @param {string} locale - The locale to set.
 		 */
-		setLocale: (locale) => {
-			// The locale is now managed manually by the application.
-			// This function will not automatically write the cookie.
-			// Developers must manually set `document.cookie = `CYIMEWRITE_LOCALE=${locale};path=/;max-age=31536000;SameSite=Lax`
-			// in their application code when a persistent language change is desired.
+		setLocale: (_locale) => {
+			// no-op by design
 		}
 	});
 }

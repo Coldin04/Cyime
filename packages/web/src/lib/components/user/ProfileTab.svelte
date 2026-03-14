@@ -18,7 +18,7 @@
 		event?.preventDefault();
 		const nextName = displayName.trim();
 		if (!nextName) {
-			toast.error('昵称不能为空');
+			toast.error(m.user_profile_display_name_required());
 			return;
 		}
 
@@ -26,9 +26,9 @@
 		try {
 			const user = await updateDisplayName(nextName);
 			auth.setUser(user);
-			toast.success('昵称已更新');
+			toast.success(m.user_profile_display_name_updated());
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '昵称更新失败');
+			toast.error(error instanceof Error ? error.message : m.user_profile_display_name_update_failed());
 		} finally {
 			savingDisplayName = false;
 		}
@@ -39,8 +39,8 @@
 	<!-- Avatar Row -->
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 pb-6 dark:border-zinc-800/50">
 		<div class="space-y-1 pr-4">
-			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">头像</h2>
-			<p class="text-xs text-zinc-500 dark:text-zinc-400">点击头像可修改或上传新图片。</p>
+			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">{m.user_profile_avatar_title()}</h2>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">{m.user_profile_avatar_description()}</p>
 		</div>
 		<button
 			type="button"
@@ -55,8 +55,8 @@
 	<!-- Display Name Row -->
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-6">
 		<div class="space-y-1 sm:w-1/3">
-			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">昵称</h2>
-			<p class="text-xs text-zinc-500 dark:text-zinc-400">用于在平台中展示的名称。</p>
+			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">{m.user_profile_display_name_title()}</h2>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">{m.user_profile_display_name_description()}</p>
 		</div>
 		<form class="flex w-full flex-1 gap-3 sm:max-w-md" onsubmit={handleDisplayNameSubmit}>
 			<input
@@ -64,14 +64,14 @@
 				type="text"
 				maxlength="80"
 				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
-				placeholder="输入你想展示的昵称"
+				placeholder={m.user_profile_display_name_placeholder()}
 			/>
 			<button
 				type="submit"
 				class="shrink-0 rounded-lg bg-zinc-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 				disabled={savingDisplayName}
 			>
-				{savingDisplayName ? '保存中...' : '保存'}
+				{savingDisplayName ? m.common_saving() : m.common_save()}
 			</button>
 		</form>
 	</div>
@@ -80,14 +80,14 @@
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4">
 		<div class="space-y-1 sm:w-1/3">
 			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-				邮箱
-				<span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">建设中</span>
+				{m.user_profile_email_title()}
+				<span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">{m.user_profile_badge_wip()}</span>
 			</h2>
-			<p class="text-xs text-zinc-500 dark:text-zinc-400">关联和登录使用的邮箱地址。</p>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">{m.user_profile_email_description()}</p>
 		</div>
 		<div class="flex w-full flex-1 gap-3 sm:max-w-md">
 			<input
-				value={$auth.user?.email || 'No email'}
+				value={$auth.user?.email || m.user_common_no_email()}
 				type="text"
 				disabled
 				class="w-full flex-1 rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-2 text-sm text-zinc-500 outline-none cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900/20 dark:text-zinc-500"
@@ -97,7 +97,7 @@
 				disabled
 				class="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-5 py-2 text-sm font-medium text-zinc-400 cursor-not-allowed dark:border-zinc-800 dark:text-zinc-600"
 			>
-				修改
+				{m.user_profile_email_action_edit()}
 			</button>
 		</div>
 	</div>
