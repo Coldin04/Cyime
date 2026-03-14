@@ -2,6 +2,7 @@
 	import * as m from '$paraglide/messages';
 	import { toast } from 'svelte-sonner';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
+	import { avatarMaxBytes, avatarOutputSize } from '$lib/config/avatar';
 	import { auth } from '$lib/stores/auth';
 	import { setGitHubAvatar, updateDisplayName, uploadAvatar } from '$lib/api/user';
 
@@ -44,7 +45,14 @@
 
 		uploadingAvatar = true;
 		try {
-			const user = await uploadAvatar(file);
+			const prepared = await prepareAvatarFile(file);
+			if (prepared.size > avatarMaxBytes) {
+				const maxMB = (avatarMaxBytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
+				toast.error(`头像处理后仍超过 ${maxMB}MB，请换一张更小的图片`);
+				return;
+			}
+
+			const user = await uploadAvatar(prepared);
 			auth.setUser(user);
 			avatarDialogOpen = false;
 			toast.success('头像已更新');
@@ -78,6 +86,74 @@
 		} finally {
 			savingGitHubAvatar = false;
 		}
+	}
+
+	async function prepareAvatarFile(file: File): Promise<File> {
+		if (!file.type.startsWith('image/')) {
+			throw new Error('请选择图片文件');
+		}
+
+		const img = await loadImage(file);
+		const sourceSize = Math.min(img.width, img.height);
+		const sourceX = Math.floor((img.width - sourceSize) / 2);
+		const sourceY = Math.floor((img.height - sourceSize) / 2);
+
+		const canvas = document.createElement('canvas');
+		canvas.width = avatarOutputSize;
+		canvas.height = avatarOutputSize;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) {
+			throw new Error('无法处理头像图片');
+		}
+
+		ctx.imageSmoothingEnabled = true;
+		ctx.imageSmoothingQuality = 'high';
+		ctx.drawImage(
+			img,
+			sourceX,
+			sourceY,
+			sourceSize,
+			sourceSize,
+			0,
+			0,
+			avatarOutputSize,
+			avatarOutputSize
+		);
+
+		const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
+		return new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+	}
+
+	function loadImage(file: File): Promise<HTMLImageElement> {
+		return new Promise((resolve, reject) => {
+			const objectURL = URL.createObjectURL(file);
+			const img = new Image();
+			img.onload = () => {
+				URL.revokeObjectURL(objectURL);
+				resolve(img);
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(objectURL);
+				reject(new Error('图片加载失败'));
+			};
+			img.src = objectURL;
+		});
+	}
+
+	function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+		return new Promise((resolve, reject) => {
+			canvas.toBlob(
+				(blob) => {
+					if (!blob) {
+						reject(new Error('头像处理失败'));
+						return;
+					}
+					resolve(blob);
+				},
+				type,
+				quality
+			);
+		});
 	}
 </script>
 

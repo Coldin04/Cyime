@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
@@ -101,6 +102,9 @@ func UploadAvatarHandler(c *fiber.Ctx) error {
 		case "file is required":
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		default:
+			if errors.Is(err, media.ErrAvatarFileTooLarge) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+			}
 			if len(err.Error()) >= len("unsupported avatar file type:") && err.Error()[:len("unsupported avatar file type:")] == "unsupported avatar file type:" {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 			}

@@ -3,14 +3,21 @@ package media
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+const defaultAvatarMaxBytes int64 = 2 * 1024 * 1024
+
+var ErrAvatarFileTooLarge = errors.New("avatar file too large")
 
 type UploadUserAvatarResult struct {
 	URL       string
@@ -28,6 +35,10 @@ func UploadUserAvatar(ctx context.Context, userID uuid.UUID, fileHeader *multipa
 	if !ok || !strings.HasPrefix(contentType, "image/") {
 		return nil, fmt.Errorf("unsupported avatar file type: %s", contentType)
 	}
+	maxBytes := avatarMaxBytes()
+	if fileHeader.Size > 0 && fileHeader.Size > maxBytes {
+		return nil, fmt.Errorf("%w: max %d bytes", ErrAvatarFileTooLarge, maxBytes)
+	}
 	if err := initStorageProvider(); err != nil {
 		return nil, err
 	}
@@ -41,6 +52,9 @@ func UploadUserAvatar(ctx context.Context, userID uuid.UUID, fileHeader *multipa
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(fileBytes)) > maxBytes {
+		return nil, fmt.Errorf("%w: max %d bytes", ErrAvatarFileTooLarge, maxBytes)
 	}
 
 	objectKey := buildUserAvatarObjectKey(userID, fileHeader.Filename)
@@ -87,4 +101,16 @@ func GetStoredObject(ctx context.Context, objectKey string) (*GetObjectResult, e
 		return nil, err
 	}
 	return storageProvider.GetObject(ctx, objectKey)
+}
+
+func avatarMaxBytes() int64 {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_AVATAR_MAX_BYTES"))
+	if raw == "" {
+		return defaultAvatarMaxBytes
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed <= 0 {
+		return defaultAvatarMaxBytes
+	}
+	return parsed
 }
