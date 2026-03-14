@@ -18,7 +18,7 @@
 		event?.preventDefault();
 		const nextName = displayName.trim();
 		if (!nextName) {
-			toast.error(m.user_avatar_error_invalid_type()); // Generic error for now or add a new one
+			toast.error('昵称不能为空');
 			return;
 		}
 
@@ -26,73 +26,76 @@
 		try {
 			const user = await updateDisplayName(nextName);
 			auth.setUser(user);
-			toast.success(m.user_avatar_success_updated());
+			toast.success('昵称已更新');
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : 'Update failed');
+			toast.error(error instanceof Error ? error.message : '昵称更新失败');
 		} finally {
 			savingDisplayName = false;
 		}
 	}
 </script>
 
-<div class="space-y-8">
+<div class="flex flex-col gap-4">
 	<!-- Avatar Row -->
-	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 pb-8 dark:border-zinc-800/50">
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 pb-6 dark:border-zinc-800/50">
 		<div class="space-y-1 pr-4">
 			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">头像</h2>
-			<p class="text-sm text-zinc-500 dark:text-zinc-400">点击头像可修改或上传新图片。</p>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">点击头像可修改或上传新图片。</p>
 		</div>
 		<button
 			type="button"
 			class="group relative shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-riptide-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
 			onclick={() => (avatarDialogOpen = true)}
 		>
-			<UserAvatar size={72} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
+			<UserAvatar size={64} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
 			<span class="pointer-events-none absolute inset-0 rounded-full bg-black/0 transition group-hover:bg-black/10 dark:group-hover:bg-white/10"></span>
 		</button>
 	</div>
 
 	<!-- Display Name Row -->
-	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 pb-8 dark:border-zinc-800/50">
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-6">
 		<div class="space-y-1 sm:w-1/3">
 			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">昵称</h2>
-			<p class="text-sm text-zinc-500 dark:text-zinc-400">用于在平台中展示的名称。</p>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">用于在平台中展示的名称。</p>
 		</div>
 		<form class="flex w-full flex-1 gap-3 sm:max-w-md" onsubmit={handleDisplayNameSubmit}>
 			<input
 				bind:value={displayName}
 				type="text"
 				maxlength="80"
-				class="w-full flex-1 rounded-xl border border-zinc-200 bg-transparent px-4 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 				placeholder="输入你想展示的昵称"
 			/>
 			<button
 				type="submit"
-				class="shrink-0 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+				class="shrink-0 rounded-lg bg-zinc-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 				disabled={savingDisplayName}
 			>
-				{savingDisplayName ? m.common_saving() : m.common_save()}
+				{savingDisplayName ? '保存中...' : '保存'}
 			</button>
 		</form>
 	</div>
 
 	<!-- Email Row -->
-	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4">
 		<div class="space-y-1 sm:w-1/3">
-			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100">邮箱</h2>
-			<p class="text-sm text-zinc-500 dark:text-zinc-400">关联和登录使用的邮箱地址。</p>
+			<h2 class="text-base font-medium text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+				邮箱
+				<span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">建设中</span>
+			</h2>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400">关联和登录使用的邮箱地址。</p>
 		</div>
 		<div class="flex w-full flex-1 gap-3 sm:max-w-md">
 			<input
 				value={$auth.user?.email || 'No email'}
 				type="text"
 				disabled
-				class="w-full flex-1 rounded-xl border border-zinc-200 bg-zinc-50/50 px-4 py-2.5 text-sm text-zinc-500 outline-none cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900/20 dark:text-zinc-500"
+				class="w-full flex-1 rounded-lg border border-zinc-200 bg-zinc-50/50 px-4 py-2 text-sm text-zinc-500 outline-none cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900/20 dark:text-zinc-500"
 			/>
 			<button
 				type="button"
 				disabled
-				class="shrink-0 rounded-xl border border-zinc-200 bg-transparent px-5 py-2.5 text-sm font-medium text-zinc-400 cursor-not-allowed dark:border-zinc-800 dark:text-zinc-600"
+				class="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-5 py-2 text-sm font-medium text-zinc-400 cursor-not-allowed dark:border-zinc-800 dark:text-zinc-600"
 			>
 				修改
 			</button>
