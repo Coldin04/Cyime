@@ -1,6 +1,6 @@
-import { defineCustomClientStrategy } from '../paraglide/runtime.js';
+import { defineCustomClientStrategy, isLocale } from '../paraglide/runtime.js';
 import { browser } from '$app/environment';
-import { getCookieValue, MANUAL_LOCALE_COOKIE_NAME } from '$lib/i18n/manual-locale-cookie';
+import { getCookieValue, MANUAL_LOCALE_COOKIE_NAME } from '$lib/paraglide/manual-locale-cookie';
 
 if (browser) {
 
@@ -14,7 +14,8 @@ if (browser) {
 		 * @returns The locale string or `undefined` if the cookie is not set.
 		 */
 		getLocale: () => {
-			return getCookieValue(document.cookie, MANUAL_LOCALE_COOKIE_NAME);
+			const manualLocale = getCookieValue(document.cookie, MANUAL_LOCALE_COOKIE_NAME);
+			return manualLocale && isLocale(manualLocale) ? manualLocale : undefined;
 		},
 
 		/**

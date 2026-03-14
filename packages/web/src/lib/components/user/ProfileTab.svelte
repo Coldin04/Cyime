@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
-	import { setLocale } from '$paraglide/runtime';
+	import { getLocale, isLocale, locales } from '$paraglide/runtime';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { auth } from '$lib/stores/auth';
 	import { updateDisplayName } from '$lib/api/user';
@@ -12,12 +12,12 @@
 		clearManualLocaleCookie,
 		getManualLocaleFromDocument,
 		setManualLocaleCookie
-	} from '$lib/i18n/manual-locale-cookie';
+	} from '$lib/paraglide/manual-locale-cookie';
 
 	let displayName = $state('');
 	let avatarDialogOpen = $state(false);
 	let savingDisplayName = $state(false);
-	type LocalePreference = 'system' | 'en' | 'zh';
+	type LocalePreference = 'system' | (typeof locales)[number];
 	let localePreference = $state<LocalePreference>('system');
 	let switchingLocale = $state(false);
 
@@ -27,8 +27,20 @@
 
 	onMount(() => {
 		const manualLocale = getManualLocaleFromDocument();
-		localePreference = manualLocale === 'en' || manualLocale === 'zh' ? manualLocale : 'system';
+		localePreference = manualLocale && isLocale(manualLocale) ? manualLocale : 'system';
 	});
+
+	function getLocaleOptionLabel(localeTag: string): string {
+		if (!browser || typeof Intl === 'undefined' || typeof Intl.DisplayNames === 'undefined') {
+			return localeTag;
+		}
+		try {
+			const display = new Intl.DisplayNames([getLocale()], { type: 'language' });
+			return display.of(localeTag.split('-')[0]) ?? localeTag;
+		} catch {
+			return localeTag;
+		}
+	}
 
 	async function handleDisplayNameSubmit(event?: SubmitEvent) {
 		event?.preventDefault();
@@ -52,7 +64,8 @@
 
 	async function handleLocaleChange(event: Event) {
 		const next = (event.currentTarget as HTMLSelectElement | null)?.value;
-		if (next !== 'system' && next !== 'en' && next !== 'zh') return;
+		if (!next) return;
+		if (next !== 'system' && !isLocale(next)) return;
 		if (next === localePreference) return;
 
 		switchingLocale = true;
@@ -66,9 +79,12 @@
 				return;
 			}
 
+			if (!isLocale(next)) return;
 			setManualLocaleCookie(next);
-			localePreference = next;
-			await setLocale(next);
+			localePreference = next as LocalePreference;
+			if (browser) {
+				window.location.reload();
+			}
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : m.user_profile_language_update_failed());
 		} finally {
@@ -132,8 +148,9 @@
 				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 			>
 				<option value="system">{m.user_profile_language_option_system()}</option>
-				<option value="zh">{m.user_profile_language_option_zh()}</option>
-				<option value="en">{m.user_profile_language_option_en()}</option>
+				{#each locales as localeTag (localeTag)}
+					<option value={localeTag}>{getLocaleOptionLabel(localeTag)}</option>
+				{/each}
 			</select>
 		</div>
 	</div>
