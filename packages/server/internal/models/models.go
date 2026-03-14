@@ -17,12 +17,13 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 
 // User represents the core user model
 type User struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
-	Email       *string   `gorm:"unique"`
-	DisplayName *string
-	AvatarURL   *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              uuid.UUID `gorm:"type:uuid;primary_key"`
+	Email           *string   `gorm:"unique"`
+	DisplayName     *string
+	AvatarURL       *string
+	AvatarObjectKey *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.

@@ -63,6 +63,10 @@ func main() {
 	// User routes (protected)
 	userRoutes := api.Group("/user", middleware.Protected())
 	userRoutes.Get("/me", user.GetMe)
+	userRoutes.Put("/profile", user.UpdateProfileHandler)
+	userRoutes.Post("/avatar", user.UploadAvatarHandler)
+	userRoutes.Put("/avatar/github", user.UpdateGitHubAvatarHandler)
+	api.Get("/user/avatar/content", user.GetAvatarContentHandler)
 
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())

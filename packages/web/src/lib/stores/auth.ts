@@ -130,6 +130,21 @@ function createAuthStore() {
 		}
 	}
 
+	async function refreshUser() {
+		const token = get(auth).token;
+		if (!token) {
+			return null;
+		}
+
+		const user = await _fetchUser(token);
+		update((state) => ({ ...state, user }));
+		return user;
+	}
+
+	function setUser(user: User | null) {
+		update((state) => ({ ...state, user }));
+	}
+
 	async function logout() {
 		if (refreshTimerId) {
 			clearTimeout(refreshTimerId);
@@ -158,6 +173,8 @@ function createAuthStore() {
 		subscribe,
 		init,
 		loginAndFetchUser,
+		refreshUser,
+		setUser,
 		logout,
 		refreshToken // Expose the refresh function
 	};

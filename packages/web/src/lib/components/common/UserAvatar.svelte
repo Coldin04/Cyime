@@ -1,5 +1,10 @@
 <script lang="ts">
+	import { apiFetch } from '$lib/api';
 	import * as m from '$paraglide/messages';
+	import User from '~icons/ph/user';
+
+	const avatarBlobCache = new Map<string, string>();
+	const avatarFetchInFlight = new Map<string, Promise<string>>();
 
 	interface Props {
 		name?: string | null;
@@ -12,15 +17,69 @@
 
 	let loadFailed = $state(false);
 	let loaded = $state(false);
+	let resolvedSrc = $state('');
 	let imgEl = $state<HTMLImageElement | null>(null);
 	const normalizedUrl = $derived((avatarUrl || '').trim());
 	const displayName = $derived((name || '').trim());
-	const fallbackInitial = $derived((displayName || m.common_user()).charAt(0).toUpperCase());
+	const fallbackIconSize = $derived(Math.max(18, Math.round(size * 0.42)));
+
+	async function resolveAvatarSource(url: string): Promise<string> {
+		if (!url.includes('/api/v1/user/avatar/content?token=')) {
+			return url;
+		}
+
+		const cached = avatarBlobCache.get(url);
+		if (cached) {
+			return cached;
+		}
+
+		const inFlight = avatarFetchInFlight.get(url);
+		if (inFlight) {
+			return inFlight;
+		}
+
+		const request = (async () => {
+			const resp = await apiFetch(url);
+			if (!resp.ok) {
+				throw new Error('avatar fetch failed');
+			}
+			const blob = await resp.blob();
+			const objectURL = URL.createObjectURL(blob);
+			avatarBlobCache.set(url, objectURL);
+			return objectURL;
+		})();
+
+		avatarFetchInFlight.set(url, request);
+		try {
+			return await request;
+		} finally {
+			avatarFetchInFlight.delete(url);
+		}
+	}
 
 	$effect(() => {
-		const _url = normalizedUrl;
+		const nextURL = normalizedUrl;
 		loadFailed = false;
 		loaded = false;
+		resolvedSrc = '';
+
+		if (!nextURL) return;
+
+		let disposed = false;
+		void (async () => {
+			try {
+				const finalSrc = await resolveAvatarSource(nextURL);
+				if (disposed) return;
+				resolvedSrc = finalSrc;
+			} catch {
+				if (disposed) return;
+				loadFailed = true;
+			}
+		})();
+
+		return () => {
+			disposed = true;
+		};
 	});
 
 	$effect(() => {
@@ -34,7 +93,7 @@
 	class={`relative grid place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900 ${className}`}
 	style={`width:${size}px;height:${size}px;`}
 >
-	{#if normalizedUrl && !loadFailed}
+	{#if resolvedSrc && !loadFailed}
 		{#if !loaded}
 			<div
 				class="absolute inset-0 animate-pulse bg-riptide-200/80 dark:bg-riptide-800/70"
@@ -43,7 +102,7 @@
 		{/if}
 		<img
 			bind:this={imgEl}
-			src={normalizedUrl}
+			src={resolvedSrc}
 			alt={m.greeting_avatar_alt({ name: displayName || m.common_user() })}
 			class="h-full w-full rounded-full object-cover transition-opacity duration-200"
 			class:opacity-0={!loaded}
@@ -59,6 +118,10 @@
 			}}
 		/>
 	{:else}
-		<span class="text-xl font-bold text-riptide-600 dark:text-riptide-300">{fallbackInitial}</span>
+		<User
+			class="text-riptide-600 dark:text-riptide-300"
+			style={`width:${fallbackIconSize}px;height:${fallbackIconSize}px;`}
+			aria-label={m.common_user()}
+		/>
 	{/if}
 </div>
