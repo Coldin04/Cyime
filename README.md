@@ -2,6 +2,12 @@
 
 🍋 CyimeWrite —— 青柠写  轻量简洁的云端同步Markdown编辑器 为随心流动的创意而生
 
+## 仓库说明
+
+关于仓库迁移、提交历史整理以及部署仓库说明，请参阅：
+
+- [仓库迁移与提交历史说明](docs/repository_migration_note.md)
+
 ---
 
 ## 开发指南 (Development Guide)
