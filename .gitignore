@@ -39,6 +39,8 @@ Thumbs.db
 # Project specific
 /deployments/.env
 /packages/server/tmp/
+/packages/server/init
+/packages/server/server
 /packages/client/.svelte-kit/
 /blueprints/
 
