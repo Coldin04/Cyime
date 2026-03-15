@@ -38,41 +38,14 @@
     # 进入后端目录
     cd packages/server
 
-    # (可选) 在该目录下创建一个 .env 文件来配置环境变量，例如:
-    # JWT_SECRET_KEY=a-very-secret-key-for-development
-    # CORS_ALLOWED_ORIGINS=http://localhost:5173
+    # 建议先从仓库根目录的 .env.example 复制一份
+    # cp ../.env.example .env
 
     # 运行后端
     go run ./cmd/server/main.go
     ```
     后端服务将运行在 `http://localhost:8080`。
     说明：后端启动会自动读取 `packages/server/.env`。
-
-    媒体模块环境变量：
-    - `MEDIA_TOKEN_SECRET=replace-with-strong-secret`（私有媒体签名必需）
-    - `MEDIA_SIGN_TTL_SECONDS=120`
-    - `MEDIA_STORAGE_PROVIDER=local|r2|s3|cos`（默认 `local`）
-    - `RESET_WORKSPACE_TABLES_ON_BOOT=false`（默认不清空业务表；仅调试时改为 `true`）
-
-    本地 provider（开发）：
-    - `MEDIA_LOCAL_ROOT_DIR=/tmp/cyimewrite-media`
-    - `MEDIA_LOCAL_BASE_URL=/media-files`
-
-    S3 兼容 provider（R2/COS/S3）：
-    - `MEDIA_S3_ENDPOINT=https://<endpoint>`
-    - `MEDIA_S3_BUCKET=<bucket>`
-    - `MEDIA_S3_REGION=auto`
-    - `MEDIA_S3_ACCESS_KEY_ID=<key>`
-    - `MEDIA_S3_SECRET_ACCESS_KEY=<secret>`
-    - `MEDIA_S3_PUBLIC_BASE_URL=https://<cdn-domain>`（可选）
-
-    R2 也可用同义变量（兼容）：
-    - `R2_ENDPOINT`
-    - `R2_BUCKET`
-    - `R2_REGION`
-    - `R2_ACCESS_KEY_ID`
-    - `R2_SECRET_ACCESS_KEY`
-    - `R2_PUBLIC_BASE_URL`
 
 3.  **启动前端服务**:
     ```bash
@@ -86,6 +59,55 @@
     pnpm run dev
     ```
     前端服务将运行在 `http://localhost:5173`。
+
+### 关键环境变量
+
+完整示例见根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)。下面只列当前最常用的配置项。
+
+- 认证与会话
+  - `JWT_SECRET_KEY`：JWT 与部分签名逻辑依赖的密钥，生产环境必须配置。
+  - `ACCESS_TOKEN_LIFETIME_MINUTES`：Access Token 生命周期，默认 `15`。
+  - `REFRESH_TOKEN_LIFETIME_HOURS`：Refresh Token 生命周期，默认 `720`（30 天）。
+  - `FRONTEND_CALLBACK_URL`：登录成功后回跳到前端的地址。
+
+- 文档数量限制
+  - `DEFAULT_DOCUMENT_QUOTA`：全局默认文档上限。
+  - 留空表示不限制。
+  - 用户如果单独配置了 `document_quota`，会优先使用用户自己的值。
+  - 后端会在创建文档时校验这个上限。
+
+- 媒体与图床
+  - `MEDIA_STORAGE_PROVIDER`：可选 `local | r2 | s3 | cos`，默认 `local`。
+  - `MEDIA_TOKEN_SECRET`：私有媒体短期签名密钥；留空时回退到 `JWT_SECRET_KEY`。
+  - `MEDIA_SIGN_TTL_SECONDS`：私有媒体签名有效期，默认 `120` 秒。
+  - `MEDIA_AVATAR_SIGN_TTL_SECONDS`：私有头像签名有效期，默认 `300` 秒。
+  - `MEDIA_AVATAR_MAX_BYTES`：头像上传大小限制，默认 `2MB`。
+
+- 本地媒体存储
+  - `MEDIA_LOCAL_ROOT_DIR`：本地文件落盘目录。
+  - `MEDIA_LOCAL_BASE_URL`：本地媒体对外访问前缀。
+
+- S3 / R2 / COS 兼容存储
+  - `MEDIA_S3_ENDPOINT`
+  - `MEDIA_S3_BUCKET`
+  - `MEDIA_S3_REGION`
+  - `MEDIA_S3_ACCESS_KEY_ID`
+  - `MEDIA_S3_SECRET_ACCESS_KEY`
+  - `MEDIA_S3_PUBLIC_BASE_URL`
+  - 兼容旧变量：`R2_ENDPOINT`、`R2_BUCKET`、`R2_REGION`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_PUBLIC_BASE_URL`
+
+- 媒体 GC / 引用回收
+  - `MEDIA_ASSET_GC_ENABLED`
+  - `MEDIA_ASSET_GC_INTERVAL`
+  - `MEDIA_ASSET_GC_BATCH_SIZE`
+  - `MEDIA_ASSET_GC_MAX_ATTEMPTS`
+  - `MEDIA_ASSET_GC_RETRY_GAP`
+  - `MEDIA_ASSET_RECONCILE_ENABLED`
+  - `MEDIA_ASSET_RECONCILE_BATCH_SIZE`
+
+- 其他
+  - `CORS_ALLOWED_ORIGINS`：允许的前端来源，多个值用英文逗号分隔。
+  - `RESET_WORKSPACE_TABLES_ON_BOOT`：启动时重置业务表，仅调试时使用。
 
 ### 详细文档
 

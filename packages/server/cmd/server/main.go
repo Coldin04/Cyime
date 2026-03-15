@@ -59,10 +59,18 @@ func main() {
 	authRoutes.Get("/callback/:provider", auth.AuthCallback)
 	authRoutes.Post("/refresh", auth.HandleRefresh)
 	authRoutes.Post("/logout", auth.HandleLogout)
+	authRoutes.Get("/sessions", middleware.Protected(), auth.HandleListSessions)
+	authRoutes.Delete("/sessions/others", middleware.Protected(), auth.HandleRevokeOtherSessions)
+	authRoutes.Delete("/sessions/:id", middleware.Protected(), auth.HandleRevokeSession)
 
 	// User routes (protected)
 	userRoutes := api.Group("/user", middleware.Protected())
 	userRoutes.Get("/me", user.GetMe)
+	userRoutes.Get("/overview", user.GetOverview)
+	userRoutes.Put("/profile", user.UpdateProfileHandler)
+	userRoutes.Post("/avatar", user.UploadAvatarHandler)
+	userRoutes.Put("/avatar/github", user.UpdateGitHubAvatarHandler)
+	api.Get("/user/avatar/content", user.GetAvatarContentHandler)
 
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())

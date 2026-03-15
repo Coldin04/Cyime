@@ -12,6 +12,7 @@
 	import { toast } from 'svelte-sonner';
 	import { workspaceContext } from '$lib/stores/workspace';
 	import { clickOutside } from '$lib/actions/clickOutside';
+	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 
 	let { mode = 'workspace' }: { mode?: 'workspace' | 'trash' } = $props();
 	const isTrashMode = $derived(mode === 'trash');
@@ -31,31 +32,8 @@
 		}
 	}
 
-	function getInitial(name: string | null): string {
-		if (!name || name.trim() === '') {
-			return m.common_user().charAt(0).toUpperCase();
-		}
-		return name.charAt(0).toUpperCase();
-	}
-
 	let showMenu = $state(false);
 	let isLoading = $state(false);
-	let avatarLoadFailed = $state(false);
-	let avatarLoaded = $state(false);
-	let avatarImgEl = $state<HTMLImageElement | null>(null);
-	const avatarUrl = $derived(($auth.user?.avatarUrl || '').trim());
-
-	$effect(() => {
-		const _avatar = avatarUrl;
-		avatarLoadFailed = false;
-		avatarLoaded = false;
-	});
-
-	$effect(() => {
-		if (avatarImgEl && avatarImgEl.complete && avatarImgEl.naturalWidth > 0) {
-			avatarLoaded = true;
-		}
-	});
 
 	function toggleMenu() {
 		showMenu = !showMenu;
@@ -116,39 +94,7 @@
 
 <section class="mb-6 flex items-center justify-between gap-4">
 	<div class="flex items-center gap-4">
-		<div
-			class="relative grid h-16 w-16 flex-shrink-0 place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900"
-		>
-			{#if avatarUrl && !avatarLoadFailed}
-				{#if !avatarLoaded}
-					<div
-						class="absolute inset-0 animate-pulse bg-riptide-200/80 dark:bg-riptide-800/70"
-						aria-hidden="true"
-					></div>
-				{/if}
-				<img
-					bind:this={avatarImgEl}
-					src={avatarUrl}
-					alt={m.greeting_avatar_alt({ name: $auth.user?.displayName || m.common_user() })}
-					class="h-full w-full rounded-full object-cover transition-opacity duration-200"
-					class:opacity-0={!avatarLoaded}
-					class:opacity-100={avatarLoaded}
-					decoding="async"
-					fetchpriority="low"
-					referrerpolicy="no-referrer"
-					onload={() => {
-						avatarLoaded = true;
-					}}
-					onerror={() => {
-						avatarLoadFailed = true;
-					}}
-				/>
-			{:else}
-				<span class="text-3xl font-bold text-riptide-600 dark:text-riptide-300">
-					{getInitial($auth.user?.displayName || null)}
-				</span>
-			{/if}
-		</div>
+		<UserAvatar size={64} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
 			<div>
 			<h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200">
 				{getGreeting()}, {$auth.user?.displayName || m.common_user()}

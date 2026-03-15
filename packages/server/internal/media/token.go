@@ -11,6 +11,7 @@ import (
 )
 
 const defaultSignTTLSeconds = 120
+const defaultAvatarSignTTLSeconds = 86400
 
 type AssetReadClaims struct {
 	jwt.RegisteredClaims
@@ -18,9 +19,16 @@ type AssetReadClaims struct {
 	UserID  uuid.UUID `json:"userId"`
 }
 
+type AvatarReadClaims struct {
+	jwt.RegisteredClaims
+	UserID    uuid.UUID `json:"userId"`
+	ObjectKey string    `json:"objectKey"`
+}
+
 type TokenService struct {
-	secret  []byte
-	signTTL time.Duration
+	secret        []byte
+	signTTL       time.Duration
+	avatarSignTTL time.Duration
 }
 
 func NewTokenService() (*TokenService, error) {
@@ -36,10 +44,15 @@ func NewTokenService() (*TokenService, error) {
 	if err != nil || ttlSeconds <= 0 {
 		ttlSeconds = defaultSignTTLSeconds
 	}
+	avatarTTLSeconds, err := strconv.Atoi(os.Getenv("MEDIA_AVATAR_SIGN_TTL_SECONDS"))
+	if err != nil || avatarTTLSeconds <= 0 {
+		avatarTTLSeconds = defaultAvatarSignTTLSeconds
+	}
 
 	return &TokenService{
-		secret:  []byte(secret),
-		signTTL: time.Duration(ttlSeconds) * time.Second,
+		secret:        []byte(secret),
+		signTTL:       time.Duration(ttlSeconds) * time.Second,
+		avatarSignTTL: time.Duration(avatarTTLSeconds) * time.Second,
 	}, nil
 }
 
@@ -76,6 +89,43 @@ func (s *TokenService) VerifyAssetReadToken(tokenStr string) (*AssetReadClaims, 
 	claims, ok := token.Claims.(*AssetReadClaims)
 	if !ok || !token.Valid {
 		return nil, errors.New("invalid media token")
+	}
+	return claims, nil
+}
+
+func (s *TokenService) IssueAvatarReadToken(userID uuid.UUID, objectKey string) (string, time.Time, error) {
+	now := time.Now()
+	exp := now.Add(s.avatarSignTTL)
+	claims := AvatarReadClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Subject:   userID.String(),
+			Issuer:    "CyimeWrite.Avatar",
+		},
+		UserID:    userID,
+		ObjectKey: objectKey,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString(s.secret)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return tokenStr, exp, nil
+}
+
+func (s *TokenService) VerifyAvatarReadToken(tokenStr string) (*AvatarReadClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &AvatarReadClaims{}, func(_ *jwt.Token) (any, error) {
+		return s.secret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	claims, ok := token.Claims.(*AvatarReadClaims)
+	if !ok || !token.Valid {
+		return nil, errors.New("invalid avatar token")
 	}
 	return claims, nil
 }

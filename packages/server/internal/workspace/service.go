@@ -10,6 +10,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -26,6 +27,8 @@ var ReservedFolderNames = []string{
 	"deleted",
 	".deleted",
 }
+
+var ErrDocumentQuotaExceeded = errors.New("已达到文档数量上限")
 
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
@@ -288,6 +291,22 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 	// Create the document in a transaction
 	var document *models.Document
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		limit, err := user.GetEffectiveDocumentQuota(userID)
+		if err != nil {
+			return err
+		}
+		if limit != nil {
+			var activeCount int64
+			if err := tx.Model(&models.Document{}).
+				Where("owner_user_id = ? AND deleted_at IS NULL", userID).
+				Count(&activeCount).Error; err != nil {
+				return err
+			}
+			if activeCount >= int64(*limit) {
+				return ErrDocumentQuotaExceeded
+			}
+		}
+
 		// Create document metadata
 		document = &models.Document{
 			ID:           uuid.New(),

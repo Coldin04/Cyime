@@ -1,15 +1,12 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
 	import { updateDocumentTitle } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
+	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
 
 	// Icons
 	import Home from '~icons/ph/house';
 	import Search from '~icons/ph/magnifying-glass';
-	import User from '~icons/ph/user';
-	import SignOut from '~icons/ph/sign-out';
-	import Trash from '~icons/ph/trash';
 	import FileText from '~icons/ph/file-text';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
@@ -30,7 +27,6 @@
 		onTitleChange?: (title: string) => void;
 	} = $props();
 
-	let showUserMenu = $state(false);
 	let title = $state('');
 
 	// Title editing state
@@ -84,14 +80,6 @@
 		}
 	}
 
-	function toggleUserMenu() {
-		showUserMenu = !showUserMenu;
-	}
-
-	function handleLogout() {
-		auth.logout();
-		showUserMenu = false;
-	}
 </script>
 
 <!-- Top Bar -->
@@ -184,39 +172,6 @@
 		>
 			<Search class="h-5 w-5" />
 		</button>
-		<div class="relative">
-			<button
-				onclick={toggleUserMenu}
-				class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
-			>
-				<User class="h-5 w-5" />
-			</button>
-			{#if showUserMenu}
-				<div
-					class="absolute top-full right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none dark:bg-zinc-800 dark:ring-zinc-700"
-				>
-					<a
-						href="/workspace"
-						class="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
-						>{m.topbar_back_to_workspace()}</a
-					>
-					<a
-						href="/workspace/trash"
-						class="flex items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
-					>
-						<Trash class="h-4 w-4" />
-						<span>{m.topbar_trash()}</span>
-					</a>
-					<div class="my-1 h-px bg-zinc-200 dark:bg-zinc-700"></div>
-					<button
-						onclick={handleLogout}
-						class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-600 hover:bg-zinc-100 dark:text-red-400 dark:hover:bg-zinc-700"
-					>
-						<SignOut class="h-4 w-4" />
-						<span>{m.topbar_logout()}</span>
-					</button>
-				</div>
-			{/if}
-		</div>
+		<UserMenuDropdown profileHref="/user" trashHref="/workspace/trash" showTrash={true} />
 	</div>
 </header>

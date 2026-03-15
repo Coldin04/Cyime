@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -231,6 +233,12 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
+				Message: err.Error(),
+			})
+		}
+		if errors.Is(err, ErrDocumentQuotaExceeded) {
+			return c.Status(fiber.StatusForbidden).JSON(ErrorResponse{
+				Error:   "Quota Exceeded",
 				Message: err.Error(),
 			})
 		}
