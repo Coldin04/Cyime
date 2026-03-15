@@ -13,7 +13,7 @@
 		"machine-translate": "inlang machine translate --project project.inlang",
 		"lint": "eslint . --ext .ts,.svelte",
 		"lint:fix": "eslint . --ext .ts,.svelte --fix",
-		"paraglide": "pnpm paraglide-js compile --project ./project.inlang",
+		"paraglide": "pnpm paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy custom-manual-cookie preferredLanguage baseLocale",
 		"paraglide:preview": "cp src/locales/en.json src/locales/en.json.bak && cp src/locales/zh.json src/locales/en.json && pnpm paraglide && mv src/locales/en.json.bak src/locales/en.json"
 	},
 	"devDependencies": {
