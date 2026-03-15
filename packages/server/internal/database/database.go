@@ -77,6 +77,7 @@ func Connect() {
 		&models.User{},
 		&models.AuthProvider{},
 		&models.UserIdentityProvider{},
+		&models.UserSession{},
 		&models.UserRefreshToken{},
 		&models.Folder{},
 		&models.Document{},

@@ -14,6 +14,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 )
@@ -49,6 +50,20 @@ type ProviderInfo struct {
 	Name   string `json:"name"`
 	Icon   string `json:"icon"`
 	SSOUrl string `json:"ssoUrl"`
+}
+
+type SessionListResponse struct {
+	Items []SessionResponseDTO `json:"items"`
+}
+
+type SessionResponseDTO struct {
+	ID          string    `json:"id"`
+	DeviceLabel string    `json:"deviceLabel"`
+	UserAgent   string    `json:"userAgent"`
+	LastSeenAt  time.Time `json:"lastSeenAt"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Current     bool      `json:"current"`
 }
 
 // GetAuthConfig is the handler for GET /api/v1/auth/config
@@ -156,7 +171,7 @@ func AuthCallback(c *fiber.Ctx) error {
 		}
 
 		// Step 2: Generate and persist tokens for the user.
-		accessToken, refreshToken, txErr = svc.GenerateAndPersistTokens(tx, user)
+		accessToken, refreshToken, txErr = svc.GenerateAndPersistTokens(tx, user, c.Get("User-Agent"))
 		if txErr != nil {
 			return txErr
 		}
@@ -206,6 +221,94 @@ func HandleLogout(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+// HandleListSessions returns active sessions for the current user.
+func HandleListSessions(c *fiber.Ctx) error {
+	svc, err := getTokenService()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	userID, err := parseUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	items, err := svc.ListUserSessions(userID, c.Cookies("cyime_refresh_token"))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	responseItems := make([]SessionResponseDTO, 0, len(items))
+	for _, item := range items {
+		responseItems = append(responseItems, SessionResponseDTO{
+			ID:          item.ID.String(),
+			DeviceLabel: item.DeviceLabel,
+			UserAgent:   item.UserAgent,
+			LastSeenAt:  item.LastSeenAt,
+			ExpiresAt:   item.ExpiresAt,
+			CreatedAt:   item.CreatedAt,
+			Current:     item.Current,
+		})
+	}
+
+	return c.JSON(SessionListResponse{Items: responseItems})
+}
+
+// HandleRevokeSession revokes one session by id.
+func HandleRevokeSession(c *fiber.Ctx) error {
+	svc, err := getTokenService()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	userID, err := parseUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	sessionID, err := parseSessionID(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	isCurrent, err := svc.RevokeSession(userID, sessionID, c.Cookies("cyime_refresh_token"))
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "会话不存在"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if isCurrent {
+		c.ClearCookie("cyime_refresh_token", "/api/v1/auth")
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// HandleRevokeOtherSessions revokes all sessions except the current one.
+func HandleRevokeOtherSessions(c *fiber.Ctx) error {
+	svc, err := getTokenService()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	userID, err := parseUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	revokedCount, err := svc.RevokeOtherSessions(userID, c.Cookies("cyime_refresh_token"))
+	if err != nil {
+		if e, ok := err.(*fiber.Error); ok {
+			return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"revokedCount": revokedCount})
+}
+
 // --- Helper Functions ---
 
 // findOrCreateUser finds an existing user based on provider info or creates a new one.
@@ -253,6 +356,22 @@ func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile
 	}
 
 	return &createdUser, nil
+}
+
+func parseUserIDFromContext(c *fiber.Ctx) (uuid.UUID, error) {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok || strings.TrimSpace(userIDStr) == "" {
+		return uuid.Nil, fmt.Errorf("missing user id in context")
+	}
+	return uuid.Parse(userIDStr)
+}
+
+func parseSessionID(raw string) (uuid.UUID, error) {
+	id, err := uuid.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("无效的会话 id")
+	}
+	return id, nil
 }
 
 func getEndpointFromProvider(ctx context.Context, provider *models.AuthProvider) (oauth2.Endpoint, error) {

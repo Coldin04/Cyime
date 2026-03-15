@@ -59,6 +59,9 @@ func main() {
 	authRoutes.Get("/callback/:provider", auth.AuthCallback)
 	authRoutes.Post("/refresh", auth.HandleRefresh)
 	authRoutes.Post("/logout", auth.HandleLogout)
+	authRoutes.Get("/sessions", middleware.Protected(), auth.HandleListSessions)
+	authRoutes.Delete("/sessions/others", middleware.Protected(), auth.HandleRevokeOtherSessions)
+	authRoutes.Delete("/sessions/:id", middleware.Protected(), auth.HandleRevokeSession)
 
 	// User routes (protected)
 	userRoutes := api.Group("/user", middleware.Protected())

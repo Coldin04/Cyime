@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
@@ -28,6 +29,17 @@ type TokenService struct {
 	accessTokenLifetime    time.Duration
 	refreshTokenLifetime   time.Duration
 	refreshTokenByteLength int
+}
+
+// SessionInfo is the API-facing session view used by the security page.
+type SessionInfo struct {
+	ID          uuid.UUID `json:"id"`
+	DeviceLabel string    `json:"deviceLabel"`
+	UserAgent   string    `json:"userAgent"`
+	LastSeenAt  time.Time `json:"lastSeenAt"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Current     bool      `json:"current"`
 }
 
 // NewTokenService creates a new token service, reading configuration from environment variables.
@@ -59,9 +71,9 @@ func NewTokenService() (*TokenService, error) {
 	}, nil
 }
 
-// GenerateAndPersistTokens creates new access and refresh tokens, and persists the refresh token hash.
+// GenerateAndPersistTokens creates a new logical session plus access/refresh tokens.
 // This must be run within a GORM transaction.
-func (s *TokenService) GenerateAndPersistTokens(tx *gorm.DB, user *models.User) (accessTokenString, rawRefreshTokenString string, err error) {
+func (s *TokenService) GenerateAndPersistTokens(tx *gorm.DB, user *models.User, userAgent string) (accessTokenString, rawRefreshTokenString string, err error) {
 	// 1. Generate Access Token
 	accessTokenString, err = s.generateAccessToken(user.ID)
 	if err != nil {
@@ -74,12 +86,25 @@ func (s *TokenService) GenerateAndPersistTokens(tx *gorm.DB, user *models.User) 
 		return "", "", fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// 3. Hash and Persist Refresh Token
+	// 3. Create a logical session row for later session management UI.
+	now := time.Now()
+	session := models.UserSession{
+		UserID:      user.ID,
+		UserAgent:   userAgent,
+		DeviceLabel: buildDeviceLabel(userAgent),
+		LastSeenAt:  now,
+	}
+	if err := tx.Create(&session).Error; err != nil {
+		return "", "", fmt.Errorf("failed to persist session: %w", err)
+	}
+
+	// 4. Hash and Persist Refresh Token
 	refreshTokenHash := sha256.Sum256([]byte(rawRefreshTokenString))
-	refreshTokenExpiresAt := time.Now().Add(s.refreshTokenLifetime)
+	refreshTokenExpiresAt := now.Add(s.refreshTokenLifetime)
 
 	refreshToken := models.UserRefreshToken{
 		UserID:    user.ID,
+		SessionID: session.ID,
 		TokenHash: hex.EncodeToString(refreshTokenHash[:]),
 		ExpiresAt: refreshTokenExpiresAt,
 	}
@@ -147,21 +172,199 @@ func (s *TokenService) generateRefreshToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+func hashRefreshToken(rawRefreshToken string) string {
+	tokenHash := sha256.Sum256([]byte(rawRefreshToken))
+	return hex.EncodeToString(tokenHash[:])
+}
+
+// buildDeviceLabel keeps设备展示简单可读，不依赖重型 UA 解析库。
+func buildDeviceLabel(userAgent string) string {
+	if userAgent == "" {
+		return "未知设备"
+	}
+
+	lower := strings.ToLower(userAgent)
+	browser := "未知浏览器"
+	platform := "未知系统"
+
+	switch {
+	case strings.Contains(lower, "firefox"):
+		browser = "Firefox"
+	case strings.Contains(lower, "edg"):
+		browser = "Edge"
+	case strings.Contains(lower, "chrome") && !strings.Contains(lower, "edg"):
+		browser = "Chrome"
+	case strings.Contains(lower, "safari") && !strings.Contains(lower, "chrome"):
+		browser = "Safari"
+	}
+
+	switch {
+	case strings.Contains(lower, "iphone"):
+		platform = "iPhone"
+	case strings.Contains(lower, "ipad"):
+		platform = "iPad"
+	case strings.Contains(lower, "android"):
+		platform = "Android"
+	case strings.Contains(lower, "mac os x"), strings.Contains(lower, "macintosh"):
+		platform = "macOS"
+	case strings.Contains(lower, "windows"):
+		platform = "Windows"
+	case strings.Contains(lower, "linux"):
+		platform = "Linux"
+	}
+
+	return fmt.Sprintf("%s · %s", browser, platform)
+}
+
 // RevokeRefreshToken deletes a refresh token from the database.
 func (s *TokenService) RevokeRefreshToken(rawRefreshToken string) error {
-	// Hash the incoming token to look it up in the database.
-	tokenHash := sha256.Sum256([]byte(rawRefreshToken))
-	tokenHashStr := hex.EncodeToString(tokenHash[:])
-
 	// Delete the token from the database.
 	// We use Unscoped() to ensure a hard delete, not a soft delete.
-	result := database.DB.Unscoped().Where("token_hash = ?", tokenHashStr).Delete(&models.UserRefreshToken{})
+	result := database.DB.Unscoped().Where("token_hash = ?", hashRefreshToken(rawRefreshToken)).Delete(&models.UserRefreshToken{})
 
 	if result.Error != nil {
 		return result.Error
 	}
 
 	return nil
+}
+
+func (s *TokenService) currentSessionIDFromRefreshToken(rawRefreshToken string) (*uuid.UUID, error) {
+	if rawRefreshToken == "" {
+		return nil, nil
+	}
+
+	var token models.UserRefreshToken
+	if err := database.DB.
+		Select("session_id").
+		Where("token_hash = ? AND expires_at > ?", hashRefreshToken(rawRefreshToken), time.Now()).
+		First(&token).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &token.SessionID, nil
+}
+
+// ListUserSessions returns active sessions for one user.
+func (s *TokenService) ListUserSessions(userID uuid.UUID, currentRawRefreshToken string) ([]SessionInfo, error) {
+	currentSessionID, err := s.currentSessionIDFromRefreshToken(currentRawRefreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var sessions []models.UserSession
+	if err := database.DB.
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Order("last_seen_at DESC").
+		Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+
+	var refreshTokens []models.UserRefreshToken
+	if err := database.DB.
+		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+		Order("created_at DESC").
+		Find(&refreshTokens).Error; err != nil {
+		return nil, err
+	}
+
+	expiresAtBySessionID := make(map[uuid.UUID]time.Time, len(refreshTokens))
+	for _, token := range refreshTokens {
+		if _, exists := expiresAtBySessionID[token.SessionID]; !exists {
+			expiresAtBySessionID[token.SessionID] = token.ExpiresAt
+		}
+	}
+
+	items := make([]SessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		expiresAt, ok := expiresAtBySessionID[session.ID]
+		if !ok {
+			continue
+		}
+		isCurrent := currentSessionID != nil && *currentSessionID == session.ID
+		items = append(items, SessionInfo{
+			ID:          session.ID,
+			DeviceLabel: session.DeviceLabel,
+			UserAgent:   session.UserAgent,
+			LastSeenAt:  session.LastSeenAt,
+			ExpiresAt:   expiresAt,
+			CreatedAt:   session.CreatedAt,
+			Current:     isCurrent,
+		})
+	}
+
+	return items, nil
+}
+
+// RevokeSession revokes one logical session and removes all its refresh tokens.
+func (s *TokenService) RevokeSession(userID uuid.UUID, sessionID uuid.UUID, currentRawRefreshToken string) (bool, error) {
+	currentSessionID, err := s.currentSessionIDFromRefreshToken(currentRawRefreshToken)
+	if err != nil {
+		return false, err
+	}
+
+	now := time.Now()
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.UserSession{}).
+			Where("id = ? AND user_id = ? AND revoked_at IS NULL", sessionID, userID).
+			Updates(map[string]any{"revoked_at": &now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		if err := tx.Unscoped().
+			Where("user_id = ? AND session_id = ?", userID, sessionID).
+			Delete(&models.UserRefreshToken{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return currentSessionID != nil && *currentSessionID == sessionID, nil
+}
+
+// RevokeOtherSessions revokes all sessions except the current one.
+func (s *TokenService) RevokeOtherSessions(userID uuid.UUID, currentRawRefreshToken string) (int64, error) {
+	currentSessionID, err := s.currentSessionIDFromRefreshToken(currentRawRefreshToken)
+	if err != nil {
+		return 0, err
+	}
+	if currentSessionID == nil {
+		return 0, fiber.NewError(fiber.StatusUnauthorized, "Current session not found")
+	}
+
+	now := time.Now()
+	var affected int64
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.UserSession{}).
+			Where("user_id = ? AND id <> ? AND revoked_at IS NULL", userID, *currentSessionID).
+			Updates(map[string]any{"revoked_at": &now})
+		if result.Error != nil {
+			return result.Error
+		}
+		affected = result.RowsAffected
+
+		if err := tx.Unscoped().
+			Where("user_id = ? AND session_id <> ?", userID, *currentSessionID).
+			Delete(&models.UserRefreshToken{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return affected, nil
 }
 
 // HandleRefresh processes a refresh token request, implementing token rotation for security.
@@ -173,8 +376,7 @@ func (s *TokenService) HandleRefresh(c *fiber.Ctx) error {
 	}
 
 	// 2. Hash the incoming token to look it up in the database.
-	incomingTokenHash := sha256.Sum256([]byte(rawRefreshToken))
-	incomingTokenHashStr := hex.EncodeToString(incomingTokenHash[:])
+	incomingTokenHashStr := hashRefreshToken(rawRefreshToken)
 
 	var foundToken models.UserRefreshToken
 	var newAccessToken string
@@ -200,18 +402,31 @@ func (s *TokenService) HandleRefresh(c *fiber.Ctx) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate new access token: %w", err)
 		}
-		
+
 		// Generate and persist a new refresh token.
 		newRefreshToken, err = s.generateRefreshToken()
 		if err != nil {
 			return fmt.Errorf("failed to generate new refresh token: %w", err)
 		}
 
+		now := time.Now()
 		newRefreshTokenHash := sha256.Sum256([]byte(newRefreshToken))
-		newRefreshTokenExpiresAt := time.Now().Add(s.refreshTokenLifetime)
+		newRefreshTokenExpiresAt := now.Add(s.refreshTokenLifetime)
+
+		// 刷新时沿用同一个逻辑会话，只更新最近活跃时间。
+		if err := tx.Model(&models.UserSession{}).
+			Where("id = ? AND user_id = ? AND revoked_at IS NULL", foundToken.SessionID, foundToken.UserID).
+			Updates(map[string]any{
+				"last_seen_at": now,
+				"user_agent":   c.Get("User-Agent"),
+				"device_label": buildDeviceLabel(c.Get("User-Agent")),
+			}).Error; err != nil {
+			return fmt.Errorf("failed to update session heartbeat: %w", err)
+		}
 
 		replacementToken := models.UserRefreshToken{
 			UserID:    foundToken.UserID,
+			SessionID: foundToken.SessionID,
 			TokenHash: hex.EncodeToString(newRefreshTokenHash[:]),
 			ExpiresAt: newRefreshTokenExpiresAt,
 		}

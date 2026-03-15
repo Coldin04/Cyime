@@ -75,6 +75,28 @@ type UserIdentityProvider struct {
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (us *UserSession) BeforeCreate(tx *gorm.DB) (err error) {
+	if us.ID == uuid.Nil {
+		us.ID = uuid.New()
+	}
+	return
+}
+
+// UserSession stores a logical login session for one user.
+type UserSession struct {
+	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID      uuid.UUID `gorm:"not null;index"`
+	User        User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	UserAgent   string    `gorm:"type:text;not null;default:''"`
+	DeviceLabel string    `gorm:"type:varchar(255);not null;default:''"`
+	LastSeenAt  time.Time `gorm:"not null;index"`
+	RevokedAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
 func (urt *UserRefreshToken) BeforeCreate(tx *gorm.DB) (err error) {
 	if urt.ID == uuid.Nil {
 		urt.ID = uuid.New()
@@ -84,11 +106,13 @@ func (urt *UserRefreshToken) BeforeCreate(tx *gorm.DB) (err error) {
 
 // UserRefreshToken stores a user's long-lived refresh token.
 type UserRefreshToken struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID    uuid.UUID `gorm:"not null"`
-	User      User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
-	TokenHash string    `gorm:"type:varchar(255);not null;uniqueIndex"`
-	ExpiresAt time.Time `gorm:"not null"`
+	ID        uuid.UUID   `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID   `gorm:"not null;index"`
+	User      User        `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	SessionID uuid.UUID   `gorm:"type:uuid;not null;index"`
+	Session   UserSession `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE;"`
+	TokenHash string      `gorm:"type:varchar(255);not null;uniqueIndex"`
+	ExpiresAt time.Time   `gorm:"not null"`
 	CreatedAt time.Time
 }
 
@@ -248,6 +272,10 @@ func (AuthProvider) TableName() string {
 
 func (UserIdentityProvider) TableName() string {
 	return "user_identity_providers"
+}
+
+func (UserSession) TableName() string {
+	return "user_sessions"
 }
 
 func (UserRefreshToken) TableName() string {
