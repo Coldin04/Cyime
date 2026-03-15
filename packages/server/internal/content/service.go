@@ -1,0 +1,581 @@
+package content
+
+import (
+	"encoding/json"
+	"errors"
+	"net/url"
+	"regexp"
+	"time"
+
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+const defaultContentJSON = `{"type":"doc","content":[{"type":"paragraph"}]}`
+
+const (
+	editorContentRefType = "editor_content"
+	assetStatusReady     = "ready"
+	assetStatusPending   = "pending_delete"
+	assetDeleteDelay     = 24 * time.Hour
+)
+
+var assetContentPathPattern = regexp.MustCompile(`/api/v1/media/assets/([0-9a-fA-F-]{36})/content(?:\?.*)?$`)
+
+// GetContentResult represents the current content of a document.
+type GetContentResult struct {
+	ID             uuid.UUID       `json:"id"`
+	DocumentID     uuid.UUID       `json:"documentId"`
+	ContentJSON    json.RawMessage `json:"contentJson"`
+	PlainText      string          `json:"plainText"`
+	ContentVersion int64           `json:"contentVersion"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+// UpdateContentResult represents the result of updating document content.
+type UpdateContentResult struct {
+	Success        bool      `json:"success"`
+	ContentVersion int64     `json:"contentVersion"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// GetContent retrieves the current content of a document.
+func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档不存在或无权访问")
+		}
+		return nil, result.Error
+	}
+
+	var content models.DocumentBody
+	result = database.DB.Where("document_id = ?", documentID).First(&content)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档内容不存在")
+		}
+		return nil, result.Error
+	}
+
+	return &GetContentResult{
+		ID:             content.ID,
+		DocumentID:     content.DocumentID,
+		ContentJSON:    json.RawMessage(content.ContentJSON),
+		PlainText:      content.PlainText,
+		ContentVersion: content.ContentVersion,
+		CreatedAt:      content.CreatedAt,
+		UpdatedAt:      content.UpdatedAt,
+	}, nil
+}
+
+// UpdateContent updates the current content of a document in place.
+func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte) (*UpdateContentResult, error) {
+	contentJSON, err := normalizeContentJSON(contentJSONRaw)
+	if err != nil {
+		return nil, err
+	}
+	assetIDs, err := extractAssetIDsFromContentJSON(contentJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		updatedAt      time.Time
+		contentVersion int64
+	)
+	plainText := toPlainText(contentJSON)
+	excerpt := buildExcerpt(plainText)
+
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		result := tx.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return result.Error
+		}
+
+		now := time.Now()
+		result = tx.Model(&models.DocumentBody{}).
+			Where("document_id = ?", documentID).
+			Updates(map[string]any{
+				"content_json":    contentJSON,
+				"plain_text":      plainText,
+				"updated_by":      userID,
+				"content_version": gorm.Expr("content_version + 1"),
+				"updated_at":      now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			contentRecord := &models.DocumentBody{
+				ID:             uuid.New(),
+				DocumentID:     documentID,
+				ContentJSON:    contentJSON,
+				PlainText:      plainText,
+				ContentVersion: 1,
+				UpdatedBy:      userID,
+			}
+			if err := tx.Create(contentRecord).Error; err != nil {
+				return err
+			}
+			contentVersion = contentRecord.ContentVersion
+		}
+
+		if contentVersion == 0 {
+			var body models.DocumentBody
+			if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
+				return err
+			}
+			contentVersion = body.ContentVersion
+		}
+
+		if err := syncDocumentAssetRefs(tx, userID, documentID, assetIDs, now); err != nil {
+			return err
+		}
+
+		updatedAt = now
+		return tx.Model(&document).Updates(map[string]any{
+			"excerpt":    excerpt,
+			"updated_at": now,
+			"updated_by": userID,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &UpdateContentResult{
+		Success:        true,
+		ContentVersion: contentVersion,
+		UpdatedAt:      updatedAt,
+	}, nil
+}
+
+// CreateInitialContent creates the first content row for a document.
+func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSONRaw string) error {
+	contentJSON, err := normalizeContentJSON([]byte(contentJSONRaw))
+	if err != nil {
+		return err
+	}
+	assetIDs, err := extractAssetIDsFromContentJSON(contentJSON)
+	if err != nil {
+		return err
+	}
+
+	contentRecord := &models.DocumentBody{
+		ID:             uuid.New(),
+		DocumentID:     documentID,
+		ContentJSON:    contentJSON,
+		PlainText:      toPlainText(contentJSON),
+		ContentVersion: 1,
+		UpdatedBy:      userID,
+	}
+
+	if err := tx.Create(contentRecord).Error; err != nil {
+		return err
+	}
+
+	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
+}
+
+// DeleteContentByDocumentID soft deletes the content row for a document.
+func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
+	var count int64
+	if err := tx.Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+
+	if err := tx.Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {
+		return err
+	}
+
+	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
+}
+
+// RestoreContentByDocumentID restores the content row for a document.
+func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
+	var count int64
+	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+
+	if err := tx.Unscoped().
+		Model(&models.DocumentBody{}).
+		Where("document_id = ?", documentID).
+		Update("deleted_at", nil).Error; err != nil {
+		return err
+	}
+
+	var body models.DocumentBody
+	if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	assetIDs, err := extractAssetIDsFromContentJSON(body.ContentJSON)
+	if err != nil {
+		return err
+	}
+
+	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
+}
+
+// PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
+func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
+	var count int64
+	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+
+	if err := tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {
+		return err
+	}
+
+	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
+}
+
+func normalizeContentJSON(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return defaultContentJSON, nil
+	}
+	if !json.Valid(raw) {
+		return "", errors.New("contentJson must be valid JSON")
+	}
+	return string(raw), nil
+}
+
+func toPlainText(contentJSON string) string {
+	var node any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 64)
+	collectText(node, &parts)
+	return joinWithSpace(parts)
+}
+
+func collectText(node any, out *[]string) {
+	switch v := node.(type) {
+	case map[string]any:
+		if text, ok := v["text"].(string); ok {
+			*out = append(*out, text)
+		}
+		if children, ok := v["content"].([]any); ok {
+			for _, child := range children {
+				collectText(child, out)
+			}
+		}
+	case []any:
+		for _, item := range v {
+			collectText(item, out)
+		}
+	}
+}
+
+func joinWithSpace(parts []string) string {
+	merged := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if merged == "" {
+			merged = p
+			continue
+		}
+		merged += " " + p
+	}
+	return merged
+}
+
+func buildExcerpt(plainText string) string {
+	if len(plainText) == 0 {
+		return ""
+	}
+	if len(plainText) > 100 {
+		return plainText[:100] + "..."
+	}
+	return plainText
+}
+
+// BuildExcerptFromContentJSON derives a document excerpt from editor JSON.
+func BuildExcerptFromContentJSON(contentJSONRaw string) string {
+	contentJSON, err := normalizeContentJSON([]byte(contentJSONRaw))
+	if err != nil {
+		return ""
+	}
+	return buildExcerpt(toPlainText(contentJSON))
+}
+
+func extractAssetIDsFromContentJSON(contentJSON string) ([]uuid.UUID, error) {
+	var node any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return nil, errors.New("contentJson must be valid JSON")
+	}
+
+	seen := make(map[uuid.UUID]struct{})
+	assetIDs := make([]uuid.UUID, 0)
+	collectAssetIDs(node, seen, &assetIDs)
+	return assetIDs, nil
+}
+
+func collectAssetIDs(node any, seen map[uuid.UUID]struct{}, out *[]uuid.UUID) {
+	switch v := node.(type) {
+	case map[string]any:
+		if attrs, ok := v["attrs"].(map[string]any); ok {
+			if assetID, ok := extractAssetIDFromAttrs(attrs); ok {
+				if _, exists := seen[assetID]; !exists {
+					seen[assetID] = struct{}{}
+					*out = append(*out, assetID)
+				}
+			}
+		}
+		if children, ok := v["content"].([]any); ok {
+			for _, child := range children {
+				collectAssetIDs(child, seen, out)
+			}
+		}
+	case []any:
+		for _, item := range v {
+			collectAssetIDs(item, seen, out)
+		}
+	}
+}
+
+func extractAssetIDFromAttrs(attrs map[string]any) (uuid.UUID, bool) {
+	if rawAssetID, ok := attrs["assetId"].(string); ok {
+		if assetID, err := uuid.Parse(rawAssetID); err == nil {
+			return assetID, true
+		}
+	}
+
+	rawSrc, ok := attrs["src"].(string)
+	if !ok || rawSrc == "" {
+		return uuid.Nil, false
+	}
+
+	if parsed, err := url.Parse(rawSrc); err == nil {
+		if match := assetContentPathPattern.FindStringSubmatch(parsed.Path); len(match) == 2 {
+			if assetID, err := uuid.Parse(match[1]); err == nil {
+				return assetID, true
+			}
+		}
+	}
+	if match := assetContentPathPattern.FindStringSubmatch(rawSrc); len(match) == 2 {
+		if assetID, err := uuid.Parse(match[1]); err == nil {
+			return assetID, true
+		}
+	}
+
+	return uuid.Nil, false
+}
+
+func syncDocumentAssetRefs(tx *gorm.DB, userID, documentID uuid.UUID, assetIDs []uuid.UUID, now time.Time) error {
+	validAssetIDs, err := filterOwnedAssetIDs(tx, userID, assetIDs)
+	if err != nil {
+		return err
+	}
+	if len(validAssetIDs) != len(assetIDs) {
+		return errors.New("content references invalid assets")
+	}
+
+	var existingRefs []models.DocumentAssetRef
+	if err := tx.
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Find(&existingRefs).Error; err != nil {
+		return err
+	}
+
+	existingSet := make(map[uuid.UUID]models.DocumentAssetRef, len(existingRefs))
+	affectedSet := make(map[uuid.UUID]struct{}, len(validAssetIDs)+len(existingRefs))
+	for _, ref := range existingRefs {
+		existingSet[ref.AssetID] = ref
+		affectedSet[ref.AssetID] = struct{}{}
+	}
+
+	desiredSet := make(map[uuid.UUID]struct{}, len(validAssetIDs))
+	for _, assetID := range validAssetIDs {
+		desiredSet[assetID] = struct{}{}
+		affectedSet[assetID] = struct{}{}
+		if ref, ok := existingSet[assetID]; ok {
+			if err := tx.Model(&models.DocumentAssetRef{}).
+				Where("id = ?", ref.ID).
+				Update("updated_at", now).Error; err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := tx.Create(&models.DocumentAssetRef{
+			ID:          uuid.New(),
+			DocumentID:  documentID,
+			AssetID:     assetID,
+			OwnerUserID: userID,
+			RefType:     editorContentRefType,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	for _, ref := range existingRefs {
+		if _, keep := desiredSet[ref.AssetID]; keep {
+			continue
+		}
+		if err := tx.Unscoped().Delete(&models.DocumentAssetRef{}, "id = ?", ref.ID).Error; err != nil {
+			return err
+		}
+	}
+
+	affectedAssetIDs := make([]uuid.UUID, 0, len(affectedSet))
+	for assetID := range affectedSet {
+		affectedAssetIDs = append(affectedAssetIDs, assetID)
+	}
+
+	return reconcileAssetRefs(tx, affectedAssetIDs, now)
+}
+
+func filterOwnedAssetIDs(tx *gorm.DB, userID uuid.UUID, assetIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if len(assetIDs) == 0 {
+		return nil, nil
+	}
+
+	var assets []models.Asset
+	if err := tx.
+		Where("owner_user_id = ? AND id IN ? AND deleted_at IS NULL", userID, assetIDs).
+		Find(&assets).Error; err != nil {
+		return nil, err
+	}
+
+	validSet := make(map[uuid.UUID]struct{}, len(assets))
+	for _, asset := range assets {
+		validSet[asset.ID] = struct{}{}
+	}
+
+	validAssetIDs := make([]uuid.UUID, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if _, ok := validSet[assetID]; ok {
+			validAssetIDs = append(validAssetIDs, assetID)
+		}
+	}
+	return validAssetIDs, nil
+}
+
+func reconcileAssetRefs(tx *gorm.DB, assetIDs []uuid.UUID, now time.Time) error {
+	for _, assetID := range assetIDs {
+		var refCount int64
+		if err := tx.Model(&models.DocumentAssetRef{}).
+			Where("asset_id = ? AND ref_type = ?", assetID, editorContentRefType).
+			Count(&refCount).Error; err != nil {
+			return err
+		}
+
+		status := assetStatusReady
+		if refCount == 0 {
+			status = assetStatusPending
+		}
+
+		if err := tx.Model(&models.Asset{}).
+			Where("id = ? AND deleted_at IS NULL", assetID).
+			Updates(map[string]any{
+				"reference_count": int(refCount),
+				"status":          status,
+				"updated_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+
+		if refCount == 0 {
+			if err := ensurePendingDeleteJob(tx, assetID, now); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := cancelPendingDeleteJobs(tx, assetID, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensurePendingDeleteJob(tx *gorm.DB, assetID uuid.UUID, now time.Time) error {
+	var existing models.AssetGCJob
+	err := tx.
+		Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").
+		First(&existing).Error
+	switch {
+	case err == nil:
+		return tx.Model(&models.AssetGCJob{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{
+				"run_after":  now.Add(assetDeleteDelay),
+				"updated_at": now,
+			}).Error
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return tx.Create(&models.AssetGCJob{
+			ID:       uuid.New(),
+			AssetID:  assetID,
+			JobType:  "delete",
+			Status:   "pending",
+			RunAfter: now.Add(assetDeleteDelay),
+		}).Error
+	default:
+		return err
+	}
+}
+
+func cancelPendingDeleteJobs(tx *gorm.DB, assetID uuid.UUID, now time.Time) error {
+	return tx.Model(&models.AssetGCJob{}).
+		Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").
+		Updates(map[string]any{
+			"status":     "cancelled",
+			"updated_at": now,
+		}).Error
+}
+
+func removeDocumentAssetRefs(tx *gorm.DB, userID, documentID uuid.UUID, now time.Time) error {
+	var refs []models.DocumentAssetRef
+	if err := tx.
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Find(&refs).Error; err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+
+	assetIDs := make([]uuid.UUID, 0, len(refs))
+	for _, ref := range refs {
+		assetIDs = append(assetIDs, ref.AssetID)
+	}
+
+	if err := tx.Unscoped().
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
+		Delete(&models.DocumentAssetRef{}).Error; err != nil {
+		return err
+	}
+
+	return reconcileAssetRefs(tx, assetIDs, now)
+}

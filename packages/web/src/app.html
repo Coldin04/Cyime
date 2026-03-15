@@ -2,11 +2,20 @@
 <html lang="%lang%">
 	<head>
 		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.ico" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			(() => {
+				const key = 'cyime-theme-mode';
+				const mode = localStorage.getItem(key) || 'system';
+				const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+				document.documentElement.classList.toggle('dark', dark);
+				document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
-	<body class="bg-white dark:bg-slate-900" data-sveltekit-preload-data="hover">
+	<body class="bg-white dark:bg-slate-800" data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

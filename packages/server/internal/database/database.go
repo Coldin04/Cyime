@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 )
 
 var DB *gorm.DB
@@ -21,7 +22,7 @@ func Connect() {
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
-			SlowThreshold:             200 * 1000, // Slow SQL threshold
+			SlowThreshold:             200 * 1000,  // Slow SQL threshold
 			LogLevel:                  logger.Info, // Log level
 			IgnoreRecordNotFoundError: true,        // Ignore ErrRecordNotFound error for logger
 			Colorful:                  true,        // Disable color
@@ -40,7 +41,6 @@ func Connect() {
 	}
 	dsn := filepath.Join(dbPath, "cyimewrite.db")
 
-
 	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
@@ -50,8 +50,42 @@ func Connect() {
 
 	log.Println("Database connection established.")
 
+	// Optional development reset (disabled by default).
+	// Set RESET_WORKSPACE_TABLES_ON_BOOT=true to drop workspace/content/media tables.
+	if config.IsTrue(os.Getenv("RESET_WORKSPACE_TABLES_ON_BOOT")) {
+		resetTables := []string{
+			"asset_gc_jobs",
+			"assets",
+			"document_asset_refs",
+			"document_bodies",
+			"documents",
+			"folders",
+			// Legacy table name from previous schema.
+			"document_contents",
+		}
+		for _, table := range resetTables {
+			if DB.Migrator().HasTable(table) {
+				if err := DB.Migrator().DropTable(table); err != nil {
+					log.Fatalf("Failed to drop table %s: %v", table, err)
+				}
+			}
+		}
+	}
+
 	// Auto-migrate the schema
-	err = DB.AutoMigrate(&models.User{}, &models.AuthProvider{}, &models.UserIdentityProvider{}, &models.UserRefreshToken{})
+	err = DB.AutoMigrate(
+		&models.User{},
+		&models.AuthProvider{},
+		&models.UserIdentityProvider{},
+		&models.UserSession{},
+		&models.UserRefreshToken{},
+		&models.Folder{},
+		&models.Document{},
+		&models.DocumentBody{},
+		&models.Asset{},
+		&models.DocumentAssetRef{},
+		&models.AssetGCJob{},
+	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)
 	}

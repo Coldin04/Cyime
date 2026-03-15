@@ -12,6 +12,12 @@
   let isLoading = true;
   let error: string | null = null;
 
+  function formatProviderName(name: string): string {
+    const value = name.trim();
+    if (!value) return name;
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
   onMount(async () => {
     try {
       const response = await fetch('/api/v1/auth/config');
@@ -51,7 +57,7 @@
             ? 'bg-riptide-500 text-riptide-50'
             : 'bg-white text-gray-600 dark:bg-slate-700 dark:text-gray-300'}"
         >
-          {m.sso_login_box_login_with_provider({ providerName: provider.name })}
+          {m.sso_login_box_login_with_provider({ providerName: formatProviderName(provider.name) })}
         </a>
       {/each}
     </div>
@@ -62,4 +68,3 @@
     </div>
   {/if}
 </div>
-

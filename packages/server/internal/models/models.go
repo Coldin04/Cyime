@@ -17,12 +17,14 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 
 // User represents the core user model
 type User struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
-	Email       *string   `gorm:"unique"`
-	DisplayName *string
-	AvatarURL   *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              uuid.UUID `gorm:"type:uuid;primary_key"`
+	Email           *string   `gorm:"unique"`
+	DisplayName     *string
+	AvatarURL       *string
+	AvatarObjectKey *string
+	DocumentQuota   *int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -35,20 +37,20 @@ func (a *AuthProvider) BeforeCreate(tx *gorm.DB) (err error) {
 
 // AuthProvider stores configuration for an OIDC or OAuth2 provider
 type AuthProvider struct {
-	ID                      uuid.UUID `gorm:"type:uuid;primary_key"`
-	Name                    string    `gorm:"type:varchar(100);not null;unique"`
-	ProtocolType            string    `gorm:"type:varchar(20);not null;default:'oidc'"`
-	IssuerURL               *string   `gorm:"type:varchar(255)"`
-	AuthURL                 *string   `gorm:"type:varchar(255)"` // For OAuth2
-	TokenURL                *string   `gorm:"type:varchar(255)"` // For OAuth2
-	UserInfoURL             *string   `gorm:"type:varchar(255)"`
-	ClientID                string    `gorm:"type:varchar(255);not null"`
-	ClientSecretEncrypted   string    `gorm:"type:text;not null"`
-	IconURL                 *string   `gorm:"type:varchar(255)"`
-	Scopes                  string    `gorm:"type:varchar(255);not null"`
-	IsActive                bool      `gorm:"not null;default:true"`
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	ID                    uuid.UUID `gorm:"type:uuid;primary_key"`
+	Name                  string    `gorm:"type:varchar(100);not null;unique"`
+	ProtocolType          string    `gorm:"type:varchar(20);not null;default:'oidc'"`
+	IssuerURL             *string   `gorm:"type:varchar(255)"`
+	AuthURL               *string   `gorm:"type:varchar(255)"` // For OAuth2
+	TokenURL              *string   `gorm:"type:varchar(255)"` // For OAuth2
+	UserInfoURL           *string   `gorm:"type:varchar(255)"`
+	ClientID              string    `gorm:"type:varchar(255);not null"`
+	ClientSecretEncrypted string    `gorm:"type:text;not null"`
+	IconURL               *string   `gorm:"type:varchar(255)"`
+	Scopes                string    `gorm:"type:varchar(255);not null"`
+	IsActive              bool      `gorm:"not null;default:true"`
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -61,16 +63,38 @@ func (uip *UserIdentityProvider) BeforeCreate(tx *gorm.DB) (err error) {
 
 // UserIdentityProvider links a user to an OIDC identity
 type UserIdentityProvider struct {
-	ID               uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID           uuid.UUID `gorm:"not null"`
-	User             User      `gorm:"foreignKey:UserID"`
-	ProviderName     string    `gorm:"type:varchar(100);not null"`
-	ProviderUserID   string    `gorm:"type:varchar(255);not null"`
-	CreatedAt        time.Time
+	ID             uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID         uuid.UUID `gorm:"not null"`
+	User           User      `gorm:"foreignKey:UserID"`
+	ProviderName   string    `gorm:"type:varchar(100);not null"`
+	ProviderUserID string    `gorm:"type:varchar(255);not null"`
+	CreatedAt      time.Time
 
 	// Unique constraints
 	// _      struct{} `gorm:"uniqueIndex:idx_user_provider,columns:user_id,provider_name"`
 	// _      struct{} `gorm:"uniqueIndex:idx_provider_user,columns:provider_name,provider_user_id"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (us *UserSession) BeforeCreate(tx *gorm.DB) (err error) {
+	if us.ID == uuid.Nil {
+		us.ID = uuid.New()
+	}
+	return
+}
+
+// UserSession stores a logical login session for one user.
+type UserSession struct {
+	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID      uuid.UUID `gorm:"not null;index"`
+	User        User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	UserAgent   string    `gorm:"type:text;not null;default:''"`
+	DeviceLabel string    `gorm:"type:varchar(255);not null;default:''"`
+	LastSeenAt  time.Time `gorm:"not null;index"`
+	RevokedAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -83,12 +107,159 @@ func (urt *UserRefreshToken) BeforeCreate(tx *gorm.DB) (err error) {
 
 // UserRefreshToken stores a user's long-lived refresh token.
 type UserRefreshToken struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID    uuid.UUID `gorm:"not null"`
-	User      User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
-	TokenHash string    `gorm:"type:varchar(255);not null;uniqueIndex"`
-	ExpiresAt time.Time `gorm:"not null"`
+	ID        uuid.UUID   `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID   `gorm:"not null;index"`
+	User      User        `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	SessionID uuid.UUID   `gorm:"type:uuid;not null;index"`
+	Session   UserSession `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE;"`
+	TokenHash string      `gorm:"type:varchar(255);not null;uniqueIndex"`
+	ExpiresAt time.Time   `gorm:"not null"`
 	CreatedAt time.Time
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (f *Folder) BeforeCreate(tx *gorm.DB) (err error) {
+	if f.ID == uuid.Nil {
+		f.ID = uuid.New()
+	}
+	return
+}
+
+// Folder represents a folder in the workspace
+type Folder struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID uuid.UUID  `gorm:"not null;index:idx_owner_parent"`
+	ParentID    *uuid.UUID `gorm:"index:idx_owner_parent"`
+	Name        string     `gorm:"type:varchar(255);not null"`
+	Description *string    `gorm:"type:text"`
+	CreatedBy   uuid.UUID  `gorm:"not null"`
+	UpdatedBy   uuid.UUID  `gorm:"not null"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (d *Document) BeforeCreate(tx *gorm.DB) (err error) {
+	if d.ID == uuid.Nil {
+		d.ID = uuid.New()
+	}
+	return
+}
+
+// Document represents an editable workspace document (metadata only).
+type Document struct {
+	ID           uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID  uuid.UUID  `gorm:"not null;index:idx_owner_folder"`
+	FolderID     *uuid.UUID `gorm:"index:idx_owner_folder"`
+	Title        string     `gorm:"type:varchar(255);not null"`
+	Excerpt      string     `gorm:"type:text"`
+	DocumentType string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
+	EditorType   string     `gorm:"type:varchar(50);not null;default:'tiptap'"`
+	CreatedBy    uuid.UUID  `gorm:"not null"`
+	UpdatedBy    uuid.UUID  `gorm:"not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (dbd *DocumentBody) BeforeCreate(tx *gorm.DB) (err error) {
+	if dbd.ID == uuid.Nil {
+		dbd.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentBody stores current canonical editor content for a document.
+type DocumentBody struct {
+	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
+	ContentJSON    string         `gorm:"type:text;not null"`
+	PlainText      string         `gorm:"type:text;not null;default:''"`
+	ContentVersion int64          `gorm:"not null;default:1"`
+	YjsState       string         `gorm:"type:text"`
+	YjsStateVector string         `gorm:"type:text"`
+	UpdatedBy      uuid.UUID      `gorm:"not null"`
+	CreatedAt      time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
+	return
+}
+
+// Asset represents a stored binary resource such as an image, video, or file.
+type Asset struct {
+	ID              uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID     uuid.UUID  `gorm:"not null;index:idx_owner_document"`
+	DocumentID      *uuid.UUID `gorm:"type:uuid;index:idx_owner_document"`
+	Kind            string     `gorm:"type:varchar(20);not null;default:'image'"`
+	Filename        string     `gorm:"type:varchar(255);not null"`
+	FileHash        string     `gorm:"type:varchar(64);not null;index"`
+	FileSize        int64      `gorm:"not null"`
+	MimeType        string     `gorm:"type:varchar(100);not null"`
+	StorageProvider string     `gorm:"type:varchar(50);not null;default:'r2'"`
+	Bucket          string     `gorm:"type:varchar(255)"`
+	ObjectKey       string     `gorm:"type:varchar(255);not null;unique"`
+	URL             string     `gorm:"type:text;not null"`
+	Visibility      string     `gorm:"type:varchar(20);not null;default:'private'"`
+	AltText         *string    `gorm:"type:text"`
+	Width           *int       `gorm:"type:int"`
+	Height          *int       `gorm:"type:int"`
+	Status          string     `gorm:"type:varchar(20);not null;default:'ready'"`
+	ReferenceCount  int        `gorm:"not null;default:0;index"`
+	CreatedBy       uuid.UUID  `gorm:"not null"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (r *DocumentAssetRef) BeforeCreate(tx *gorm.DB) (err error) {
+	if r.ID == uuid.Nil {
+		r.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentAssetRef is the source of truth for whether a document references an asset.
+type DocumentAssetRef struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID  uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref"`
+	AssetID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_asset_ref;index"`
+	OwnerUserID uuid.UUID      `gorm:"type:uuid;not null;index:idx_owner_document_asset_ref"`
+	RefType     string         `gorm:"type:varchar(50);not null;default:'editor_content';uniqueIndex:idx_document_asset_ref"`
+	CreatedAt   time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (j *AssetGCJob) BeforeCreate(tx *gorm.DB) (err error) {
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	return
+}
+
+// AssetGCJob stores delayed cleanup work for unused assets.
+type AssetGCJob struct {
+	ID           uuid.UUID      `gorm:"type:uuid;primary_key"`
+	AssetID      uuid.UUID      `gorm:"type:uuid;not null;index"`
+	JobType      string         `gorm:"type:varchar(20);not null;index"`
+	Status       string         `gorm:"type:varchar(20);not null;default:'pending';index"`
+	RunAfter     time.Time      `gorm:"not null;index"`
+	AttemptCount int            `gorm:"not null;default:0"`
+	LastError    *string        `gorm:"type:text"`
+	CreatedAt    time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // Set GORM table names to use snake_case
@@ -104,6 +275,34 @@ func (UserIdentityProvider) TableName() string {
 	return "user_identity_providers"
 }
 
+func (UserSession) TableName() string {
+	return "user_sessions"
+}
+
 func (UserRefreshToken) TableName() string {
 	return "user_refresh_tokens"
+}
+
+func (Folder) TableName() string {
+	return "folders"
+}
+
+func (Document) TableName() string {
+	return "documents"
+}
+
+func (DocumentBody) TableName() string {
+	return "document_bodies"
+}
+
+func (Asset) TableName() string {
+	return "assets"
+}
+
+func (DocumentAssetRef) TableName() string {
+	return "document_asset_refs"
+}
+
+func (AssetGCJob) TableName() string {
+	return "asset_gc_jobs"
 }

@@ -3,7 +3,11 @@
   import * as m from '$paraglide/messages';
 </script>
 
-<div class="flex min-h-screen items-center justify-center bg-riptide-50 py-12 dark:bg-slate-900 md:pb-0">
+<svelte:head>
+  <title>{m.page_title_login()}</title>
+</svelte:head>
+
+<div class="flex min-h-screen items-center justify-center bg-white py-12 dark:bg-slate-900 md:pb-0">
   <div class="container mx-auto p-4">
     <div class="mx-auto max-w-4xl grid grid-cols-1 items-center gap-6 md:grid-cols-2">
       <!-- Left Column: Brand and Tagline -->

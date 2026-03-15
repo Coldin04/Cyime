@@ -1,0 +1,382 @@
+package media
+
+import (
+	"context"
+	"errors"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+const (
+	defaultAssetGCInterval = time.Minute
+	defaultAssetGCBatch    = 20
+	defaultAssetGCMaxRetry = 5
+	defaultAssetGCRetryGap = 5 * time.Minute
+	defaultAssetReconcile  = 200
+)
+
+func StartAssetGCWorker(ctx context.Context) {
+	if !assetGCEnabledFromEnv() {
+		log.Println("[media.gc] disabled")
+		return
+	}
+
+	interval := assetGCIntervalFromEnv()
+	batchSize := assetGCBatchSizeFromEnv()
+	reconcileBatch := assetReconcileBatchSizeFromEnv()
+	reconcileEnabled := assetReconcileEnabledFromEnv()
+	if interval <= 0 || batchSize <= 0 {
+		log.Printf("[media.gc] skipped invalid config interval=%s batch=%d", interval, batchSize)
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		log.Printf("[media.gc] started interval=%s batch=%d reconcile=%v reconcile_batch=%d", interval, batchSize, reconcileEnabled, reconcileBatch)
+		for {
+			now := time.Now()
+			if reconcileEnabled {
+				reconciled, err := RunAssetReferenceReconcilePass(now, reconcileBatch)
+				if err != nil {
+					log.Printf("[media.gc] reconcile failed: %v", err)
+				} else if reconciled > 0 {
+					log.Printf("[media.gc] reconciled assets=%d", reconciled)
+				}
+			}
+
+			if _, err := RunDueAssetGCJobs(ctx, time.Now(), batchSize); err != nil {
+				log.Printf("[media.gc] run failed: %v", err)
+			}
+
+			select {
+			case <-ctx.Done():
+				log.Println("[media.gc] stopped")
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func RunDueAssetGCJobs(ctx context.Context, now time.Time, limit int) (int, error) {
+	if limit <= 0 {
+		limit = defaultAssetGCBatch
+	}
+
+	var jobs []models.AssetGCJob
+	if err := database.DB.
+		Where("job_type = ? AND status = ? AND run_after <= ?", "delete", "pending", now).
+		Order("run_after asc").
+		Limit(limit).
+		Find(&jobs).Error; err != nil {
+		return 0, err
+	}
+
+	processed := 0
+	for _, job := range jobs {
+		processed++
+		if err := runAssetDeleteJob(ctx, job.ID, now); err != nil {
+			log.Printf("[media.gc] job=%s failed: %v", job.ID, err)
+		}
+	}
+
+	return processed, nil
+}
+
+func runAssetDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) error {
+	var job models.AssetGCJob
+	var asset models.Asset
+	var shouldDelete bool
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ? AND job_type = ? AND status = ?", jobID, "delete", "pending").First(&job).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.AssetGCJob{}).
+			Where("id = ?", job.ID).
+			Updates(map[string]any{
+				"status":        "running",
+				"attempt_count": gorm.Expr("attempt_count + 1"),
+				"updated_at":    now,
+				"last_error":    nil,
+			}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("id = ?", job.AssetID).First(&asset).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return tx.Model(&models.AssetGCJob{}).
+					Where("id = ?", job.ID).
+					Updates(map[string]any{
+						"status":     "done",
+						"updated_at": now,
+					}).Error
+			}
+			return err
+		}
+
+		var refCount int64
+		if err := tx.Model(&models.DocumentAssetRef{}).
+			Where("asset_id = ? AND ref_type = ?", job.AssetID, "editor_content").
+			Count(&refCount).Error; err != nil {
+			return err
+		}
+		if refCount > 0 {
+			if err := tx.Model(&models.Asset{}).
+				Where("id = ?", asset.ID).
+				Updates(map[string]any{
+					"status":          "ready",
+					"reference_count": int(refCount),
+					"updated_at":      now,
+				}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&models.AssetGCJob{}).
+				Where("id = ?", job.ID).
+				Updates(map[string]any{
+					"status":     "cancelled",
+					"updated_at": now,
+				}).Error
+		}
+
+		shouldDelete = true
+		return nil
+	})
+	if err != nil {
+		return markAssetGCJobFailed(jobID, now, err)
+	}
+	if asset.ID == uuid.Nil || !shouldDelete {
+		return nil
+	}
+
+	if err := initStorageProvider(); err != nil {
+		return markAssetGCJobFailed(jobID, now, err)
+	}
+	if err := storageProvider.DeleteObject(ctx, asset.ObjectKey); err != nil {
+		return markAssetGCJobFailed(jobID, now, err)
+	}
+
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Asset{}).
+			Where("id = ? AND deleted_at IS NULL", asset.ID).
+			Updates(map[string]any{
+				"status":          "deleted",
+				"reference_count": 0,
+				"updated_at":      now,
+				"deleted_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.AssetGCJob{}).
+			Where("id = ?", jobID).
+			Updates(map[string]any{
+				"status":     "done",
+				"updated_at": now,
+			}).Error
+	})
+}
+
+func markAssetGCJobFailed(jobID uuid.UUID, now time.Time, cause error) error {
+	message := cause.Error()
+	maxAttempts := assetGCMaxAttemptsFromEnv()
+	retryGap := assetGCRetryGapFromEnv()
+
+	var job models.AssetGCJob
+	if err := database.DB.First(&job, "id = ?", jobID).Error; err != nil {
+		return cause
+	}
+
+	status := "failed"
+	runAfter := job.RunAfter
+	if job.AttemptCount < maxAttempts {
+		attemptCount := job.AttemptCount
+		if attemptCount < 1 {
+			attemptCount = 1
+		}
+		status = "pending"
+		runAfter = now.Add(retryGap * time.Duration(1<<(attemptCount-1)))
+	}
+
+	updateErr := database.DB.Model(&models.AssetGCJob{}).
+		Where("id = ?", jobID).
+		Updates(map[string]any{
+			"status":     status,
+			"run_after":  runAfter,
+			"last_error": message,
+			"updated_at": now,
+		}).Error
+	if updateErr != nil {
+		return errors.Join(cause, updateErr)
+	}
+	return cause
+}
+
+func RunAssetReferenceReconcilePass(now time.Time, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		batchSize = defaultAssetReconcile
+	}
+
+	var assets []models.Asset
+	if err := database.DB.Where("deleted_at IS NULL").Order("updated_at asc").Limit(batchSize).Find(&assets).Error; err != nil {
+		return 0, err
+	}
+
+	reconciled := 0
+	for _, asset := range assets {
+		if err := reconcileOneAsset(now, asset.ID); err != nil {
+			return reconciled, err
+		}
+		reconciled++
+	}
+	return reconciled, nil
+}
+
+func reconcileOneAsset(now time.Time, assetID uuid.UUID) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var asset models.Asset
+		if err := tx.Where("id = ?", assetID).First(&asset).Error; err != nil {
+			return err
+		}
+
+		var refCount int64
+		if err := tx.Model(&models.DocumentAssetRef{}).
+			Where("asset_id = ? AND ref_type = ?", assetID, "editor_content").
+			Count(&refCount).Error; err != nil {
+			return err
+		}
+
+		nextStatus := "ready"
+		if refCount == 0 {
+			nextStatus = "pending_delete"
+		}
+		if asset.Status == "deleted" {
+			nextStatus = "deleted"
+		}
+
+		if err := tx.Model(&models.Asset{}).
+			Where("id = ?", assetID).
+			Updates(map[string]any{
+				"reference_count": int(refCount),
+				"status":          nextStatus,
+				"updated_at":      now,
+			}).Error; err != nil {
+			return err
+		}
+
+		if nextStatus == "deleted" {
+			return tx.Model(&models.AssetGCJob{}).
+				Where("asset_id = ? AND status = ?", assetID, "pending").
+				Updates(map[string]any{
+					"status":     "cancelled",
+					"updated_at": now,
+				}).Error
+		}
+
+		if refCount > 0 {
+			return tx.Model(&models.AssetGCJob{}).
+				Where("asset_id = ? AND status = ?", assetID, "pending").
+				Updates(map[string]any{
+					"status":     "cancelled",
+					"updated_at": now,
+				}).Error
+		}
+
+		var pending models.AssetGCJob
+		err := tx.Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").First(&pending).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		return tx.Create(&models.AssetGCJob{
+			ID:       uuid.New(),
+			AssetID:  assetID,
+			JobType:  "delete",
+			Status:   "pending",
+			RunAfter: now.Add(24 * time.Hour),
+		}).Error
+	})
+}
+
+func assetGCEnabledFromEnv() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("MEDIA_ASSET_GC_ENABLED")))
+	return raw == "" || raw == "1" || raw == "true" || raw == "yes"
+}
+
+func assetGCIntervalFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_GC_INTERVAL"))
+	if raw == "" {
+		return defaultAssetGCInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return defaultAssetGCInterval
+	}
+	return d
+}
+
+func assetGCBatchSizeFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_GC_BATCH_SIZE"))
+	if raw == "" {
+		return defaultAssetGCBatch
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultAssetGCBatch
+	}
+	return n
+}
+
+func assetGCMaxAttemptsFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_GC_MAX_ATTEMPTS"))
+	if raw == "" {
+		return defaultAssetGCMaxRetry
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultAssetGCMaxRetry
+	}
+	return n
+}
+
+func assetGCRetryGapFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_GC_RETRY_GAP"))
+	if raw == "" {
+		return defaultAssetGCRetryGap
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultAssetGCRetryGap
+	}
+	return d
+}
+
+func assetReconcileEnabledFromEnv() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("MEDIA_ASSET_RECONCILE_ENABLED")))
+	return raw == "" || raw == "1" || raw == "true" || raw == "yes"
+}
+
+func assetReconcileBatchSizeFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_RECONCILE_BATCH_SIZE"))
+	if raw == "" {
+		return defaultAssetReconcile
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultAssetReconcile
+	}
+	return n
+}

@@ -2,8 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
+
 @layer base {
 	html {
 		@apply scroll-smooth;
+	}
+}
+
+.scrollbar-none {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
+.tiptap {
+	line-height: 1.85;
+	min-height: 100%;
+}
+
+.tiptap:focus {
+	outline: none;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+	color: rgb(161 161 170);
+	content: attr(data-placeholder);
+	float: left;
+	height: 0;
+	pointer-events: none;
+}
+
+.tiptap p {
+	margin: 0;
+}
+
+.tiptap > * + * {
+	margin-top: 1rem;
+}
+
+.tiptap ul,
+.tiptap ol {
+	padding-left: 1.5rem;
+}
+
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.tiptap h1 {
+	font-size: 1.875rem;
+}
+
+.tiptap h2 {
+	font-size: 1.5rem;
+}
+
+.tiptap h3 {
+	font-size: 1.25rem;
+}
+
+.tiptap blockquote {
+	border-left: 3px solid rgb(212 212 216);
+	margin: 1rem 0;
+	padding-left: 1rem;
+}
+
+.tiptap code {
+	background: rgb(244 244 245);
+	border-radius: 0.25rem;
+	padding: 0.125rem 0.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+	.tiptap code {
+		background: rgb(39 39 42);
+		color: rgb(228 228 231);
+	}
+}
+
+.tiptap pre {
+	background: rgb(24 24 27);
+	border-radius: 0.75rem;
+	color: rgb(250 250 250);
+	padding: 1rem;
+}
+
+.tiptap pre code {
+	background: transparent;
+	padding: 0;
+}
+
+.tiptap img {
+	border-radius: 0.5rem;
+	display: block;
+	height: auto;
+	max-width: 100%;
+}
+
+@media (max-width: 640px) {
+	.tiptap {
+		padding-left: 1rem !important;
+		padding-right: 1rem !important;
 	}
 }
