@@ -9,7 +9,7 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/paraglide',
-			strategy: ["custom-manual-cookie", "preferredLanguage", "baseLocale"]
+			strategy: ['custom-manual-cookie', 'preferredLanguage', 'baseLocale']
 		}),
 		Icons({
 			compiler: 'svelte',
