@@ -2,7 +2,9 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -46,4 +48,20 @@ func IsTrue(value string) bool {
 	default:
 		return false
 	}
+}
+
+// GetOptionalNonNegativeInt reads an optional non-negative integer from env.
+// Empty values mean "not configured".
+func GetOptionalNonNegativeInt(key string) (*int, error) {
+	raw, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+
+	return &value, nil
 }

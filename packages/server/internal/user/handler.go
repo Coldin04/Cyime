@@ -20,6 +20,13 @@ type UserResponseDTO struct {
 	AvatarURL   *string   `json:"avatarUrl"`
 }
 
+type OverviewResponseDTO struct {
+	ActiveDocumentCount  int64 `json:"activeDocumentCount"`
+	TrashedDocumentCount int64 `json:"trashedDocumentCount"`
+	DocumentLimit        *int  `json:"documentLimit"`
+	Unlimited            bool  `json:"unlimited"`
+}
+
 type UpdateProfileRequest struct {
 	DisplayName string `json:"displayName"`
 }
@@ -51,6 +58,30 @@ func GetMe(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(response)
+}
+
+// GetOverview handles GET /api/v1/user/overview.
+func GetOverview(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized: Invalid token context.",
+		})
+	}
+
+	stats, err := GetOverviewStats(userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to load overview.",
+		})
+	}
+
+	return c.JSON(OverviewResponseDTO{
+		ActiveDocumentCount:  stats.ActiveDocumentCount,
+		TrashedDocumentCount: stats.TrashedDocumentCount,
+		DocumentLimit:        stats.DocumentLimit,
+		Unlimited:            stats.Unlimited,
+	})
 }
 
 func UpdateProfileHandler(c *fiber.Ctx) error {

@@ -7,6 +7,13 @@ export type UserProfile = {
 	avatarUrl: string | null;
 };
 
+export type UserOverview = {
+	activeDocumentCount: number;
+	trashedDocumentCount: number;
+	documentLimit: number | null;
+	unlimited: boolean;
+};
+
 async function parseUserResponse(response: Response): Promise<UserProfile> {
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({}));
@@ -50,4 +57,15 @@ export async function setGitHubAvatar(username: string): Promise<UserProfile> {
 	});
 
 	return parseUserResponse(response);
+}
+
+export async function getUserOverview(): Promise<UserOverview> {
+	const response = await apiFetch('/api/v1/user/overview');
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to load user overview');
+	}
+
+	return response.json();
 }

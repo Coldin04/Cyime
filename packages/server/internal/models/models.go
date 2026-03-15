@@ -22,6 +22,7 @@ type User struct {
 	DisplayName     *string
 	AvatarURL       *string
 	AvatarObjectKey *string
+	DocumentQuota   *int
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
