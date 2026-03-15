@@ -4,6 +4,7 @@
 	import * as m from '$paraglide/messages';
 	import type { MediaAssetItem, MediaAssetReferencesResponse } from '$lib/api/media';
 	import { deleteMediaAsset, getMediaAssetReferences, getMediaAssetURL, listMediaAssets } from '$lib/api/media';
+	import { portal } from '$lib/actions/portal';
 	import CopySimple from '~icons/ph/copy-simple';
 	import Check from '~icons/ph/check';
 	import FileImage from '~icons/ph/file-image';
@@ -398,74 +399,92 @@
 </div>
 
 {#if referencesOpen}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-		<div class="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
-			<div class="flex items-start justify-between gap-3">
-				<div>
-					<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.user_media_references_title()}</h3>
-					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400 truncate">
-						{referencesAsset?.filename}
-					</p>
+	<div
+		use:portal
+		class="fixed inset-0 z-[100] min-h-dvh w-screen overflow-y-auto bg-black/40"
+		role="presentation"
+		onclick={closeReferences}
+	>
+		<div class="flex min-h-dvh w-full items-center justify-center p-2 sm:p-4">
+			<div
+				class="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+				role="dialog"
+				aria-modal="true"
+				tabindex="-1"
+				onclick={(event) => event.stopPropagation()}
+				onkeydown={(event) => {
+					if (event.key === 'Escape') {
+						closeReferences();
+					}
+				}}
+			>
+				<div class="flex items-start justify-between gap-3">
+					<div>
+						<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.user_media_references_title()}</h3>
+						<p class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
+							{referencesAsset?.filename}
+						</p>
+					</div>
+					<button
+						type="button"
+						class="rounded-full p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						onclick={closeReferences}
+					>
+						✕
+					</button>
 				</div>
-				<button
-					type="button"
-					class="rounded-full p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-					onclick={closeReferences}
-				>
-					✕
-				</button>
-			</div>
 
-			<div class="mt-4">
-				{#if referencesHint}
-					<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
-						{referencesHint}
-					</p>
-				{/if}
-				{#if referencesLoading}
-					<p class="text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_loading()}</p>
-				{:else if referencesError}
-					<p class="text-sm text-red-600 dark:text-red-300">{referencesError}</p>
-				{:else if referencesData}
-					<p class="text-sm text-zinc-600 dark:text-zinc-300">{m.user_media_references_count({ count: referencesData.referenceCount })}</p>
-					{#if referencesData.documents.length === 0}
-						<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_references_empty()}</p>
-					{:else}
-						<ul class="mt-3 space-y-2">
-							{#each referencesData.documents as doc (doc.documentId)}
-								<li class="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-700">
-									<div class="flex items-center justify-between gap-3">
-										<div class="min-w-0">
-											<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{doc.title}</p>
-											<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{formatDate(doc.updatedAt)}</p>
-										</div>
-										<div class="shrink-0 flex items-center gap-2">
-											<button
-												type="button"
-												class="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-												onclick={() => copyDocumentID(doc.documentId)}
-											>
-												{#if copiedDocumentID === doc.documentId}
-													<Check class="h-3.5 w-3.5" />
-													{m.user_media_action_copied()}
-												{:else}
-													<CopySimple class="h-3.5 w-3.5" />
-													{m.user_media_action_copy_id()}
-												{/if}
-											</button>
-											<a
-												href={`/edit/documents/${doc.documentId}`}
-												class="text-xs font-medium text-riptide-700 hover:underline dark:text-riptide-300"
-											>
-												{m.user_media_action_open_document()}
-											</a>
-										</div>
-									</div>
-								</li>
-							{/each}
-						</ul>
+				<div class="mt-4">
+					{#if referencesHint}
+						<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
+							{referencesHint}
+						</p>
 					{/if}
-				{/if}
+					{#if referencesLoading}
+						<p class="text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_loading()}</p>
+					{:else if referencesError}
+						<p class="text-sm text-red-600 dark:text-red-300">{referencesError}</p>
+					{:else if referencesData}
+						<p class="text-sm text-zinc-600 dark:text-zinc-300">{m.user_media_references_count({ count: referencesData.referenceCount })}</p>
+						{#if referencesData.documents.length === 0}
+							<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{m.user_media_references_empty()}</p>
+						{:else}
+							<ul class="mt-3 space-y-2">
+								{#each referencesData.documents as doc (doc.documentId)}
+									<li class="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+										<div class="flex items-center justify-between gap-3">
+											<div class="min-w-0">
+												<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{doc.title}</p>
+												<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{formatDate(doc.updatedAt)}</p>
+											</div>
+											<div class="shrink-0 flex items-center gap-2">
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+													onclick={() => copyDocumentID(doc.documentId)}
+												>
+													{#if copiedDocumentID === doc.documentId}
+														<Check class="h-3.5 w-3.5" />
+														{m.user_media_action_copied()}
+													{:else}
+														<CopySimple class="h-3.5 w-3.5" />
+														{m.user_media_action_copy_id()}
+													{/if}
+												</button>
+												<a
+													href={`/edit/documents/${doc.documentId}`}
+													class="text-xs font-medium text-riptide-700 hover:underline dark:text-riptide-300"
+												>
+													{m.user_media_action_open_document()}
+												</a>
+											</div>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>
