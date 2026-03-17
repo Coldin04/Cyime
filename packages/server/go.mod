@@ -1,6 +1,6 @@
 module g.co1d.in/Coldin04/CyimeWrite/server
 
-go 1.25.6
+go 1.25
 
 require (
 	github.com/google/uuid v1.6.0
