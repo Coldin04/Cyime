@@ -217,6 +217,15 @@
 	padding-bottom: 0.25rem;
 }
 
+.tiptap .tableWrapper .column-resize-handle {
+	display: none;
+}
+
+.tiptap .tableWrapper.resize-cursor,
+.tiptap .tableWrapper .resize-cursor {
+	cursor: default;
+}
+
 .tiptap table {
 	background: var(--editor-surface-muted);
 	border: 1px solid var(--editor-border);
@@ -224,6 +233,7 @@
 	border-radius: 1rem;
 	border-spacing: 0;
 	min-width: 36rem;
+	table-layout: fixed;
 	overflow: hidden;
 	width: 100%;
 }

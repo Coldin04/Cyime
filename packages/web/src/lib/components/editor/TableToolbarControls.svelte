@@ -7,25 +7,39 @@
 
 	interface Props {
 		isTableActive: boolean;
+		isHeaderRowActive: boolean;
 		canInsertTable: boolean;
 		canAddRow: boolean;
+		canDeleteRow: boolean;
 		canAddColumn: boolean;
+		canDeleteColumn: boolean;
+		canToggleHeaderRow: boolean;
 		canDeleteTable: boolean;
 		onInsertTable: (rows: number, cols: number) => void;
 		onAddRow: () => void;
+		onDeleteRow: () => void;
 		onAddColumn: () => void;
+		onDeleteColumn: () => void;
+		onToggleHeaderRow: () => void;
 		onDeleteTable: () => void;
 	}
 
 	let {
 		isTableActive,
+		isHeaderRowActive,
 		canInsertTable,
 		canAddRow,
+		canDeleteRow,
 		canAddColumn,
+		canDeleteColumn,
+		canToggleHeaderRow,
 		canDeleteTable,
 		onInsertTable,
 		onAddRow,
+		onDeleteRow,
 		onAddColumn,
+		onDeleteColumn,
+		onToggleHeaderRow,
 		onDeleteTable
 	}: Props = $props();
 
@@ -188,6 +202,16 @@
 		</button>
 		<button
 			type="button"
+			title={m.editor_toolbar_delete_row()}
+			aria-label={m.editor_toolbar_delete_row()}
+			disabled={!canDeleteRow}
+			class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+			onclick={onDeleteRow}
+		>
+			<span>-R</span>
+		</button>
+		<button
+			type="button"
 			title={m.editor_toolbar_add_column()}
 			aria-label={m.editor_toolbar_add_column()}
 			disabled={!canAddColumn}
@@ -195,6 +219,26 @@
 			onclick={onAddColumn}
 		>
 			<span>+C</span>
+		</button>
+		<button
+			type="button"
+			title={m.editor_toolbar_delete_column()}
+			aria-label={m.editor_toolbar_delete_column()}
+			disabled={!canDeleteColumn}
+			class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+			onclick={onDeleteColumn}
+		>
+			<span>-C</span>
+		</button>
+		<button
+			type="button"
+			title={m.editor_toolbar_toggle_header_row()}
+			aria-label={m.editor_toolbar_toggle_header_row()}
+			disabled={!canToggleHeaderRow}
+			class={`${pillButtonBaseClass} ${isHeaderRowActive ? activeToggleClass : inactiveToggleClass}`}
+			onclick={onToggleHeaderRow}
+		>
+			<span>HDR</span>
 		</button>
 		<button
 			type="button"

@@ -396,7 +396,7 @@
 					defaultProtocol: 'https'
 				}),
 				Table.configure({
-					resizable: false,
+					resizable: true,
 					HTMLAttributes: {
 						class: 'cw-editor-table'
 					}
@@ -897,11 +897,15 @@
 			{/if}
 			<TableToolbarControls
 				isTableActive={isActive('table')}
+				isHeaderRowActive={isActive('tableHeader')}
 				canInsertTable={canApply((instance) =>
 					instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
 				)}
 				canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
+				canDeleteRow={canApply((instance) => instance.can().chain().focus().deleteRow().run())}
 				canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
+				canDeleteColumn={canApply((instance) => instance.can().chain().focus().deleteColumn().run())}
+				canToggleHeaderRow={canApply((instance) => instance.can().chain().focus().toggleHeaderRow().run())}
 				canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
 				onInsertTable={(rows, cols) =>
 					apply((instance) => {
@@ -911,9 +915,21 @@
 					apply((instance) => {
 						instance.chain().focus().addRowAfter().run();
 					})}
+				onDeleteRow={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteRow().fixTables().run();
+					})}
 				onAddColumn={() =>
 					apply((instance) => {
 						instance.chain().focus().addColumnAfter().run();
+					})}
+				onDeleteColumn={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteColumn().fixTables().run();
+					})}
+				onToggleHeaderRow={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleHeaderRow().fixTables().run();
 					})}
 				onDeleteTable={() =>
 					apply((instance) => {
