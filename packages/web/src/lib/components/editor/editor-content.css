@@ -174,7 +174,30 @@
 	border-radius: 0.75rem;
 	display: block;
 	height: auto;
+	max-height: min(40vh, 28rem);
 	max-width: 100%;
+	object-fit: contain;
+}
+
+.tiptap img:not([data-display-width]) {
+	max-width: min(100%, 46rem);
+	width: auto;
+}
+
+.tiptap img[data-display-width='40%'] {
+	width: 40%;
+}
+
+.tiptap img[data-display-width='60%'] {
+	width: 60%;
+}
+
+.tiptap img[data-display-width='80%'] {
+	width: 80%;
+}
+
+.tiptap img[data-display-width='100%'] {
+	width: 100%;
 }
 
 .tiptap hr {
@@ -263,5 +286,11 @@
 
 	.tiptap table {
 		min-width: 32rem;
+	}
+
+	.tiptap img[data-display-width='40%'],
+	.tiptap img[data-display-width='60%'],
+	.tiptap img[data-display-width='80%'] {
+		width: 100%;
 	}
 }

@@ -4,7 +4,6 @@
 	import type { Content, JSONContent } from '@tiptap/core';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
-	import Image from '@tiptap/extension-image';
 	import { Table } from '@tiptap/extension-table';
 	import { TableCell } from '@tiptap/extension-table-cell';
 	import { TableHeader } from '@tiptap/extension-table-header';
@@ -21,7 +20,10 @@
 	import Quotes from '~icons/ph/quotes';
 	import Code from '~icons/ph/code';
 	import Minus from '~icons/ph/minus';
+	import { CyImage, cyImageWidths } from '$lib/components/editor/CyImage';
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
+	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
+	import ImageUploadButton from '$lib/components/editor/ImageUploadButton.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { uploadDocumentAsset } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
@@ -53,17 +55,17 @@
 	let editor: Editor | null = null;
 	let lastSyncedContent = '';
 	let editorRevision = $state(0);
+	let uploadingImageCount = $state(0);
+	const imageUploadToastId = 'editor-image-upload';
 
-	const allowedUploadMimeTypes = new Set([
+	const allowedImageMimeTypes = new Set([
 		'image/png',
 		'image/jpeg',
 		'image/webp',
-		'image/gif',
-		'video/mp4',
-		'video/webm'
+		'image/gif'
 	]);
-
-	const allowedUploadExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm']);
+	const allowedImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 
 	function sanitizePastedHTML(html: string): string {
@@ -146,46 +148,147 @@
 		return JSON.stringify(normalizeDoc(value));
 	}
 
-	function isSupportedUploadFile(file: File): boolean {
+	function isSupportedImageFile(file: File): boolean {
 		const type = file.type.trim().toLowerCase();
-		if (type && allowedUploadMimeTypes.has(type)) {
+		if (type && allowedImageMimeTypes.has(type)) {
 			return true;
 		}
 
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
-		return ext !== '' && allowedUploadExtensions.has(ext);
+		return ext !== '' && allowedImageExtensions.has(ext);
 	}
 
-	function showUnsupportedUploadToast(file: File) {
+	function showUnsupportedImageUploadToast(file: File) {
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? 'unknown';
-		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF/MP4/WebM`);
+		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF`);
 	}
 
-	async function uploadAndInsertImage(file: File) {
+	function insertUploadedImage(attrs: Record<string, unknown>) {
 		if (!editor) return;
-		if (!isSupportedUploadFile(file)) {
-			showUnsupportedUploadToast(file);
+
+		editor
+			.chain()
+			.focus()
+			.insertContent([
+				{
+					type: 'image',
+					attrs
+				},
+				{
+					type: 'paragraph'
+				}
+			])
+			.run();
+	}
+
+	function beginImageUpload() {
+		uploadingImageCount += 1;
+		toast.loading(
+			uploadingImageCount > 1
+				? `正在上传 ${uploadingImageCount} 张图片...`
+				: m.common_uploading(),
+			{ id: imageUploadToastId, duration: Infinity }
+		);
+	}
+
+	function endImageUpload() {
+		uploadingImageCount = Math.max(0, uploadingImageCount - 1);
+		if (uploadingImageCount > 0) {
+			toast.loading(`正在上传 ${uploadingImageCount} 张图片...`, {
+				id: imageUploadToastId,
+				duration: Infinity
+			});
 			return;
 		}
+
+		toast.dismiss(imageUploadToastId);
+	}
+
+	async function uploadAndInsertImage(
+		file: File,
+		source: 'picker' | 'paste' = 'picker'
+	): Promise<boolean> {
+		if (!editor) return false;
+		if (!isSupportedImageFile(file)) {
+			showUnsupportedImageUploadToast(file);
+			return false;
+		}
+		beginImageUpload();
 		try {
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
-			editor
-				.chain()
-				.focus()
-				.insertContent({
-					type: 'image',
-					attrs: {
-						src: uploaded.url,
-						alt: file.name,
-						title: file.name,
-						assetId: uploaded.assetId
-					}
-				})
-				.run();
+			insertUploadedImage({
+				src: uploaded.url,
+				alt: file.name,
+				title: file.name,
+				assetId: uploaded.assetId
+			});
+			return true;
 		} catch (error) {
-			console.error('[Upload] Failed to upload image:', error);
-			toast.error(error instanceof Error ? error.message : '上传资源失败');
+			console.error(`[${source === 'paste' ? 'Paste' : 'Upload'}] Failed to upload image:`, error);
+			toast.error(error instanceof Error ? error.message : '上传图片失败');
+			return false;
+		} finally {
+			endImageUpload();
 		}
+	}
+
+	async function uploadAndInsertImages(files: Iterable<File>, source: 'picker' | 'paste' = 'picker') {
+		const supportedFiles: File[] = [];
+		let blockedCount = 0;
+		let uploadedCount = 0;
+
+		for (const file of files) {
+			if (!isSupportedImageFile(file)) {
+				blockedCount += 1;
+				continue;
+			}
+			supportedFiles.push(file);
+		}
+
+		if (blockedCount > 0) {
+			toast.error(
+				blockedCount === 1
+					? '检测到 1 个不支持的图片文件，已跳过。仅支持 PNG/JPG/WebP/GIF。'
+					: `检测到 ${blockedCount} 个不支持的图片文件，已跳过。仅支持 PNG/JPG/WebP/GIF。`
+			);
+		}
+
+		for (const file of supportedFiles) {
+			const uploaded = await uploadAndInsertImage(file, source);
+			if (uploaded) {
+				uploadedCount += 1;
+			}
+		}
+
+		if (uploadedCount > 0 && uploadingImageCount === 0) {
+			toast.success(
+				uploadedCount === 1 ? '图片上传完成' : `${uploadedCount} 张图片上传完成`
+			);
+		}
+	}
+
+	function hasClipboardFiles(clipboard: DataTransfer): boolean {
+		return Array.from(clipboard.items).some((item) => item.kind === 'file') || clipboard.files.length > 0;
+	}
+
+	function collectClipboardImageFiles(clipboard: DataTransfer): File[] {
+		const files = [
+			...Array.from(clipboard.items)
+				.filter((item) => item.kind === 'file')
+				.map((item) => item.getAsFile())
+				.filter((file): file is File => file !== null),
+			...Array.from(clipboard.files)
+		];
+
+		const uniqueFiles = new Map<string, File>();
+		for (const file of files) {
+			const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+			if (!uniqueFiles.has(key)) {
+				uniqueFiles.set(key, file);
+			}
+		}
+
+		return [...uniqueFiles.values()];
 	}
 
 	function extractImageSourcesFromHTML(html: string): string[] {
@@ -223,7 +326,7 @@
 						levels: [...headingLevels]
 					}
 				}),
-				Image.configure({
+				CyImage.configure({
 					inline: false,
 					allowBase64: true
 				}),
@@ -249,25 +352,18 @@
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
 
-						const imageFiles = [
-							...Array.from(clipboard.items)
-								.filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-								.map((item) => item.getAsFile())
-								.filter((file): file is File => file !== null),
-							...Array.from(clipboard.files).filter((file) => file.type.startsWith('image/'))
-						];
-
-						if (imageFiles.length > 0) {
+						const clipboardFiles = collectClipboardImageFiles(clipboard);
+						if (clipboardFiles.length > 0) {
 							clipboardEvent.preventDefault();
 							void (async () => {
-								for (const file of imageFiles) {
-									try {
-										await uploadAndInsertImage(file);
-									} catch (error) {
-										console.error('[Paste] Failed to upload pasted image file:', error);
-									}
-								}
+								await uploadAndInsertImages(clipboardFiles, 'paste');
 							})();
+							return true;
+						}
+
+						if (hasClipboardFiles(clipboard)) {
+							clipboardEvent.preventDefault();
+							toast.error('当前仅支持粘贴 PNG/JPG/WebP/GIF 图片，其他文件请先导出为图片后再上传。');
 							return true;
 						}
 
@@ -278,14 +374,20 @@
 						if (imageSources.length > 0) {
 							clipboardEvent.preventDefault();
 							void (async () => {
+								let blockedSourceCount = 0;
 								for (const src of imageSources) {
 									const file = await srcToUploadFile(src);
-									if (!file) continue;
-									try {
-										await uploadAndInsertImage(file);
-									} catch (error) {
-										console.error('[Paste] Failed to upload pasted image element:', error);
+									if (!file) {
+										blockedSourceCount += 1;
+										continue;
 									}
+									await uploadAndInsertImage(file, 'paste');
+								}
+
+								if (blockedSourceCount > 0) {
+									toast.error(
+										'检测到不支持或无法读取的粘贴图片内容，已跳过。仅支持 PNG/JPG/WebP/GIF。'
+									);
 								}
 							})();
 							return true;
@@ -403,6 +505,29 @@
 		editorRevision += 1;
 	}
 
+	function currentImageWidth() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return 'auto';
+		const attrs = editor.getAttributes('image');
+		const width = typeof attrs.width === 'string' ? attrs.width : '';
+		return cyImageWidths.includes(width as (typeof cyImageWidths)[number]) ? width : 'auto';
+	}
+
+	function applyImageWidth(width: string) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				width: width === 'auto' ? null : width
+			})
+			.run();
+		editorRevision += 1;
+	}
+
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
 		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
@@ -451,6 +576,15 @@
 			>
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
+			<ImageUploadButton
+				accept={imageUploadAccept}
+				label={m.editor_toolbar_upload_image()}
+				uploadingLabel={m.common_uploading()}
+				isUploading={uploadingImageCount > 0}
+				onFilesSelected={(files) => {
+					void uploadAndInsertImages(Array.from(files), 'picker');
+				}}
+			/>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
@@ -551,6 +685,10 @@
 			>
 				<Minus class="h-4 w-4" />
 			</button>
+			{#if isActive('image')}
+				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+				<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
+			{/if}
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<TableToolbarControls
 				isTableActive={isActive('table')}
