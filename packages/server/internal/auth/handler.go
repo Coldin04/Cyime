@@ -72,7 +72,14 @@ type SessionResponseDTO struct {
 func getAPIBaseURL() string {
 	baseURL := strings.TrimSpace(os.Getenv("API_BASE_URL"))
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		port := strings.TrimSpace(os.Getenv("PORT"))
+		if port == "" {
+			port = "8080"
+		}
+		if strings.HasPrefix(port, ":") {
+			port = port[1:]
+		}
+		baseURL = fmt.Sprintf("http://localhost:%s", port)
 	}
 
 	return strings.TrimRight(baseURL, "/")
