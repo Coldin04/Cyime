@@ -5,6 +5,10 @@
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
 	import Image from '@tiptap/extension-image';
+	import { Table } from '@tiptap/extension-table';
+	import { TableCell } from '@tiptap/extension-table-cell';
+	import { TableHeader } from '@tiptap/extension-table-header';
+	import { TableRow } from '@tiptap/extension-table-row';
 	import { marked } from 'marked';
 	import * as m from '$paraglide/messages';
 	import TextHOne from '~icons/ph/text-h-one';
@@ -17,6 +21,10 @@
 	import FloppyDisk from '~icons/ph/floppy-disk';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
+	import Quotes from '~icons/ph/quotes';
+	import Code from '~icons/ph/code';
+	import Minus from '~icons/ph/minus';
+	import TableIcon from '~icons/ph/table';
 	import { uploadDocumentAsset } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
 
@@ -216,6 +224,15 @@
 					inline: false,
 					allowBase64: true
 				}),
+				Table.configure({
+					resizable: false,
+					HTMLAttributes: {
+						class: 'cw-editor-table'
+					}
+				}),
+				TableRow,
+				TableHeader,
+				TableCell,
 				Placeholder.configure({
 					placeholder: m.editor_placeholder()
 				})
@@ -349,9 +366,19 @@
 		return editor.can().chain().focus().redo().run();
 	}
 
+	function canApply(action: (instance: Editor) => boolean) {
+		editorRevision;
+		if (!editor) return false;
+		return action(editor);
+	}
+
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
 		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
+	const iconButtonBaseClass =
+		'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+	const pillButtonBaseClass =
+		'inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50';
 </script>
 
 <div class="flex h-full w-full flex-col">
@@ -365,7 +392,7 @@
 				aria-label={m.editor_toolbar_save_with_shortcut()}
 				disabled={isSaving || !hasUnsavedChanges}
 				onclick={() => onSave?.()}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<FloppyDisk class="h-4 w-4" />
 			</button>
@@ -378,7 +405,7 @@
 					apply((instance) => {
 						instance.chain().focus().undo().run();
 					})}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<ArrowCounterClockwise class="h-4 w-4" />
 			</button>
@@ -391,7 +418,7 @@
 					apply((instance) => {
 						instance.chain().focus().redo().run();
 					})}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
@@ -493,6 +520,104 @@
 					})}
 			>
 				<ListNumbers class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_blockquote()}
+				aria-label={m.editor_toolbar_blockquote()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('blockquote') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleBlockquote().run();
+					})}
+			>
+				<Quotes class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_code_block()}
+				aria-label={m.editor_toolbar_code_block()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('codeBlock') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleCodeBlock().run();
+					})}
+			>
+				<Code class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_divider()}
+				aria-label={m.editor_toolbar_divider()}
+				class={`rounded-md px-2 py-1 text-xs leading-none ${inactiveToggleClass}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().setHorizontalRule().run();
+					})}
+			>
+				<Minus class="h-4 w-4" />
+			</button>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<button
+				type="button"
+				title={m.editor_toolbar_insert_table()}
+				aria-label={m.editor_toolbar_insert_table()}
+				disabled={!canApply((instance) =>
+					instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+				)}
+				class={`${pillButtonBaseClass} ${
+					isActive('table') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+					})}
+			>
+				<TableIcon class="h-4 w-4" />
+				<span class="hidden sm:inline">{m.editor_toolbar_insert_table_short()}</span>
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_add_row()}
+				aria-label={m.editor_toolbar_add_row()}
+				disabled={!canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
+				class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().addRowAfter().run();
+					})}
+			>
+				<span>+R</span>
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_add_column()}
+				aria-label={m.editor_toolbar_add_column()}
+				disabled={!canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
+				class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().addColumnAfter().run();
+					})}
+			>
+				<span>+C</span>
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_delete_table()}
+				aria-label={m.editor_toolbar_delete_table()}
+				disabled={!canApply((instance) => instance.can().chain().focus().deleteTable().run())}
+				class={`${pillButtonBaseClass} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteTable().run();
+					})}
+			>
+				<span>-T</span>
 			</button>
 		</div>
 	</div>

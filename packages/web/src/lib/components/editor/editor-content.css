@@ -1,0 +1,248 @@
+.tiptap {
+	--editor-text: rgb(39 39 42);
+	--editor-muted: rgb(113 113 122);
+	--editor-border: rgb(228 228 231);
+	--editor-border-strong: rgb(212 212 216);
+	--editor-surface-soft: rgb(244 244 245);
+	--editor-surface-muted: rgb(250 250 250);
+	--editor-code-bg: rgb(244 244 245);
+	--editor-pre-bg: rgb(24 24 27);
+	--editor-pre-fg: rgb(250 250 250);
+	--editor-quote-bg: rgb(250 250 250);
+	--editor-table-head: rgb(244 244 245);
+	--editor-link: rgb(13 148 136);
+	--editor-selected-cell: rgb(13 148 136 / 0.12);
+	color: var(--editor-text);
+	line-height: 2.1;
+	min-height: 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+	.tiptap {
+		--editor-text: rgb(244 244 245);
+		--editor-muted: rgb(161 161 170);
+		--editor-border: rgb(63 63 70);
+		--editor-border-strong: rgb(82 82 91);
+		--editor-surface-soft: rgb(39 39 42);
+		--editor-surface-muted: rgb(24 24 27);
+		--editor-code-bg: rgb(39 39 42);
+		--editor-pre-bg: rgb(9 9 11);
+		--editor-pre-fg: rgb(244 244 245);
+		--editor-quote-bg: rgb(24 24 27);
+		--editor-table-head: rgb(39 39 42);
+		--editor-link: rgb(45 212 191);
+		--editor-selected-cell: rgb(45 212 191 / 0.18);
+	}
+}
+
+.tiptap:focus {
+	outline: none;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+	color: rgb(161 161 170);
+	content: attr(data-placeholder);
+	float: left;
+	height: 0;
+	pointer-events: none;
+}
+
+.tiptap > * {
+	margin: 0;
+}
+
+.tiptap > p + p {
+	margin-top: 1.1rem;
+}
+
+.tiptap > :not(p) + :not(p),
+.tiptap > p + :not(p),
+.tiptap > :not(p) + p {
+	margin-top: 1.5rem;
+}
+
+.tiptap ul,
+.tiptap ol {
+	list-style-position: outside;
+	padding-left: 1.25rem;
+}
+
+.tiptap ul {
+	list-style-type: disc;
+}
+
+.tiptap ol {
+	list-style-type: decimal;
+}
+
+.tiptap ul ul {
+	list-style-type: circle;
+}
+
+.tiptap ul ul ul {
+	list-style-type: square;
+}
+
+.tiptap ul ul,
+.tiptap ul ol,
+.tiptap ol ul,
+.tiptap ol ol {
+	margin-top: 0.45rem;
+}
+
+.tiptap li + li {
+	margin-top: 0.35rem;
+}
+
+.tiptap li::marker {
+	color: var(--editor-muted);
+}
+
+.tiptap li p {
+	display: inline;
+	margin: 0;
+}
+
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	line-height: 1.16;
+	text-wrap: balance;
+}
+
+.tiptap h1 {
+	font-size: 1.875rem;
+}
+
+.tiptap h2 {
+	font-size: 1.5rem;
+}
+
+.tiptap h3 {
+	font-size: 1.25rem;
+}
+
+.tiptap blockquote {
+	background: linear-gradient(180deg, var(--editor-surface-muted) 0%, var(--editor-quote-bg) 100%);
+	border-left: 3px solid rgb(20 184 166);
+	border-radius: 0 0.95rem 0.95rem 0;
+	padding: 0.9rem 1rem;
+}
+
+.tiptap code {
+	background: var(--editor-code-bg);
+	border-radius: 0.4rem;
+	padding: 0.125rem 0.25rem;
+}
+
+.tiptap pre {
+	background: var(--editor-pre-bg);
+	border-radius: 1rem;
+	box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04);
+	color: var(--editor-pre-fg);
+	overflow-x: auto;
+	padding: 1rem 1.1rem;
+}
+
+.tiptap pre code {
+	background: transparent;
+	padding: 0;
+}
+
+.tiptap img {
+	border-radius: 0.75rem;
+	display: block;
+	height: auto;
+	max-width: 100%;
+}
+
+.tiptap hr {
+	border: none;
+	border-top: 1px solid var(--editor-border-strong);
+	margin: 2rem 0;
+}
+
+.tiptap .tableWrapper {
+	margin: 1.35rem 0;
+	overflow-x: auto;
+	padding-bottom: 0.25rem;
+}
+
+.tiptap table {
+	background: var(--editor-surface-muted);
+	border: 1px solid var(--editor-border);
+	border-collapse: separate;
+	border-radius: 1rem;
+	border-spacing: 0;
+	min-width: 36rem;
+	overflow: hidden;
+	width: 100%;
+}
+
+.tiptap th,
+.tiptap td {
+	border-bottom: 1px solid var(--editor-border);
+	border-right: 1px solid var(--editor-border);
+	padding: 0.8rem 0.9rem;
+	text-align: left;
+	vertical-align: top;
+}
+
+.tiptap th {
+	background: var(--editor-table-head);
+	font-weight: 600;
+}
+
+.tiptap tr:last-child td {
+	border-bottom: none;
+}
+
+.tiptap tr > *:last-child {
+	border-right: none;
+}
+
+.tiptap .selectedCell {
+	position: relative;
+}
+
+.tiptap .selectedCell::after {
+	background: var(--editor-selected-cell);
+	content: '';
+	inset: 0;
+	pointer-events: none;
+	position: absolute;
+}
+
+.tiptap a {
+	color: var(--editor-link);
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.18em;
+}
+
+@media (max-width: 640px) {
+	.tiptap {
+		padding-left: 1rem !important;
+		padding-right: 1rem !important;
+	}
+
+	.tiptap h1 {
+		font-size: 1.65rem;
+	}
+
+	.tiptap h2 {
+		font-size: 1.35rem;
+	}
+
+	.tiptap > :not(p) + :not(p),
+	.tiptap > p + :not(p),
+	.tiptap > :not(p) + p {
+		margin-top: 1.25rem;
+	}
+
+	.tiptap table {
+		min-width: 32rem;
+	}
+}
