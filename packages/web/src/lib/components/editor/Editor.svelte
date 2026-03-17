@@ -728,9 +728,9 @@
 				canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
 				canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
 				canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
-				onInsertTable={() =>
+				onInsertTable={(rows, cols) =>
 					apply((instance) => {
-						instance.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+						instance.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
 					})}
 				onAddRow={() =>
 					apply((instance) => {
