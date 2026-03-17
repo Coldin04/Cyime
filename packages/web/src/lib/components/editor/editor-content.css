@@ -124,6 +124,25 @@
 	font-size: 1.25rem;
 }
 
+.tiptap h4 {
+	font-size: 1.1rem;
+}
+
+.tiptap h5 {
+	font-size: 1rem;
+}
+
+.tiptap h6 {
+	color: var(--editor-muted);
+	font-size: 0.95rem;
+	letter-spacing: 0;
+	text-transform: uppercase;
+}
+
+.tiptap h1 + * {
+	margin-top: 1.9rem !important;
+}
+
 .tiptap blockquote {
 	background: linear-gradient(180deg, var(--editor-surface-muted) 0%, var(--editor-quote-bg) 100%);
 	border-left: 3px solid rgb(20 184 166);

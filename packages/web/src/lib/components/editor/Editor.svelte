@@ -11,9 +11,6 @@
 	import { TableRow } from '@tiptap/extension-table-row';
 	import { marked } from 'marked';
 	import * as m from '$paraglide/messages';
-	import TextHOne from '~icons/ph/text-h-one';
-	import TextHTwo from '~icons/ph/text-h-two';
-	import Paragraph from '~icons/ph/paragraph';
 	import TextB from '~icons/ph/text-b';
 	import TextItalic from '~icons/ph/text-italic';
 	import ListBullets from '~icons/ph/list-bullets';
@@ -24,7 +21,8 @@
 	import Quotes from '~icons/ph/quotes';
 	import Code from '~icons/ph/code';
 	import Minus from '~icons/ph/minus';
-	import TableIcon from '~icons/ph/table';
+	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
+	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { uploadDocumentAsset } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
 
@@ -66,6 +64,7 @@
 	]);
 
 	const allowedUploadExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm']);
+	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -219,7 +218,11 @@
 		editor = new Editor({
 			element: editorElement,
 			extensions: [
-				StarterKit,
+				StarterKit.configure({
+					heading: {
+						levels: [...headingLevels]
+					}
+				}),
 				Image.configure({
 					inline: false,
 					allowBase64: true
@@ -372,13 +375,39 @@
 		return action(editor);
 	}
 
+	function currentHeadingValue() {
+		editorRevision;
+		if (!editor) return 'paragraph';
+		for (const level of headingLevels) {
+			if (editor.isActive('heading', { level })) {
+				return `h${level}`;
+			}
+		}
+		return 'paragraph';
+	}
+
+	function applyHeadingValue(value: string) {
+		if (!editor) return;
+		if (value === 'paragraph') {
+			editor.chain().focus().setParagraph().run();
+			editorRevision += 1;
+			return;
+		}
+
+		const level = Number.parseInt(value.replace('h', ''), 10);
+		if (!headingLevels.includes(level as (typeof headingLevels)[number])) {
+			return;
+		}
+
+		editor.chain().focus().setHeading({ level: level as (typeof headingLevels)[number] }).run();
+		editorRevision += 1;
+	}
+
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
 		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
 	const iconButtonBaseClass =
 		'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-	const pillButtonBaseClass =
-		'inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50';
 </script>
 
 <div class="flex h-full w-full flex-col">
@@ -423,46 +452,7 @@
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-			<button
-				type="button"
-				title={m.editor_toolbar_heading_1()}
-				aria-label={m.editor_toolbar_heading_1()}
-				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-					isActive('heading', { level: 1 }) ? activeToggleClass : inactiveToggleClass
-				}`}
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().toggleHeading({ level: 1 }).run();
-					})}
-			>
-				<TextHOne class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_heading_2()}
-				aria-label={m.editor_toolbar_heading_2()}
-				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-					isActive('heading', { level: 2 }) ? activeToggleClass : inactiveToggleClass
-				}`}
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().toggleHeading({ level: 2 }).run();
-					})}
-			>
-				<TextHTwo class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_paragraph()}
-				aria-label={m.editor_toolbar_paragraph()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().setParagraph().run();
-					})}
-			>
-				<Paragraph class="h-4 w-4" />
-			</button>
+			<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -562,63 +552,31 @@
 				<Minus class="h-4 w-4" />
 			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-			<button
-				type="button"
-				title={m.editor_toolbar_insert_table()}
-				aria-label={m.editor_toolbar_insert_table()}
-				disabled={!canApply((instance) =>
+			<TableToolbarControls
+				isTableActive={isActive('table')}
+				canInsertTable={canApply((instance) =>
 					instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
 				)}
-				class={`${pillButtonBaseClass} ${
-					isActive('table') ? activeToggleClass : inactiveToggleClass
-				}`}
-				onclick={() =>
+				canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
+				canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
+				canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
+				onInsertTable={() =>
 					apply((instance) => {
 						instance.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
 					})}
-			>
-				<TableIcon class="h-4 w-4" />
-				<span class="hidden sm:inline">{m.editor_toolbar_insert_table_short()}</span>
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_add_row()}
-				aria-label={m.editor_toolbar_add_row()}
-				disabled={!canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
-				class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
-				onclick={() =>
+				onAddRow={() =>
 					apply((instance) => {
 						instance.chain().focus().addRowAfter().run();
 					})}
-			>
-				<span>+R</span>
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_add_column()}
-				aria-label={m.editor_toolbar_add_column()}
-				disabled={!canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
-				class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
-				onclick={() =>
+				onAddColumn={() =>
 					apply((instance) => {
 						instance.chain().focus().addColumnAfter().run();
 					})}
-			>
-				<span>+C</span>
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_delete_table()}
-				aria-label={m.editor_toolbar_delete_table()}
-				disabled={!canApply((instance) => instance.can().chain().focus().deleteTable().run())}
-				class={`${pillButtonBaseClass} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30`}
-				onclick={() =>
+				onDeleteTable={() =>
 					apply((instance) => {
 						instance.chain().focus().deleteTable().run();
 					})}
-			>
-				<span>-T</span>
-			</button>
+			/>
 		</div>
 	</div>
 
