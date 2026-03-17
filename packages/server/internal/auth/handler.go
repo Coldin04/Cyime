@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -519,12 +520,13 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 	client := oauth2Config.Client(ctx, token)
 	resp, err := client.Get("https://api.github.com/user/emails")
 	if err != nil {
-		return "", fmt.Errorf("无法获取 GitHub 邮箱信息")
+		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("无法获取 GitHub 邮箱信息")
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: status %d, body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var emails []struct {
@@ -533,7 +535,7 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 		Verified bool   `json:"verified"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&emails); err != nil {
-		return "", fmt.Errorf("无法解析 GitHub 邮箱信息")
+		return "", fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
 	}
 
 	for _, item := range emails {
