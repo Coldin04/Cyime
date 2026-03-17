@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import * as m from '$paraglide/messages';
 	import Paragraph from '~icons/ph/paragraph';
 	import CaretDown from '~icons/ph/caret-down';
@@ -88,6 +89,8 @@
 
 	{#if open}
 		<div
+			in:fade={{ duration: 120 }}
+			out:fade={{ duration: 100 }}
 			role="menu"
 			class="absolute left-0 top-[calc(100%+0.4rem)] z-20 min-w-[11rem] rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30"
 		>

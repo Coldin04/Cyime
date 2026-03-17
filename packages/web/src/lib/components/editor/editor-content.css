@@ -180,7 +180,7 @@
 }
 
 .tiptap img:not([data-display-width]) {
-	max-width: min(100%, 46rem);
+	max-width: min(100%, 42rem);
 	width: auto;
 }
 
@@ -198,6 +198,11 @@
 
 .tiptap img[data-display-width='100%'] {
 	width: 100%;
+}
+
+.tiptap img[data-display-align='full'] {
+	max-width: min(100%, 56rem);
+	width: min(100%, 56rem);
 }
 
 .tiptap hr {

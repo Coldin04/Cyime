@@ -1,6 +1,7 @@
 import Image from '@tiptap/extension-image';
 
 export const cyImageWidths = ['auto', '40%', '60%', '80%', '100%'] as const;
+export const cyImageAlignments = ['content', 'full'] as const;
 
 export const CyImage = Image.extend({
 	addAttributes() {
@@ -25,6 +26,24 @@ export const CyImage = Image.extend({
 					return {
 						'data-display-width': width,
 						style: `width: ${width};`
+					};
+				}
+			},
+			align: {
+				default: 'content',
+				parseHTML: (element) => element.getAttribute('data-display-align') || 'content',
+				renderHTML: (attributes) => {
+					const align =
+						typeof attributes.align === 'string' && attributes.align.trim() !== ''
+							? attributes.align.trim()
+							: 'content';
+
+					if (align === 'content') {
+						return {};
+					}
+
+					return {
+						'data-display-align': align
 					};
 				}
 			}

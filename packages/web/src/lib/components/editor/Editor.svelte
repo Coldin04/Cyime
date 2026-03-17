@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import Link from '@tiptap/extension-link';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
 	import { Table } from '@tiptap/extension-table';
@@ -17,13 +19,16 @@
 	import FloppyDisk from '~icons/ph/floppy-disk';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
-	import ImageSquare from '~icons/ph/image-square';
 	import Quotes from '~icons/ph/quotes';
 	import Code from '~icons/ph/code';
 	import Minus from '~icons/ph/minus';
-	import { CyImage, cyImageWidths } from '$lib/components/editor/CyImage';
+	import { CyImage, cyImageAlignments, cyImageWidths } from '$lib/components/editor/CyImage';
 	import ImageAltControls from '$lib/components/editor/ImageAltControls.svelte';
+	import ExternalImageButton from '$lib/components/editor/ExternalImageButton.svelte';
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
+	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
+	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
+	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
 	import ImageUploadButton from '$lib/components/editor/ImageUploadButton.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
@@ -69,6 +74,7 @@
 	const allowedImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
+	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -181,6 +187,58 @@
 				}
 			])
 			.run();
+	}
+
+	function buildExternalImageTitle(src: string): string {
+		try {
+			const parsed = new URL(src);
+			const filename = parsed.pathname.split('/').pop()?.trim() ?? '';
+			return filename || parsed.hostname;
+		} catch {
+			return '';
+		}
+	}
+
+	function normalizeExternalImageURL(raw: string): string {
+		const trimmed = raw.trim();
+		if (!trimmed) return '';
+
+		const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+		try {
+			const parsed = new URL(candidate);
+			if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+				return '';
+			}
+			return parsed.toString();
+		} catch {
+			return '';
+		}
+	}
+
+	function isExternalImageURL(raw: string): boolean {
+		const normalized = normalizeExternalImageURL(raw);
+		if (!normalized) return false;
+
+		try {
+			const parsed = new URL(normalized);
+			return externalImagePathPattern.test(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+		} catch {
+			return false;
+		}
+	}
+
+	function insertExternalImage(src: string): boolean {
+		const normalized = normalizeExternalImageURL(src);
+		if (!normalized || !isExternalImageURL(normalized)) {
+			toast.error(m.editor_external_image_invalid());
+			return false;
+		}
+
+		insertUploadedImage({
+			src: normalized,
+			title: buildExternalImageTitle(normalized)
+		});
+		return true;
 	}
 
 	function beginImageUpload() {
@@ -332,6 +390,11 @@
 					inline: false,
 					allowBase64: true
 				}),
+				Link.configure({
+					openOnClick: false,
+					autolink: true,
+					defaultProtocol: 'https'
+				}),
 				Table.configure({
 					resizable: false,
 					HTMLAttributes: {
@@ -396,6 +459,12 @@
 						}
 
 						const text = clipboard.getData('text/plain');
+						if (isExternalImageURL(text.trim())) {
+							clipboardEvent.preventDefault();
+							insertExternalImage(text);
+							return true;
+						}
+
 						if (!looksLikeMarkdown(text)) return false;
 
 						const rendered = marked.parse(text, {
@@ -515,11 +584,26 @@
 		return cyImageWidths.includes(width as (typeof cyImageWidths)[number]) ? width : 'auto';
 	}
 
+	function currentImageAlign() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return 'content';
+		const attrs = editor.getAttributes('image');
+		const align = typeof attrs.align === 'string' ? attrs.align : 'content';
+		return cyImageAlignments.includes(align as (typeof cyImageAlignments)[number]) ? align : 'content';
+	}
+
 	function currentImageTitle() {
 		editorRevision;
 		if (!editor || !editor.isActive('image')) return '';
 		const attrs = editor.getAttributes('image');
 		return typeof attrs.title === 'string' ? attrs.title : '';
+	}
+
+	function currentLinkHref() {
+		editorRevision;
+		if (!editor || !editor.isActive('link')) return '';
+		const attrs = editor.getAttributes('link');
+		return typeof attrs.href === 'string' ? attrs.href : '';
 	}
 
 	function applyImageWidth(width: string) {
@@ -537,6 +621,21 @@
 		editorRevision += 1;
 	}
 
+	function applyImageAlign(align: string) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				align
+			})
+			.run();
+		editorRevision += 1;
+	}
+
 	function applyImageTitle(title: string) {
 		if (!editor || !editor.isActive('image')) {
 			return;
@@ -549,6 +648,70 @@
 				title
 			})
 			.run();
+		editorRevision += 1;
+	}
+
+	async function replaceCurrentImage(file: File) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+		if (!isSupportedImageFile(file)) {
+			showUnsupportedImageUploadToast(file);
+			return;
+		}
+
+		beginImageUpload();
+		try {
+			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			editor
+				.chain()
+				.focus()
+				.updateAttributes('image', {
+					src: uploaded.url,
+					assetId: uploaded.assetId,
+					title: file.name
+				})
+				.run();
+			editorRevision += 1;
+			toast.success('图片替换完成');
+		} catch (error) {
+			console.error('[Replace] Failed to replace image:', error);
+			toast.error(error instanceof Error ? error.message : '替换图片失败');
+		} finally {
+			endImageUpload();
+		}
+	}
+
+	function normalizeLinkHref(href: string) {
+		const trimmed = href.trim();
+		if (!trimmed) return '';
+		if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+			return trimmed;
+		}
+		return `https://${trimmed}`;
+	}
+
+	function applyLinkHref(href: string) {
+		if (!editor) return;
+		const normalizedHref = normalizeLinkHref(href);
+		if (!normalizedHref) {
+			editor.chain().focus().unsetLink().run();
+			editorRevision += 1;
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.extendMarkRange('link')
+			.setLink({ href: normalizedHref })
+			.run();
+		editorRevision += 1;
+	}
+
+	function removeLink() {
+		if (!editor) return;
+		editor.chain().focus().extendMarkRange('link').unsetLink().run();
 		editorRevision += 1;
 	}
 
@@ -631,6 +794,7 @@
 			>
 				<TextItalic class="h-4 w-4" />
 			</button>
+			<LinkControls href={currentLinkHref()} onSave={applyLinkHref} onRemove={removeLink} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -692,7 +856,7 @@
 				type="button"
 				title={m.editor_toolbar_divider()}
 				aria-label={m.editor_toolbar_divider()}
-				class={`rounded-md px-2 py-1 text-xs leading-none ${inactiveToggleClass}`}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${inactiveToggleClass}`}
 				onclick={() =>
 					apply((instance) => {
 						instance.chain().focus().setHorizontalRule().run();
@@ -710,15 +874,26 @@
 					void uploadAndInsertImages(Array.from(files), 'picker');
 				}}
 			/>
+			<ExternalImageButton
+				onInsert={(src) => insertExternalImage(src)}
+			/>
 			{#if isActive('image')}
 				<div
-					class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-zinc-400 dark:text-zinc-500"
-					aria-hidden="true"
+					in:fade={{ duration: 120 }}
+					out:fade={{ duration: 120 }}
+					class="inline-flex shrink-0 items-center gap-1 rounded-lg px-1 outline outline-1 -outline-offset-1 outline-zinc-200 dark:outline-zinc-700"
 				>
-					<ImageSquare class="h-4 w-4" />
+					<ImageReplaceButton
+						accept={imageUploadAccept}
+						label={m.editor_image_replace()}
+						onFileSelected={(file) => {
+							void replaceCurrentImage(file);
+						}}
+					/>
+					<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
+					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
+					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 				</div>
-				<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
-				<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 			{/if}
 			<TableToolbarControls
 				isTableActive={isActive('table')}

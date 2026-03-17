@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import * as m from '$paraglide/messages';
 	import TableIcon from '~icons/ph/table';
 	import Trash from '~icons/ph/trash';
@@ -102,7 +103,11 @@
 	</button>
 
 	{#if pickerOpen}
-		<div class="absolute left-0 top-[calc(100%+0.4rem)] z-20 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30">
+		<div
+			in:fade={{ duration: 120 }}
+			out:fade={{ duration: 100 }}
+			class="absolute left-0 top-[calc(100%+0.4rem)] z-20 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30"
+		>
 			<div
 				class="grid gap-1"
 				style={`grid-template-columns: repeat(${tablePickerMax}, ${tablePickerCellSize}px); width: max-content;`}
@@ -166,34 +171,40 @@
 </div>
 
 {#if isTableActive}
-	<button
-		type="button"
-		title={m.editor_toolbar_add_row()}
-		aria-label={m.editor_toolbar_add_row()}
-		disabled={!canAddRow}
-		class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
-		onclick={onAddRow}
+	<div
+		in:fade={{ duration: 120 }}
+		out:fade={{ duration: 120 }}
+		class="inline-flex shrink-0 items-center gap-1 rounded-lg px-1 outline outline-1 -outline-offset-1 outline-zinc-200 dark:outline-zinc-700"
 	>
-		<span>+R</span>
-	</button>
-	<button
-		type="button"
-		title={m.editor_toolbar_add_column()}
-		aria-label={m.editor_toolbar_add_column()}
-		disabled={!canAddColumn}
-		class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
-		onclick={onAddColumn}
-	>
-		<span>+C</span>
-	</button>
-	<button
-		type="button"
-		title={m.editor_toolbar_delete_table()}
-		aria-label={m.editor_toolbar_delete_table()}
-		disabled={!canDeleteTable}
-		class={`${pillButtonBaseClass} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30`}
-		onclick={onDeleteTable}
-	>
-		<Trash class="h-4 w-4" />
-	</button>
+		<button
+			type="button"
+			title={m.editor_toolbar_add_row()}
+			aria-label={m.editor_toolbar_add_row()}
+			disabled={!canAddRow}
+			class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+			onclick={onAddRow}
+		>
+			<span>+R</span>
+		</button>
+		<button
+			type="button"
+			title={m.editor_toolbar_add_column()}
+			aria-label={m.editor_toolbar_add_column()}
+			disabled={!canAddColumn}
+			class={`${pillButtonBaseClass} ${inactiveToggleClass}`}
+			onclick={onAddColumn}
+		>
+			<span>+C</span>
+		</button>
+		<button
+			type="button"
+			title={m.editor_toolbar_delete_table()}
+			aria-label={m.editor_toolbar_delete_table()}
+			disabled={!canDeleteTable}
+			class={`${pillButtonBaseClass} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30`}
+			onclick={onDeleteTable}
+		>
+			<Trash class="h-4 w-4" />
+		</button>
+	</div>
 {/if}
