@@ -17,10 +17,12 @@
 	import FloppyDisk from '~icons/ph/floppy-disk';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
+	import ImageSquare from '~icons/ph/image-square';
 	import Quotes from '~icons/ph/quotes';
 	import Code from '~icons/ph/code';
 	import Minus from '~icons/ph/minus';
 	import { CyImage, cyImageWidths } from '$lib/components/editor/CyImage';
+	import ImageAltControls from '$lib/components/editor/ImageAltControls.svelte';
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
 	import ImageUploadButton from '$lib/components/editor/ImageUploadButton.svelte';
@@ -513,6 +515,13 @@
 		return cyImageWidths.includes(width as (typeof cyImageWidths)[number]) ? width : 'auto';
 	}
 
+	function currentImageTitle() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return '';
+		const attrs = editor.getAttributes('image');
+		return typeof attrs.title === 'string' ? attrs.title : '';
+	}
+
 	function applyImageWidth(width: string) {
 		if (!editor || !editor.isActive('image')) {
 			return;
@@ -523,6 +532,21 @@
 			.focus()
 			.updateAttributes('image', {
 				width: width === 'auto' ? null : width
+			})
+			.run();
+		editorRevision += 1;
+	}
+
+	function applyImageTitle(title: string) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				title
 			})
 			.run();
 		editorRevision += 1;
@@ -576,15 +600,6 @@
 			>
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
-			<ImageUploadButton
-				accept={imageUploadAccept}
-				label={m.editor_toolbar_upload_image()}
-				uploadingLabel={m.common_uploading()}
-				isUploading={uploadingImageCount > 0}
-				onFilesSelected={(files) => {
-					void uploadAndInsertImages(Array.from(files), 'picker');
-				}}
-			/>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
@@ -685,11 +700,26 @@
 			>
 				<Minus class="h-4 w-4" />
 			</button>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<ImageUploadButton
+				accept={imageUploadAccept}
+				label={m.editor_toolbar_upload_image()}
+				uploadingLabel={m.common_uploading()}
+				isUploading={uploadingImageCount > 0}
+				onFilesSelected={(files) => {
+					void uploadAndInsertImages(Array.from(files), 'picker');
+				}}
+			/>
 			{#if isActive('image')}
-				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+				<div
+					class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-zinc-400 dark:text-zinc-500"
+					aria-hidden="true"
+				>
+					<ImageSquare class="h-4 w-4" />
+				</div>
+				<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
 				<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 			{/if}
-			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<TableToolbarControls
 				isTableActive={isActive('table')}
 				canInsertTable={canApply((instance) =>

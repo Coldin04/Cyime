@@ -145,6 +145,8 @@
   "editor_image_size_medium": "中图",
   "editor_image_size_large": "大图",
   "editor_image_size_full": "通栏",
+  "editor_image_title_label": "Title",
+  "editor_image_title_placeholder": "输入图片悬浮标题",
   "editor_toolbar_insert_table": "插入表格",
   "editor_toolbar_insert_table_short": "表格",
   "editor_toolbar_add_row": "新增一行",

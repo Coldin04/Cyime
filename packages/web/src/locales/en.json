@@ -146,6 +146,8 @@
   "editor_image_size_medium": "Medium",
   "editor_image_size_large": "Large",
   "editor_image_size_full": "Full Width",
+  "editor_image_title_label": "Title",
+  "editor_image_title_placeholder": "Enter image hover title",
   "editor_toolbar_insert_table": "Insert Table",
   "editor_toolbar_insert_table_short": "Table",
   "editor_toolbar_add_row": "Add Row",
