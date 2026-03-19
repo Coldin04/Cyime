@@ -15,7 +15,7 @@
 
 	let panelElement: HTMLDivElement | null = null;
 	let triggerElement: HTMLButtonElement | null = null;
-	let panelContentElement: HTMLDivElement | null = null;
+	let panelContentElement = $state<HTMLDivElement | null>(null);
 	let draft = $state('');
 	let open = $state(false);
 	let panelStyle = $state('');

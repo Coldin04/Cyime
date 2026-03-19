@@ -14,7 +14,7 @@
 	let { currentWidth, onSelect }: Props = $props();
 	let menuElement: HTMLDivElement | null = null;
 	let triggerElement: HTMLButtonElement | null = null;
-	let panelElement: HTMLDivElement | null = null;
+	let panelElement = $state<HTMLDivElement | null>(null);
 	let open = $state(false);
 	let panelStyle = $state('');
 	const viewportMargin = 12;

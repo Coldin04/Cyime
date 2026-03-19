@@ -53,7 +53,7 @@
 
 	let menuElement: HTMLDivElement | null = null;
 	let triggerElement: HTMLButtonElement | null = null;
-	let panelElement: HTMLDivElement | null = null;
+	let panelElement = $state<HTMLDivElement | null>(null);
 	let pickerOpen = $state(false);
 	let hoveredRows = $state(0);
 	let hoveredCols = $state(0);
