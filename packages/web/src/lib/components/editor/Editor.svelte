@@ -724,269 +724,218 @@
 
 <div class="flex h-full w-full flex-col">
 	<div class="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div class="flex w-full flex-col gap-2">
-			<div class="flex w-full overflow-x-auto scrollbar-none">
-				<div class="inline-flex w-fit min-w-max items-center gap-2 whitespace-nowrap mx-auto">
-					<button
-					type="button"
-					title={m.editor_toolbar_save_with_shortcut()}
-					aria-label={m.editor_toolbar_save_with_shortcut()}
-					disabled={isSaving || !hasUnsavedChanges}
-					onclick={() => onSave?.()}
-					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+		<div
+			class="mx-auto flex w-full max-w-4xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:flex-wrap md:justify-center md:overflow-visible md:whitespace-normal"
+		>
+			<button
+				type="button"
+				title={m.editor_toolbar_save_with_shortcut()}
+				aria-label={m.editor_toolbar_save_with_shortcut()}
+				disabled={isSaving || !hasUnsavedChanges}
+				onclick={() => onSave?.()}
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+			>
+				<FloppyDisk class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_undo_with_shortcut()}
+				aria-label={m.editor_toolbar_undo_with_shortcut()}
+				disabled={!canUndo()}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().undo().run();
+					})}
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+			>
+				<ArrowCounterClockwise class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_redo_with_shortcut()}
+				aria-label={m.editor_toolbar_redo_with_shortcut()}
+				disabled={!canRedo()}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().redo().run();
+					})}
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+			>
+				<ArrowClockwise class="h-4 w-4" />
+			</button>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<button
+				type="button"
+				title={m.editor_toolbar_bold()}
+				aria-label={m.editor_toolbar_bold()}
+				class={`rounded-md px-2 py-1 text-xs font-semibold leading-none transition-colors ${
+					isActive('bold') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleBold().run();
+					})}
+			>
+				<TextB class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_italic()}
+				aria-label={m.editor_toolbar_italic()}
+				class={`rounded-md px-2 py-1 text-xs italic leading-none transition-colors ${
+					isActive('italic') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleItalic().run();
+					})}
+			>
+				<TextItalic class="h-4 w-4" />
+			</button>
+			<LinkControls href={currentLinkHref()} onSave={applyLinkHref} onRemove={removeLink} />
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<button
+				type="button"
+				title={m.editor_toolbar_bullet_list()}
+				aria-label={m.editor_toolbar_bullet_list()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('bulletList') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleBulletList().run();
+					})}
+			>
+				<ListBullets class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_numbered_list()}
+				aria-label={m.editor_toolbar_numbered_list()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('orderedList') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleOrderedList().run();
+					})}
+			>
+				<ListNumbers class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_blockquote()}
+				aria-label={m.editor_toolbar_blockquote()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('blockquote') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleBlockquote().run();
+					})}
+			>
+				<Quotes class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_code_block()}
+				aria-label={m.editor_toolbar_code_block()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('codeBlock') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleCodeBlock().run();
+					})}
+			>
+				<Code class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_divider()}
+				aria-label={m.editor_toolbar_divider()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${inactiveToggleClass}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().setHorizontalRule().run();
+					})}
+			>
+				<Minus class="h-4 w-4" />
+			</button>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<ImageUploadButton
+				accept={imageUploadAccept}
+				label={m.editor_toolbar_upload_image()}
+				uploadingLabel={m.common_uploading()}
+				isUploading={uploadingImageCount > 0}
+				onFilesSelected={(files) => {
+					void uploadAndInsertImages(Array.from(files), 'picker');
+				}}
+			/>
+			<ExternalImageButton
+				onInsert={(src) => insertExternalImage(src)}
+			/>
+			{#if isActive('image')}
+				<div
+					in:fade={{ duration: 120 }}
+					out:fade={{ duration: 120 }}
+					class="inline-flex shrink-0 items-center gap-1 rounded-lg px-1 outline outline-1 -outline-offset-1 outline-zinc-200 dark:outline-zinc-700"
 				>
-					<FloppyDisk class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_undo_with_shortcut()}
-					aria-label={m.editor_toolbar_undo_with_shortcut()}
-					disabled={!canUndo()}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().undo().run();
-						})}
-					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
-				>
-					<ArrowCounterClockwise class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_redo_with_shortcut()}
-					aria-label={m.editor_toolbar_redo_with_shortcut()}
-					disabled={!canRedo()}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().redo().run();
-						})}
-					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
-				>
-					<ArrowClockwise class="h-4 w-4" />
-				</button>
-				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-				<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
-				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-				<button
-					type="button"
-					title={m.editor_toolbar_bold()}
-					aria-label={m.editor_toolbar_bold()}
-					class={`rounded-md px-2 py-1 text-xs font-semibold leading-none transition-colors ${
-						isActive('bold') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleBold().run();
-						})}
-				>
-					<TextB class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_italic()}
-					aria-label={m.editor_toolbar_italic()}
-					class={`rounded-md px-2 py-1 text-xs italic leading-none transition-colors ${
-						isActive('italic') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleItalic().run();
-						})}
-				>
-					<TextItalic class="h-4 w-4" />
-				</button>
-				<LinkControls href={currentLinkHref()} onSave={applyLinkHref} onRemove={removeLink} />
-				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-				<button
-					type="button"
-					title={m.editor_toolbar_bullet_list()}
-					aria-label={m.editor_toolbar_bullet_list()}
-					class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-						isActive('bulletList') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleBulletList().run();
-						})}
-				>
-					<ListBullets class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_numbered_list()}
-					aria-label={m.editor_toolbar_numbered_list()}
-					class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-						isActive('orderedList') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleOrderedList().run();
-						})}
-				>
-					<ListNumbers class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_blockquote()}
-					aria-label={m.editor_toolbar_blockquote()}
-					class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-						isActive('blockquote') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleBlockquote().run();
-						})}
-				>
-					<Quotes class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_code_block()}
-					aria-label={m.editor_toolbar_code_block()}
-					class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-						isActive('codeBlock') ? activeToggleClass : inactiveToggleClass
-					}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleCodeBlock().run();
-						})}
-				>
-					<Code class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					title={m.editor_toolbar_divider()}
-					aria-label={m.editor_toolbar_divider()}
-					class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${inactiveToggleClass}`}
-					onclick={() =>
-						apply((instance) => {
-							instance.chain().focus().setHorizontalRule().run();
-						})}
-				>
-					<Minus class="h-4 w-4" />
-				</button>
-				<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-				<ImageUploadButton
-					accept={imageUploadAccept}
-					label={m.editor_toolbar_upload_image()}
-					uploadingLabel={m.common_uploading()}
-					isUploading={uploadingImageCount > 0}
-					onFilesSelected={(files) => {
-						void uploadAndInsertImages(Array.from(files), 'picker');
-					}}
-				/>
-				<ExternalImageButton
-					onInsert={(src) => insertExternalImage(src)}
-				/>
-					<TableToolbarControls
-						showContext={false}
-					isTableActive={isActive('table')}
-					isHeaderRowActive={isActive('tableHeader')}
-					canInsertTable={canApply((instance) =>
-						instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-					)}
-					canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
-					canDeleteRow={canApply((instance) => instance.can().chain().focus().deleteRow().run())}
-					canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
-					canDeleteColumn={canApply((instance) => instance.can().chain().focus().deleteColumn().run())}
-					canToggleHeaderRow={canApply((instance) => instance.can().chain().focus().toggleHeaderRow().run())}
-					canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
-					onInsertTable={(rows, cols) =>
-						apply((instance) => {
-							instance.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
-						})}
-					onAddRow={() =>
-						apply((instance) => {
-							instance.chain().focus().addRowAfter().run();
-						})}
-					onDeleteRow={() =>
-						apply((instance) => {
-							instance.chain().focus().deleteRow().fixTables().run();
-						})}
-					onAddColumn={() =>
-						apply((instance) => {
-							instance.chain().focus().addColumnAfter().run();
-						})}
-					onDeleteColumn={() =>
-						apply((instance) => {
-							instance.chain().focus().deleteColumn().fixTables().run();
-						})}
-					onToggleHeaderRow={() =>
-						apply((instance) => {
-							instance.chain().focus().toggleHeaderRow().fixTables().run();
-						})}
-					onDeleteTable={() =>
-						apply((instance) => {
-							instance.chain().focus().deleteTable().run();
-						})}
+					<ImageReplaceButton
+						accept={imageUploadAccept}
+						label={m.editor_image_replace()}
+						onFileSelected={(file) => {
+							void replaceCurrentImage(file);
+						}}
 					/>
-				</div>
-			</div>
-			{#if isActive('image') || isActive('table')}
-				<div class="flex w-full overflow-x-auto scrollbar-none">
-					<div class="inline-flex w-fit min-w-max items-center gap-2 whitespace-nowrap mx-auto">
-						{#if isActive('image')}
-							<div
-							in:fade={{ duration: 120 }}
-							out:fade={{ duration: 120 }}
-							class="inline-flex shrink-0 items-center gap-1 rounded-md px-1 outline outline-1 -outline-offset-1 outline-zinc-200 dark:outline-zinc-700"
-						>
-							<ImageReplaceButton
-								accept={imageUploadAccept}
-								label={m.editor_image_replace()}
-								onFileSelected={(file) => {
-									void replaceCurrentImage(file);
-								}}
-							/>
-							<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
-							<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
-							<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
-						</div>
-					{/if}
-						<TableToolbarControls
-							showInsert={false}
-						isTableActive={isActive('table')}
-						isHeaderRowActive={isActive('tableHeader')}
-						canInsertTable={canApply((instance) =>
-							instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-						)}
-						canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
-						canDeleteRow={canApply((instance) => instance.can().chain().focus().deleteRow().run())}
-						canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
-						canDeleteColumn={canApply((instance) => instance.can().chain().focus().deleteColumn().run())}
-						canToggleHeaderRow={canApply((instance) => instance.can().chain().focus().toggleHeaderRow().run())}
-						canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
-						onInsertTable={(rows, cols) =>
-							apply((instance) => {
-								instance.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
-							})}
-						onAddRow={() =>
-							apply((instance) => {
-								instance.chain().focus().addRowAfter().run();
-							})}
-						onDeleteRow={() =>
-							apply((instance) => {
-								instance.chain().focus().deleteRow().fixTables().run();
-							})}
-						onAddColumn={() =>
-							apply((instance) => {
-								instance.chain().focus().addColumnAfter().run();
-							})}
-						onDeleteColumn={() =>
-							apply((instance) => {
-								instance.chain().focus().deleteColumn().fixTables().run();
-							})}
-						onToggleHeaderRow={() =>
-							apply((instance) => {
-								instance.chain().focus().toggleHeaderRow().fixTables().run();
-							})}
-						onDeleteTable={() =>
-							apply((instance) => {
-								instance.chain().focus().deleteTable().run();
-							})}
-						/>
-					</div>
+					<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
+					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
+					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 				</div>
 			{/if}
+			<TableToolbarControls
+				isTableActive={isActive('table')}
+				isHeaderRowActive={isActive('tableHeader')}
+				canInsertTable={canApply((instance) =>
+					instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+				)}
+				canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
+				canDeleteRow={canApply((instance) => instance.can().chain().focus().deleteRow().run())}
+				canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
+				canDeleteColumn={canApply((instance) => instance.can().chain().focus().deleteColumn().run())}
+				canToggleHeaderRow={canApply((instance) => instance.can().chain().focus().toggleHeaderRow().run())}
+				canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
+				onInsertTable={(rows, cols) =>
+					apply((instance) => {
+						instance.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
+					})}
+				onAddRow={() =>
+					apply((instance) => {
+						instance.chain().focus().addRowAfter().run();
+					})}
+				onDeleteRow={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteRow().fixTables().run();
+					})}
+				onAddColumn={() =>
+					apply((instance) => {
+						instance.chain().focus().addColumnAfter().run();
+					})}
+				onDeleteColumn={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteColumn().fixTables().run();
+					})}
+				onToggleHeaderRow={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleHeaderRow().fixTables().run();
+					})}
+				onDeleteTable={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteTable().run();
+					})}
+			/>
 		</div>
 	</div>
 
