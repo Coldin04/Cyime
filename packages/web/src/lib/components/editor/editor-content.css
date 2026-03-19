@@ -177,6 +177,20 @@
 	max-height: min(40vh, 28rem);
 	max-width: 100%;
 	object-fit: contain;
+	transition:
+		box-shadow 140ms ease,
+		outline-color 140ms ease,
+		transform 140ms ease;
+}
+
+/* ProseMirror 在节点选中时会给图片挂上选中类，这里做更明显的编辑器式选中框。 */
+.tiptap img.ProseMirror-selectednode {
+	box-shadow:
+		0 0 0 2px rgb(20 184 166 / 0.92),
+		0 0 0 7px rgb(20 184 166 / 0.18),
+		0 12px 28px rgb(20 184 166 / 0.14);
+	outline: 2px solid transparent;
+	transform: translateY(-1px);
 }
 
 .tiptap img:not([data-display-width]) {
