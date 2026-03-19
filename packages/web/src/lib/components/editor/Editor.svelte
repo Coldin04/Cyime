@@ -723,10 +723,11 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<div class="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div
-			class="mx-auto flex w-full max-w-4xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:flex-wrap md:justify-center md:overflow-visible md:whitespace-normal"
-		>
+	<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+		<div class="overflow-visible">
+			<div
+				class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
+			>
 			<button
 				type="button"
 				title={m.editor_toolbar_save_with_shortcut()}
@@ -891,11 +892,11 @@
 						}}
 					/>
 					<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
-					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
 					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
+					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
 				</div>
 			{/if}
-			<TableToolbarControls
+				<TableToolbarControls
 				isTableActive={isActive('table')}
 				isHeaderRowActive={isActive('tableHeader')}
 				canInsertTable={canApply((instance) =>
@@ -935,7 +936,8 @@
 					apply((instance) => {
 						instance.chain().focus().deleteTable().run();
 					})}
-			/>
+				/>
+			</div>
 		</div>
 	</div>
 

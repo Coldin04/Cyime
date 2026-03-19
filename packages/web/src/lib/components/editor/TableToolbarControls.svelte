@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { tick } from 'svelte';
+	import { clickOutside } from '$lib/actions/clickOutside';
 	import { fade } from 'svelte/transition';
 	import * as m from '$paraglide/messages';
 	import TableIcon from '~icons/ph/table';
@@ -51,11 +52,15 @@
 	}));
 
 	let menuElement: HTMLDivElement | null = null;
+	let triggerElement: HTMLButtonElement | null = null;
+	let panelElement: HTMLDivElement | null = null;
 	let pickerOpen = $state(false);
 	let hoveredRows = $state(0);
 	let hoveredCols = $state(0);
 	let manualRows = $state('3');
 	let manualCols = $state('3');
+	let panelStyle = $state('');
+	const viewportMargin = 12;
 
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
@@ -84,23 +89,41 @@
 		handleSelect(rows, cols);
 	}
 
-	onMount(() => {
-		const handlePointerDown = (event: PointerEvent) => {
-			if (!pickerOpen || !menuElement) return;
-			const target = event.target;
-			if (target instanceof Node && menuElement.contains(target)) return;
-			pickerOpen = false;
-		};
+	function closePicker() {
+		pickerOpen = false;
+	}
 
-		document.addEventListener('pointerdown', handlePointerDown);
-		return () => {
-			document.removeEventListener('pointerdown', handlePointerDown);
-		};
-	});
+	function updatePanelPosition() {
+		if (!triggerElement) return;
+		const rect = triggerElement.getBoundingClientRect();
+		const panelWidth = panelElement?.offsetWidth ?? 176;
+		// 只在弹层打开后测一次宽度，默认居中对齐按钮，再做视口边缘避让。
+		const preferredLeft = rect.left + rect.width / 2 - panelWidth / 2;
+		const left = Math.max(
+			viewportMargin,
+			Math.min(preferredLeft, window.innerWidth - panelWidth - viewportMargin)
+		);
+		panelStyle = `position: fixed; left: ${Math.round(left)}px; top: ${Math.round(rect.bottom + 8)}px;`;
+	}
+
+	async function togglePicker() {
+		pickerOpen = !pickerOpen;
+		if (!pickerOpen) return;
+		await tick();
+		updatePanelPosition();
+	}
 </script>
 
-<div bind:this={menuElement} class="relative shrink-0">
+<div
+	bind:this={menuElement}
+	class="shrink-0"
+	use:clickOutside={{
+		enabled: pickerOpen,
+		handler: closePicker
+	}}
+>
 	<button
+		bind:this={triggerElement}
 		type="button"
 		title={m.editor_toolbar_insert_table()}
 		aria-label={m.editor_toolbar_insert_table()}
@@ -110,7 +133,7 @@
 			if (!canInsertTable) return;
 			hoveredRows = 0;
 			hoveredCols = 0;
-			pickerOpen = !pickerOpen;
+			void togglePicker();
 		}}
 	>
 		<TableIcon class="h-4 w-4" />
@@ -118,12 +141,14 @@
 
 	{#if pickerOpen}
 		<div
+			bind:this={panelElement}
 			in:fade={{ duration: 120 }}
 			out:fade={{ duration: 100 }}
-			class="absolute left-0 top-[calc(100%+0.4rem)] z-20 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30"
+			style={panelStyle}
+			class="z-40 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30"
 		>
 			<div
-				class="grid gap-1"
+				class="mx-auto grid gap-1"
 				style={`grid-template-columns: repeat(${tablePickerMax}, ${tablePickerCellSize}px); width: max-content;`}
 			>
 				{#each tablePickerItems as item}

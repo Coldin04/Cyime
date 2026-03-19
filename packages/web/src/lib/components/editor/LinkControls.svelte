@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { tick } from 'svelte';
+	import { clickOutside } from '$lib/actions/clickOutside';
 	import * as m from '$paraglide/messages';
 	import LinkSimple from '~icons/ph/link-simple';
 	import LinkBreak from '~icons/ph/link-break';
@@ -13,8 +14,12 @@
 	let { href, onSave, onRemove }: Props = $props();
 
 	let panelElement: HTMLDivElement | null = null;
+	let triggerElement: HTMLButtonElement | null = null;
+	let panelContentElement: HTMLDivElement | null = null;
 	let draft = $state('');
 	let open = $state(false);
+	let panelStyle = $state('');
+	const viewportMargin = 12;
 
 	$effect(() => {
 		draft = href;
@@ -30,23 +35,35 @@
 		open = false;
 	}
 
-	onMount(() => {
-		const handlePointerDown = (event: PointerEvent) => {
-			if (!open || !panelElement) return;
-			const target = event.target;
-			if (target instanceof Node && panelElement.contains(target)) return;
-			closeWithoutSaving();
-		};
+	function updatePanelPosition() {
+		if (!triggerElement) return;
+		const rect = triggerElement.getBoundingClientRect();
+		const panelWidth = panelContentElement?.offsetWidth ?? 288;
+		const left = Math.max(
+			viewportMargin,
+			Math.min(rect.left, window.innerWidth - panelWidth - viewportMargin)
+		);
+		panelStyle = `position: fixed; left: ${Math.round(left)}px; top: ${Math.round(rect.bottom + 8)}px;`;
+	}
 
-		document.addEventListener('pointerdown', handlePointerDown);
-		return () => {
-			document.removeEventListener('pointerdown', handlePointerDown);
-		};
-	});
+	async function togglePanel() {
+		open = !open;
+		if (!open) return;
+		await tick();
+		updatePanelPosition();
+	}
 </script>
 
-<div bind:this={panelElement} class="relative flex shrink-0 items-center gap-1">
+<div
+	bind:this={panelElement}
+	class="flex shrink-0 items-center gap-1"
+	use:clickOutside={{
+		enabled: open,
+		handler: closeWithoutSaving
+	}}
+>
 	<button
+		bind:this={triggerElement}
 		type="button"
 		title={m.editor_link_label()}
 		aria-label={m.editor_link_label()}
@@ -55,9 +72,7 @@
 				? 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200'
 				: 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800'
 		}`}
-		onclick={() => {
-			open = !open;
-		}}
+		onclick={togglePanel}
 	>
 		<LinkSimple class="h-4 w-4" />
 	</button>
@@ -75,7 +90,11 @@
 	{/if}
 
 	{#if open}
-		<div class="absolute left-0 top-[calc(100%+0.4rem)] z-20 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30">
+		<div
+			bind:this={panelContentElement}
+			style={panelStyle}
+			class="z-40 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30"
+		>
 			<div class="flex min-w-[18rem] items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
 				<label class="flex min-w-0 flex-1 items-center gap-2">
 					<span class="shrink-0 text-zinc-500 dark:text-zinc-400">{m.editor_link_label()}</span>
