@@ -154,3 +154,44 @@ func TestHandleRevokeOtherSessions_RevokesOnlyOtherSessions(t *testing.T) {
 		t.Fatalf("expected other session revoked")
 	}
 }
+
+func TestFindOrCreateUser_AllowsMultipleUsersWithoutEmail(t *testing.T) {
+	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.UserIdentityProvider{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	profileA := &UserProfile{
+		Subject: "github-user-a",
+		Email:   "",
+		Name:    "User A",
+	}
+	profileB := &UserProfile{
+		Subject: "github-user-b",
+		Email:   "",
+		Name:    "User B",
+	}
+
+	userA, err := findOrCreateUser(db, "github", profileA)
+	if err != nil {
+		t.Fatalf("create user A: %v", err)
+	}
+	userB, err := findOrCreateUser(db, "github", profileB)
+	if err != nil {
+		t.Fatalf("create user B: %v", err)
+	}
+
+	if userA.Email != nil {
+		t.Fatalf("expected user A email to be nil, got %q", *userA.Email)
+	}
+	if userB.Email != nil {
+		t.Fatalf("expected user B email to be nil, got %q", *userB.Email)
+	}
+	if userA.ID == userB.ID {
+		t.Fatalf("expected different users to be created")
+	}
+}

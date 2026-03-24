@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import Link from '@tiptap/extension-link';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
-	import Image from '@tiptap/extension-image';
+	import { Table } from '@tiptap/extension-table';
+	import { TableCell } from '@tiptap/extension-table-cell';
+	import { TableHeader } from '@tiptap/extension-table-header';
+	import { TableRow } from '@tiptap/extension-table-row';
 	import { marked } from 'marked';
 	import * as m from '$paraglide/messages';
-	import TextHOne from '~icons/ph/text-h-one';
-	import TextHTwo from '~icons/ph/text-h-two';
-	import Paragraph from '~icons/ph/paragraph';
 	import TextB from '~icons/ph/text-b';
 	import TextItalic from '~icons/ph/text-italic';
 	import ListBullets from '~icons/ph/list-bullets';
@@ -17,6 +19,19 @@
 	import FloppyDisk from '~icons/ph/floppy-disk';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
+	import Quotes from '~icons/ph/quotes';
+	import Code from '~icons/ph/code';
+	import Minus from '~icons/ph/minus';
+	import { CyImage, cyImageAlignments, cyImageWidths } from '$lib/components/editor/CyImage';
+	import ImageTitleControls from '$lib/components/editor/ImageTitleControls.svelte';
+	import ExternalImageButton from '$lib/components/editor/ExternalImageButton.svelte';
+	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
+	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
+	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
+	import LinkControls from '$lib/components/editor/LinkControls.svelte';
+	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
+	import ImageUploadButton from '$lib/components/editor/ImageUploadButton.svelte';
+	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { uploadDocumentAsset } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
 
@@ -47,17 +62,19 @@
 	let editor: Editor | null = null;
 	let lastSyncedContent = '';
 	let editorRevision = $state(0);
+	let uploadingImageCount = $state(0);
+	const imageUploadToastId = 'editor-image-upload';
 
-	const allowedUploadMimeTypes = new Set([
+	const allowedImageMimeTypes = new Set([
 		'image/png',
 		'image/jpeg',
 		'image/webp',
-		'image/gif',
-		'video/mp4',
-		'video/webm'
+		'image/gif'
 	]);
-
-	const allowedUploadExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm']);
+	const allowedImageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
+	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
+	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -139,46 +156,200 @@
 		return JSON.stringify(normalizeDoc(value));
 	}
 
-	function isSupportedUploadFile(file: File): boolean {
+	function isSupportedImageFile(file: File): boolean {
 		const type = file.type.trim().toLowerCase();
-		if (type && allowedUploadMimeTypes.has(type)) {
+		if (type && allowedImageMimeTypes.has(type)) {
 			return true;
 		}
 
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? '';
-		return ext !== '' && allowedUploadExtensions.has(ext);
+		return ext !== '' && allowedImageExtensions.has(ext);
 	}
 
-	function showUnsupportedUploadToast(file: File) {
+	function showUnsupportedImageUploadToast(file: File) {
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? 'unknown';
-		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF/MP4/WebM`);
+		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF`);
 	}
 
-	async function uploadAndInsertImage(file: File) {
+	function insertUploadedImage(attrs: Record<string, unknown>) {
 		if (!editor) return;
-		if (!isSupportedUploadFile(file)) {
-			showUnsupportedUploadToast(file);
+
+		editor
+			.chain()
+			.focus()
+			.insertContent([
+				{
+					type: 'image',
+					attrs
+				},
+				{
+					type: 'paragraph'
+				}
+			])
+			.run();
+	}
+
+	function buildExternalImageTitle(src: string): string {
+		try {
+			const parsed = new URL(src);
+			const filename = parsed.pathname.split('/').pop()?.trim() ?? '';
+			return filename || parsed.hostname;
+		} catch {
+			return '';
+		}
+	}
+
+	function normalizeExternalImageURL(raw: string): string {
+		const trimmed = raw.trim();
+		if (!trimmed) return '';
+
+		const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+		try {
+			const parsed = new URL(candidate);
+			if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+				return '';
+			}
+			return parsed.toString();
+		} catch {
+			return '';
+		}
+	}
+
+	function isExternalImageURL(raw: string): boolean {
+		const normalized = normalizeExternalImageURL(raw);
+		if (!normalized) return false;
+
+		try {
+			const parsed = new URL(normalized);
+			return externalImagePathPattern.test(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+		} catch {
+			return false;
+		}
+	}
+
+	function insertExternalImage(src: string): boolean {
+		const normalized = normalizeExternalImageURL(src);
+		if (!normalized || !isExternalImageURL(normalized)) {
+			toast.error(m.editor_external_image_invalid());
+			return false;
+		}
+
+		insertUploadedImage({
+			src: normalized,
+			title: buildExternalImageTitle(normalized)
+		});
+		return true;
+	}
+
+	function beginImageUpload() {
+		uploadingImageCount += 1;
+		toast.loading(
+			uploadingImageCount > 1
+				? `正在上传 ${uploadingImageCount} 张图片...`
+				: m.common_uploading(),
+			{ id: imageUploadToastId, duration: Infinity }
+		);
+	}
+
+	function endImageUpload() {
+		uploadingImageCount = Math.max(0, uploadingImageCount - 1);
+		if (uploadingImageCount > 0) {
+			toast.loading(`正在上传 ${uploadingImageCount} 张图片...`, {
+				id: imageUploadToastId,
+				duration: Infinity
+			});
 			return;
 		}
+
+		toast.dismiss(imageUploadToastId);
+	}
+
+	async function uploadAndInsertImage(
+		file: File,
+		source: 'picker' | 'paste' = 'picker'
+	): Promise<boolean> {
+		if (!editor) return false;
+		if (!isSupportedImageFile(file)) {
+			showUnsupportedImageUploadToast(file);
+			return false;
+		}
+		beginImageUpload();
 		try {
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
-			editor
-				.chain()
-				.focus()
-				.insertContent({
-					type: 'image',
-					attrs: {
-						src: uploaded.url,
-						alt: file.name,
-						title: file.name,
-						assetId: uploaded.assetId
-					}
-				})
-				.run();
+			insertUploadedImage({
+				src: uploaded.url,
+				title: file.name,
+				assetId: uploaded.assetId
+			});
+			return true;
 		} catch (error) {
-			console.error('[Upload] Failed to upload image:', error);
-			toast.error(error instanceof Error ? error.message : '上传资源失败');
+			console.error(`[${source === 'paste' ? 'Paste' : 'Upload'}] Failed to upload image:`, error);
+			toast.error(error instanceof Error ? error.message : '上传图片失败');
+			return false;
+		} finally {
+			endImageUpload();
 		}
+	}
+
+	async function uploadAndInsertImages(files: Iterable<File>, source: 'picker' | 'paste' = 'picker') {
+		const supportedFiles: File[] = [];
+		let blockedCount = 0;
+		let uploadedCount = 0;
+
+		for (const file of files) {
+			if (!isSupportedImageFile(file)) {
+				blockedCount += 1;
+				continue;
+			}
+			supportedFiles.push(file);
+		}
+
+		if (blockedCount > 0) {
+			toast.error(
+				blockedCount === 1
+					? '检测到 1 个不支持的图片文件，已跳过。仅支持 PNG/JPG/WebP/GIF。'
+					: `检测到 ${blockedCount} 个不支持的图片文件，已跳过。仅支持 PNG/JPG/WebP/GIF。`
+			);
+		}
+
+		for (const file of supportedFiles) {
+			const uploaded = await uploadAndInsertImage(file, source);
+			if (uploaded) {
+				uploadedCount += 1;
+			}
+		}
+
+		if (uploadedCount > 0 && uploadingImageCount === 0) {
+			toast.success(
+				uploadedCount === 1 ? '图片上传完成' : `${uploadedCount} 张图片上传完成`
+			);
+		}
+	}
+
+	function hasClipboardFiles(clipboard: DataTransfer): boolean {
+		return Array.from(clipboard.items).some((item) => item.kind === 'file') || clipboard.files.length > 0;
+	}
+
+	function collectClipboardImageFiles(clipboard: DataTransfer): File[] {
+		const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+		const files = [
+			...Array.from(clipboard.items)
+				.filter((item) => item.kind === 'file' && imageTypes.has(item.type))
+				.map((item) => item.getAsFile())
+				.filter((file): file is File => file !== null),
+			...Array.from(clipboard.files).filter((file) => imageTypes.has(file.type))
+		];
+
+		const uniqueFiles = new Map<string, File>();
+		for (const file of files) {
+			const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+			if (!uniqueFiles.has(key)) {
+				uniqueFiles.set(key, file);
+			}
+		}
+
+		return [...uniqueFiles.values()];
 	}
 
 	function extractImageSourcesFromHTML(html: string): string[] {
@@ -211,11 +382,29 @@
 		editor = new Editor({
 			element: editorElement,
 			extensions: [
-				StarterKit,
-				Image.configure({
+				StarterKit.configure({
+					heading: {
+						levels: [...headingLevels]
+					}
+				}),
+				CyImage.configure({
 					inline: false,
 					allowBase64: true
 				}),
+				Link.configure({
+					openOnClick: false,
+					autolink: true,
+					defaultProtocol: 'https'
+				}),
+				Table.configure({
+					resizable: true,
+					HTMLAttributes: {
+						class: 'cw-editor-table'
+					}
+				}),
+				TableRow,
+				TableHeader,
+				TableCell,
 				Placeholder.configure({
 					placeholder: m.editor_placeholder()
 				})
@@ -229,25 +418,18 @@
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
 
-						const imageFiles = [
-							...Array.from(clipboard.items)
-								.filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-								.map((item) => item.getAsFile())
-								.filter((file): file is File => file !== null),
-							...Array.from(clipboard.files).filter((file) => file.type.startsWith('image/'))
-						];
-
-						if (imageFiles.length > 0) {
+						const clipboardFiles = collectClipboardImageFiles(clipboard);
+						if (clipboardFiles.length > 0) {
 							clipboardEvent.preventDefault();
 							void (async () => {
-								for (const file of imageFiles) {
-									try {
-										await uploadAndInsertImage(file);
-									} catch (error) {
-										console.error('[Paste] Failed to upload pasted image file:', error);
-									}
-								}
+								await uploadAndInsertImages(clipboardFiles, 'paste');
 							})();
+							return true;
+						}
+
+						if (hasClipboardFiles(clipboard)) {
+							clipboardEvent.preventDefault();
+							toast.error(m.editor_paste_only_support_image_files());
 							return true;
 						}
 
@@ -258,20 +440,32 @@
 						if (imageSources.length > 0) {
 							clipboardEvent.preventDefault();
 							void (async () => {
+								let blockedSourceCount = 0;
 								for (const src of imageSources) {
 									const file = await srcToUploadFile(src);
-									if (!file) continue;
-									try {
-										await uploadAndInsertImage(file);
-									} catch (error) {
-										console.error('[Paste] Failed to upload pasted image element:', error);
+									if (!file) {
+										blockedSourceCount += 1;
+										continue;
 									}
+									await uploadAndInsertImage(file, 'paste');
+								}
+
+								if (blockedSourceCount > 0) {
+									toast.error(
+										'检测到不支持或无法读取的粘贴图片内容，已跳过。仅支持 PNG/JPG/WebP/GIF。'
+									);
 								}
 							})();
 							return true;
 						}
 
 						const text = clipboard.getData('text/plain');
+						if (isExternalImageURL(text.trim())) {
+							clipboardEvent.preventDefault();
+							insertExternalImage(text);
+							return true;
+						}
+
 						if (!looksLikeMarkdown(text)) return false;
 
 						const rendered = marked.parse(text, {
@@ -349,23 +543,230 @@
 		return editor.can().chain().focus().redo().run();
 	}
 
+	function canApply(action: (instance: Editor) => boolean) {
+		editorRevision;
+		if (!editor) return false;
+		return action(editor);
+	}
+
+	function currentHeadingValue() {
+		editorRevision;
+		if (!editor) return 'paragraph';
+		for (const level of headingLevels) {
+			if (editor.isActive('heading', { level })) {
+				return `h${level}`;
+			}
+		}
+		return 'paragraph';
+	}
+
+	function applyHeadingValue(value: string) {
+		if (!editor) return;
+		if (value === 'paragraph') {
+			editor.chain().focus().setParagraph().run();
+			editorRevision += 1;
+			return;
+		}
+
+		const level = Number.parseInt(value.replace('h', ''), 10);
+		if (!headingLevels.includes(level as (typeof headingLevels)[number])) {
+			return;
+		}
+
+		editor.chain().focus().setHeading({ level: level as (typeof headingLevels)[number] }).run();
+		editorRevision += 1;
+	}
+
+	function currentImageWidth() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return 'auto';
+		const attrs = editor.getAttributes('image');
+		const width = typeof attrs.width === 'string' ? attrs.width : '';
+		return cyImageWidths.includes(width as (typeof cyImageWidths)[number]) ? width : 'auto';
+	}
+
+	function currentImageAlign() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return 'content';
+		const attrs = editor.getAttributes('image');
+		const align = typeof attrs.align === 'string' ? attrs.align : 'content';
+		return cyImageAlignments.includes(align as (typeof cyImageAlignments)[number]) ? align : 'content';
+	}
+
+	function currentImageTitle() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return '';
+		const attrs = editor.getAttributes('image');
+		return typeof attrs.title === 'string' ? attrs.title : '';
+	}
+
+	function currentImageDescription() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return '';
+		const attrs = editor.getAttributes('image');
+		// 编辑态只展示真实 alt，避免用户无意中把 title 回填成持久化 alt。
+		return typeof attrs.alt === 'string' ? attrs.alt : '';
+	}
+
+	function currentLinkHref() {
+		editorRevision;
+		if (!editor || !editor.isActive('link')) return '';
+		const attrs = editor.getAttributes('link');
+		return typeof attrs.href === 'string' ? attrs.href : '';
+	}
+
+	function applyImageWidth(width: string) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				width: width === 'auto' ? null : width
+			})
+			.run();
+		editorRevision += 1;
+	}
+
+	function applyImageAlign(align: string) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				align
+			})
+			.run();
+		editorRevision += 1;
+	}
+
+	function applyImageTitle(payload: { title: string; description: string }) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+
+		const title = payload.title.trim();
+		const description = payload.description.trim();
+		const nextAlt = description === '' ? null : description;
+
+		editor
+			.chain()
+			.focus()
+			.updateAttributes('image', {
+				title,
+				// 描述为空时不落库 alt，渲染阶段再回退到 title。
+				alt: nextAlt
+			})
+			.run();
+		editorRevision += 1;
+	}
+
+	async function replaceCurrentImage(file: File) {
+		if (!editor || !editor.isActive('image')) {
+			return;
+		}
+		if (!isSupportedImageFile(file)) {
+			showUnsupportedImageUploadToast(file);
+			return;
+		}
+
+		beginImageUpload();
+		try {
+			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			const attrs = editor.getAttributes('image');
+			const currentAlt = typeof attrs.alt === 'string' ? attrs.alt : '';
+			const nextTitle = file.name;
+			const nextAlt = currentAlt.trim() === '' ? null : currentAlt;
+
+			editor
+				.chain()
+				.focus()
+				.updateAttributes('image', {
+					src: uploaded.url,
+					assetId: uploaded.assetId,
+					title: nextTitle,
+					alt: nextAlt
+				})
+				.run();
+			editorRevision += 1;
+			toast.success('图片替换完成');
+		} catch (error) {
+			console.error('[Replace] Failed to replace image:', error);
+			toast.error(error instanceof Error ? error.message : '替换图片失败');
+		} finally {
+			endImageUpload();
+		}
+	}
+
+	function normalizeLinkHref(href: string) {
+		const trimmed = href.trim();
+		if (!trimmed) return '';
+
+		// If the href already has a scheme, only allow a safe subset.
+		const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z\d+\-.]*:)/);
+		if (schemeMatch) {
+			const scheme = schemeMatch[1].toLowerCase();
+			const allowedSchemes = new Set(['http:', 'https:', 'mailto:']);
+			if (!allowedSchemes.has(scheme)) {
+				// Reject unsafe or unknown schemes like javascript:, data:, etc.
+				return '';
+			}
+			return trimmed;
+		}
+
+		// No explicit scheme: default to https.
+		return `https://${trimmed}`;
+	}
+
+	function applyLinkHref(href: string) {
+		if (!editor) return;
+		const normalizedHref = normalizeLinkHref(href);
+		if (!normalizedHref) {
+			editor.chain().focus().unsetLink().run();
+			editorRevision += 1;
+			return;
+		}
+
+		editor
+			.chain()
+			.focus()
+			.extendMarkRange('link')
+			.setLink({ href: normalizedHref })
+			.run();
+		editorRevision += 1;
+	}
+
+	function removeLink() {
+		if (!editor) return;
+		editor.chain().focus().extendMarkRange('link').unsetLink().run();
+		editorRevision += 1;
+	}
+
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
 		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
+	const iconButtonBaseClass =
+		'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50';
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<div class="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div
-			class="mx-auto flex w-full max-w-4xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:flex-wrap md:justify-center md:overflow-visible md:whitespace-normal"
-		>
+	<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+		<div class="overflow-visible">
+			<div
+				class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
+			>
 			<button
 				type="button"
 				title={m.editor_toolbar_save_with_shortcut()}
 				aria-label={m.editor_toolbar_save_with_shortcut()}
 				disabled={isSaving || !hasUnsavedChanges}
 				onclick={() => onSave?.()}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<FloppyDisk class="h-4 w-4" />
 			</button>
@@ -378,7 +779,7 @@
 					apply((instance) => {
 						instance.chain().focus().undo().run();
 					})}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<ArrowCounterClockwise class="h-4 w-4" />
 			</button>
@@ -391,51 +792,12 @@
 					apply((instance) => {
 						instance.chain().focus().redo().run();
 					})}
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
 				<ArrowClockwise class="h-4 w-4" />
 			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-			<button
-				type="button"
-				title={m.editor_toolbar_heading_1()}
-				aria-label={m.editor_toolbar_heading_1()}
-				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-					isActive('heading', { level: 1 }) ? activeToggleClass : inactiveToggleClass
-				}`}
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().toggleHeading({ level: 1 }).run();
-					})}
-			>
-				<TextHOne class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_heading_2()}
-				aria-label={m.editor_toolbar_heading_2()}
-				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
-					isActive('heading', { level: 2 }) ? activeToggleClass : inactiveToggleClass
-				}`}
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().toggleHeading({ level: 2 }).run();
-					})}
-			>
-				<TextHTwo class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				title={m.editor_toolbar_paragraph()}
-				aria-label={m.editor_toolbar_paragraph()}
-				class="rounded-md px-2 py-1 text-xs leading-none text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-				onclick={() =>
-					apply((instance) => {
-						instance.chain().focus().setParagraph().run();
-					})}
-			>
-				<Paragraph class="h-4 w-4" />
-			</button>
+			<HeadingLevelMenu currentValue={currentHeadingValue()} onSelect={applyHeadingValue} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -465,6 +827,7 @@
 			>
 				<TextItalic class="h-4 w-4" />
 			</button>
+			<LinkControls href={currentLinkHref()} onSave={applyLinkHref} onRemove={removeLink} />
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -494,6 +857,123 @@
 			>
 				<ListNumbers class="h-4 w-4" />
 			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_blockquote()}
+				aria-label={m.editor_toolbar_blockquote()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('blockquote') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleBlockquote().run();
+					})}
+			>
+				<Quotes class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_code_block()}
+				aria-label={m.editor_toolbar_code_block()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${
+					isActive('codeBlock') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleCodeBlock().run();
+					})}
+			>
+				<Code class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				title={m.editor_toolbar_divider()}
+				aria-label={m.editor_toolbar_divider()}
+				class={`rounded-md px-2 py-1 text-xs leading-none transition-colors ${inactiveToggleClass}`}
+				onclick={() =>
+					apply((instance) => {
+						instance.chain().focus().setHorizontalRule().run();
+					})}
+			>
+				<Minus class="h-4 w-4" />
+			</button>
+			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
+			<ImageUploadButton
+				accept={imageUploadAccept}
+				label={m.editor_toolbar_upload_image()}
+				uploadingLabel={m.common_uploading()}
+				isUploading={uploadingImageCount > 0}
+				onFilesSelected={(files) => {
+					void uploadAndInsertImages(Array.from(files), 'picker');
+				}}
+			/>
+			<ExternalImageButton
+				onInsert={(src) => insertExternalImage(src)}
+			/>
+			{#if isActive('image')}
+				<div
+					in:fade={{ duration: 120 }}
+					out:fade={{ duration: 120 }}
+					class="inline-flex shrink-0 items-center gap-1 rounded-lg px-1 outline outline-1 -outline-offset-1 outline-zinc-200 dark:outline-zinc-700"
+				>
+					<ImageReplaceButton
+						accept={imageUploadAccept}
+						label={m.editor_image_replace()}
+						onFileSelected={(file) => {
+							void replaceCurrentImage(file);
+						}}
+					/>
+					<ImageTitleControls
+						titleValue={currentImageTitle()}
+						descriptionValue={currentImageDescription()}
+						onSave={applyImageTitle}
+					/>
+					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
+					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
+				</div>
+			{/if}
+				<TableToolbarControls
+				isTableActive={isActive('table')}
+				isHeaderRowActive={isActive('tableHeader')}
+				canInsertTable={canApply((instance) =>
+					instance.can().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+				)}
+				canAddRow={canApply((instance) => instance.can().chain().focus().addRowAfter().run())}
+				canDeleteRow={canApply((instance) => instance.can().chain().focus().deleteRow().run())}
+				canAddColumn={canApply((instance) => instance.can().chain().focus().addColumnAfter().run())}
+				canDeleteColumn={canApply((instance) => instance.can().chain().focus().deleteColumn().run())}
+				canToggleHeaderRow={canApply((instance) => instance.can().chain().focus().toggleHeaderRow().run())}
+				canDeleteTable={canApply((instance) => instance.can().chain().focus().deleteTable().run())}
+				onInsertTable={(rows, cols) =>
+					apply((instance) => {
+						instance.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
+					})}
+				onAddRow={() =>
+					apply((instance) => {
+						instance.chain().focus().addRowAfter().run();
+					})}
+				onDeleteRow={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteRow().fixTables().run();
+					})}
+				onAddColumn={() =>
+					apply((instance) => {
+						instance.chain().focus().addColumnAfter().run();
+					})}
+				onDeleteColumn={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteColumn().fixTables().run();
+					})}
+				onToggleHeaderRow={() =>
+					apply((instance) => {
+						instance.chain().focus().toggleHeaderRow().fixTables().run();
+					})}
+				onDeleteTable={() =>
+					apply((instance) => {
+						instance.chain().focus().deleteTable().run();
+					})}
+				/>
+			</div>
 		</div>
 	</div>
 

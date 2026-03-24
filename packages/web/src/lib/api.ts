@@ -1,4 +1,5 @@
 import { auth } from '$lib/stores/auth';
+import { resolveApiUrl } from '$lib/config/api';
 import { get } from 'svelte/store';
 
 // A simple flag to prevent multiple concurrent refresh attempts.
@@ -13,6 +14,8 @@ let isRefreshing = false;
  * @returns A Promise that resolves to the Response object.
  */
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+	const resolvedUrl = resolveApiUrl(url);
+
 	// Get the current token from the store.
 	const token = get(auth).token;
 
@@ -22,9 +25,12 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
 		headers.set('Authorization', `Bearer ${token}`);
 	}
 	options.headers = headers;
+	if (options.credentials === undefined) {
+		options.credentials = 'include';
+	}
 
 	// Make the initial request.
-	let response = await fetch(url, options);
+	let response = await fetch(resolvedUrl, options);
 
 	// If the response is a 401 Unauthorized, and we haven't already started a refresh,
 	// try to refresh the token and retry the request.
@@ -42,7 +48,7 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
 
 				// ...and retry the original request.
 				console.log('Retrying original request with new token.');
-				response = await fetch(url, options);
+				response = await fetch(resolvedUrl, options);
 			}
 		} catch (error) {
 			// The refresh failed, the auth store will handle logout.

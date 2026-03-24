@@ -115,9 +115,14 @@ func main() {
 		return c.SendString("Hello from CyimeWrite Server!")
 	})
 
-	log.Println("Starting server on port 8080...")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("Starting server on port %s...", port)
 	// Start server
-	if err := app.Listen(":8080"); err != nil {
+	if err := app.Listen(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

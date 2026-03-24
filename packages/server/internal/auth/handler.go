@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +69,22 @@ type SessionResponseDTO struct {
 	Current     bool      `json:"current"`
 }
 
+func getAPIBaseURL() string {
+	baseURL := strings.TrimSpace(os.Getenv("API_BASE_URL"))
+	if baseURL == "" {
+		port := strings.TrimSpace(os.Getenv("PORT"))
+		if port == "" {
+			port = "8080"
+		}
+		if strings.HasPrefix(port, ":") {
+			port = port[1:]
+		}
+		baseURL = fmt.Sprintf("http://localhost:%s", port)
+	}
+
+	return strings.TrimRight(baseURL, "/")
+}
+
 // GetAuthConfig is the handler for GET /api/v1/auth/config
 func GetAuthConfig(c *fiber.Ctx) error {
 	var dbProviders []models.AuthProvider
@@ -82,7 +101,7 @@ func GetAuthConfig(c *fiber.Ctx) error {
 		responseProviders = append(responseProviders, ProviderInfo{
 			Name:   p.Name,
 			Icon:   iconURL,
-			SSOUrl: "/api/v1/auth/login/" + p.Name,
+			SSOUrl: getAPIBaseURL() + "/api/v1/auth/login/" + p.Name,
 		})
 	}
 
@@ -109,7 +128,7 @@ func AuthLogin(c *fiber.Ctx) error {
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
 		ClientSecret: dbProvider.ClientSecretEncrypted,
-		RedirectURL:  fmt.Sprintf("http://localhost:8080/api/v1/auth/callback/%s", providerName),
+		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
 	}
@@ -145,7 +164,7 @@ func AuthCallback(c *fiber.Ctx) error {
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
 		ClientSecret: dbProvider.ClientSecretEncrypted,
-		RedirectURL:  fmt.Sprintf("http://localhost:8080/api/v1/auth/callback/%s", providerName),
+		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
 	}
@@ -331,9 +350,9 @@ func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile
 
 	// 2. Identity not found, so we create a new user and a new identity.
 	newUser := models.User{
-		Email:       &userProfile.Email,
-		DisplayName: &userProfile.Name,
-		AvatarURL:   &userProfile.Picture,
+		Email:       optionalStringPtr(userProfile.Email),
+		DisplayName: optionalStringPtr(userProfile.Name),
+		AvatarURL:   optionalStringPtr(userProfile.Picture),
 	}
 	if err := tx.Create(&newUser).Error; err != nil {
 		return nil, fmt.Errorf("创建新用户失败: %w", err)
@@ -479,7 +498,20 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			if userName == "" {
 				userName = ghUser.Login
 			}
-			userProfile = UserProfile{Subject: fmt.Sprintf("%d", ghUser.ID), Email: ghUser.Email, Name: userName, Picture: ghUser.Avatar}
+			userEmail := strings.TrimSpace(ghUser.Email)
+			if userEmail == "" {
+				fallbackEmail, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
+				if err != nil {
+					return nil, err
+				}
+				userEmail = fallbackEmail
+			}
+			userProfile = UserProfile{
+				Subject: fmt.Sprintf("%d", ghUser.ID),
+				Email:   userEmail,
+				Name:    userName,
+				Picture: ghUser.Avatar,
+			}
 		} else {
 			return nil, fmt.Errorf("未实现对 '%s' 的用户信息解析", provider.Name)
 		}
@@ -489,4 +521,53 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 		return nil, fmt.Errorf("未能获取到任何用户信息")
 	}
 	return &userProfile, nil
+}
+
+func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, token *oauth2.Token) (string, error) {
+	client := oauth2Config.Client(ctx, token)
+	resp, err := client.Get("https://api.github.com/user/emails")
+	if err != nil {
+		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: status %d, body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&emails); err != nil {
+		return "", fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
+	}
+
+	for _, item := range emails {
+		if item.Primary && item.Verified && strings.TrimSpace(item.Email) != "" {
+			return strings.TrimSpace(item.Email), nil
+		}
+	}
+	for _, item := range emails {
+		if item.Verified && strings.TrimSpace(item.Email) != "" {
+			return strings.TrimSpace(item.Email), nil
+		}
+	}
+	for _, item := range emails {
+		if strings.TrimSpace(item.Email) != "" {
+			return strings.TrimSpace(item.Email), nil
+		}
+	}
+
+	return "", nil
+}
+
+func optionalStringPtr(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }

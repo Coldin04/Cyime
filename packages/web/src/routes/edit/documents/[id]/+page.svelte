@@ -8,6 +8,12 @@
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import {
+		defaultAutoSaveEnabled,
+		defaultAutoSaveIntervalSeconds,
+		readAutoSaveEnabled,
+		readAutoSaveIntervalSeconds
+	} from '$lib/components/editor/autoSave';
 	import { getAssetReadURL, getDocumentContent, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
@@ -28,6 +34,8 @@
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
+	let autoSaveEnabled = $state(defaultAutoSaveEnabled);
+	let autoSaveIntervalSeconds = $state(defaultAutoSaveIntervalSeconds);
 
 	const assetPathPattern =
 		/\/api\/v1\/media\/assets\/([0-9a-fA-F-]{36})\/content(?:\?.*)?$/;
@@ -140,7 +148,7 @@
 		title = newTitle;
 	}
 
-	async function saveContent(): Promise<boolean> {
+	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
 			return !hasUnsavedChanges;
 		}
@@ -153,7 +161,9 @@
 			return true;
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
-			toast.error(m.editor_save_failed());
+			if (reason === 'manual') {
+				toast.error(m.editor_save_failed());
+			}
 			return false;
 		} finally {
 			isSaving = false;
@@ -199,6 +209,35 @@
 			};
 			loadContent();
 		}
+	});
+
+	$effect(() => {
+		if (!browser) {
+			return;
+		}
+
+		// 当前先从本地偏好读取自动保存策略，后续可以直接换成个人中心设置源。
+		autoSaveEnabled = readAutoSaveEnabled();
+		autoSaveIntervalSeconds = readAutoSaveIntervalSeconds();
+	});
+
+	$effect(() => {
+		if (!browser || !documentId || isLoading || !autoSaveEnabled) {
+			return;
+		}
+
+		// 自动保存只负责兜底落盘，不额外维护独立状态指示。
+		const timer = window.setInterval(() => {
+			if (!hasUnsavedChanges || isSaving) {
+				return;
+			}
+
+			void saveContent('auto');
+		}, autoSaveIntervalSeconds * 1000);
+
+		return () => {
+			window.clearInterval(timer);
+		};
 	});
 
 	onMount(() => {

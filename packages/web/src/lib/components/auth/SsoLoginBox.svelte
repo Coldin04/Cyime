@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import * as m from '$paraglide/messages';
+  import { resolveApiUrl } from '$lib/config/api';
 
   type AuthProvider = {
     name: string;
@@ -20,7 +21,9 @@
 
   onMount(async () => {
     try {
-      const response = await fetch('/api/v1/auth/config');
+      const response = await fetch(resolveApiUrl('/api/v1/auth/config'), {
+        credentials: 'include'
+      });
       if (!response.ok) {
         throw new Error(m.sso_login_box_error_fetch_config());
       }

@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
+import { resolveApiUrl } from '$lib/config/api';
 
 export type User = {
 	id: string;
@@ -35,8 +36,9 @@ function createAuthStore() {
 	});
 
 	async function _fetchUser(token: string): Promise<User> {
-		const response = await fetch('/api/v1/user/me', {
-			headers: { Authorization: `Bearer ${token}` }
+		const response = await fetch(resolveApiUrl('/api/v1/user/me'), {
+			headers: { Authorization: `Bearer ${token}` },
+			credentials: 'include'
 		});
 		if (!response.ok) throw new Error('Failed to fetch user profile');
 		const user: User = await response.json();
@@ -46,8 +48,9 @@ function createAuthStore() {
 	async function refreshToken() {
 		console.log('Attempting to refresh token...');
 		try {
-			const response = await fetch('/api/v1/auth/refresh', {
-				method: 'POST'
+			const response = await fetch(resolveApiUrl('/api/v1/auth/refresh'), {
+				method: 'POST',
+				credentials: 'include'
 			});
 			if (!response.ok) throw new Error('Refresh failed');
 
@@ -92,8 +95,9 @@ function createAuthStore() {
 
 		// Try to restore session from the backend using the refresh token cookie.
 		try {
-			const response = await fetch('/api/v1/auth/refresh', {
-				method: 'POST'
+			const response = await fetch(resolveApiUrl('/api/v1/auth/refresh'), {
+				method: 'POST',
+				credentials: 'include'
 			});
 
 			if (response.ok) {
@@ -153,8 +157,9 @@ function createAuthStore() {
 
 		try {
 			// Inform the backend to revoke the refresh token.
-			const response = await fetch('/api/v1/auth/logout', {
-				method: 'POST'
+			const response = await fetch(resolveApiUrl('/api/v1/auth/logout'), {
+				method: 'POST',
+				credentials: 'include'
 			});
 			if (!response.ok) {
 				// We can log this error, but we still want to clear the local state.
