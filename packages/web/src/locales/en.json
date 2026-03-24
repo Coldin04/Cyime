@@ -148,6 +148,7 @@
   "editor_external_image_placeholder": "Paste image URL",
   "editor_external_image_insert": "Insert",
   "editor_external_image_invalid": "Please enter a valid image URL",
+  "editor_paste_only_support_image_files": "Only PNG/JPG/WebP/GIF images can be pasted. Export other files as images before uploading.",
   "editor_image_size_auto": "Auto Size",
   "editor_image_size_small": "Small",
   "editor_image_size_medium": "Medium",

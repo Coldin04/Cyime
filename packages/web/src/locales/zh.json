@@ -147,6 +147,7 @@
   "editor_external_image_placeholder": "粘贴图片 URL",
   "editor_external_image_insert": "插入",
   "editor_external_image_invalid": "请输入可识别的图片链接",
+  "editor_paste_only_support_image_files": "当前仅支持粘贴 PNG/JPG/WebP/GIF 图片，其他文件请先导出为图片后再上传。",
   "editor_image_size_auto": "自动尺寸",
   "editor_image_size_small": "小图",
   "editor_image_size_medium": "中图",

@@ -429,7 +429,7 @@
 
 						if (hasClipboardFiles(clipboard)) {
 							clipboardEvent.preventDefault();
-							toast.error('当前仅支持粘贴 PNG/JPG/WebP/GIF 图片，其他文件请先导出为图片后再上传。');
+							toast.error(m.editor_paste_only_support_image_files());
 							return true;
 						}
 
