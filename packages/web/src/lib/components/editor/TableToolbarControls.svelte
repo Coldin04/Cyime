@@ -45,6 +45,7 @@
 	}: Props = $props();
 
 	const tablePickerMax = 6;
+	const manualInsertMax = 50;
 	const tablePickerCellSize = 20;
 	const tablePickerItems = Array.from({ length: tablePickerMax * tablePickerMax }, (_, index) => ({
 		row: Math.floor(index / tablePickerMax) + 1,
@@ -73,17 +74,17 @@
 		onInsertTable(rows, cols);
 	}
 
-	function parsePositiveInt(value: string, fallback: number) {
+	function parsePositiveInt(value: string, fallback: number, max: number) {
 		const parsed = Number.parseInt(value, 10);
 		if (!Number.isFinite(parsed) || parsed < 1) {
 			return fallback;
 		}
-		return parsed;
+		return Math.min(parsed, max);
 	}
 
 	function handleManualInsert() {
-		const rows = parsePositiveInt(manualRows, 3);
-		const cols = parsePositiveInt(manualCols, 3);
+		const rows = parsePositiveInt(manualRows, 3, manualInsertMax);
+		const cols = parsePositiveInt(manualCols, 3, manualInsertMax);
 		manualRows = String(rows);
 		manualCols = String(cols);
 		handleSelect(rows, cols);
@@ -174,7 +175,7 @@
 				{/each}
 			</div>
 			<p class="mt-2 whitespace-nowrap text-center text-xs text-zinc-500 dark:text-zinc-400">
-				{hoveredRows > 0 && hoveredCols > 0 ? `${hoveredRows} x ${hoveredCols}` : '选择表格大小'}
+				{hoveredRows > 0 && hoveredCols > 0 ? `${hoveredRows} x ${hoveredCols}` : m.editor_table_picker_placeholder()}
 			</p>
 			<div class="mt-2 flex items-center gap-2">
 				<label class="flex min-w-0 items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
@@ -182,6 +183,7 @@
 					<input
 						type="number"
 						min="1"
+						max={manualInsertMax}
 						inputmode="numeric"
 						class="w-10 bg-transparent text-center outline-none"
 						bind:value={manualRows}
@@ -192,6 +194,7 @@
 					<input
 						type="number"
 						min="1"
+						max={manualInsertMax}
 						inputmode="numeric"
 						class="w-10 bg-transparent text-center outline-none"
 						bind:value={manualCols}

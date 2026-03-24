@@ -23,7 +23,7 @@
 	import Code from '~icons/ph/code';
 	import Minus from '~icons/ph/minus';
 	import { CyImage, cyImageAlignments, cyImageWidths } from '$lib/components/editor/CyImage';
-	import ImageAltControls from '$lib/components/editor/ImageAltControls.svelte';
+	import ImageTitleControls from '$lib/components/editor/ImageTitleControls.svelte';
 	import ExternalImageButton from '$lib/components/editor/ExternalImageButton.svelte';
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
@@ -278,7 +278,6 @@
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
 			insertUploadedImage({
 				src: uploaded.url,
-				alt: file.name,
 				title: file.name,
 				assetId: uploaded.assetId
 			});
@@ -332,12 +331,14 @@
 	}
 
 	function collectClipboardImageFiles(clipboard: DataTransfer): File[] {
+		const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
 		const files = [
 			...Array.from(clipboard.items)
-				.filter((item) => item.kind === 'file')
+				.filter((item) => item.kind === 'file' && imageTypes.has(item.type))
 				.map((item) => item.getAsFile())
 				.filter((file): file is File => file !== null),
-			...Array.from(clipboard.files)
+			...Array.from(clipboard.files).filter((file) => imageTypes.has(file.type))
 		];
 
 		const uniqueFiles = new Map<string, File>();
@@ -599,6 +600,14 @@
 		return typeof attrs.title === 'string' ? attrs.title : '';
 	}
 
+	function currentImageDescription() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return '';
+		const attrs = editor.getAttributes('image');
+		// 编辑态只展示真实 alt，避免用户无意中把 title 回填成持久化 alt。
+		return typeof attrs.alt === 'string' ? attrs.alt : '';
+	}
+
 	function currentLinkHref() {
 		editorRevision;
 		if (!editor || !editor.isActive('link')) return '';
@@ -636,16 +645,22 @@
 		editorRevision += 1;
 	}
 
-	function applyImageTitle(title: string) {
+	function applyImageTitle(payload: { title: string; description: string }) {
 		if (!editor || !editor.isActive('image')) {
 			return;
 		}
+
+		const title = payload.title.trim();
+		const description = payload.description.trim();
+		const nextAlt = description === '' ? null : description;
 
 		editor
 			.chain()
 			.focus()
 			.updateAttributes('image', {
-				title
+				title,
+				// 描述为空时不落库 alt，渲染阶段再回退到 title。
+				alt: nextAlt
 			})
 			.run();
 		editorRevision += 1;
@@ -663,13 +678,19 @@
 		beginImageUpload();
 		try {
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			const attrs = editor.getAttributes('image');
+			const currentAlt = typeof attrs.alt === 'string' ? attrs.alt : '';
+			const nextTitle = file.name;
+			const nextAlt = currentAlt.trim() === '' ? null : currentAlt;
+
 			editor
 				.chain()
 				.focus()
 				.updateAttributes('image', {
 					src: uploaded.url,
 					assetId: uploaded.assetId,
-					title: file.name
+					title: nextTitle,
+					alt: nextAlt
 				})
 				.run();
 			editorRevision += 1;
@@ -685,9 +706,20 @@
 	function normalizeLinkHref(href: string) {
 		const trimmed = href.trim();
 		if (!trimmed) return '';
-		if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+
+		// If the href already has a scheme, only allow a safe subset.
+		const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z\d+\-.]*:)/);
+		if (schemeMatch) {
+			const scheme = schemeMatch[1].toLowerCase();
+			const allowedSchemes = new Set(['http:', 'https:', 'mailto:']);
+			if (!allowedSchemes.has(scheme)) {
+				// Reject unsafe or unknown schemes like javascript:, data:, etc.
+				return '';
+			}
 			return trimmed;
 		}
+
+		// No explicit scheme: default to https.
 		return `https://${trimmed}`;
 	}
 
@@ -891,7 +923,11 @@
 							void replaceCurrentImage(file);
 						}}
 					/>
-					<ImageAltControls value={currentImageTitle()} onSave={applyImageTitle} />
+					<ImageTitleControls
+						titleValue={currentImageTitle()}
+						descriptionValue={currentImageDescription()}
+						onSave={applyImageTitle}
+					/>
 					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
 				</div>
