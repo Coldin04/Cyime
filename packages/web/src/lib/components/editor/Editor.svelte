@@ -236,8 +236,7 @@
 
 		insertUploadedImage({
 			src: normalized,
-			title: buildExternalImageTitle(normalized),
-			alt: buildExternalImageTitle(normalized)
+			title: buildExternalImageTitle(normalized)
 		});
 		return true;
 	}
@@ -279,7 +278,6 @@
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
 			insertUploadedImage({
 				src: uploaded.url,
-				alt: file.name,
 				title: file.name,
 				assetId: uploaded.assetId
 			});
@@ -602,6 +600,14 @@
 		return typeof attrs.title === 'string' ? attrs.title : '';
 	}
 
+	function currentImageDescription() {
+		editorRevision;
+		if (!editor || !editor.isActive('image')) return '';
+		const attrs = editor.getAttributes('image');
+		// 编辑态只展示真实 alt，避免用户无意中把 title 回填成持久化 alt。
+		return typeof attrs.alt === 'string' ? attrs.alt : '';
+	}
+
 	function currentLinkHref() {
 		editorRevision;
 		if (!editor || !editor.isActive('link')) return '';
@@ -639,16 +645,22 @@
 		editorRevision += 1;
 	}
 
-	function applyImageTitle(title: string) {
+	function applyImageTitle(payload: { title: string; description: string }) {
 		if (!editor || !editor.isActive('image')) {
 			return;
 		}
+
+		const title = payload.title.trim();
+		const description = payload.description.trim();
+		const nextAlt = description === '' ? null : description;
 
 		editor
 			.chain()
 			.focus()
 			.updateAttributes('image', {
-				title
+				title,
+				// 描述为空时不落库 alt，渲染阶段再回退到 title。
+				alt: nextAlt
 			})
 			.run();
 		editorRevision += 1;
@@ -666,13 +678,19 @@
 		beginImageUpload();
 		try {
 			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			const attrs = editor.getAttributes('image');
+			const currentAlt = typeof attrs.alt === 'string' ? attrs.alt : '';
+			const nextTitle = file.name;
+			const nextAlt = currentAlt.trim() === '' ? null : currentAlt;
+
 			editor
 				.chain()
 				.focus()
 				.updateAttributes('image', {
 					src: uploaded.url,
 					assetId: uploaded.assetId,
-					title: file.name
+					title: nextTitle,
+					alt: nextAlt
 				})
 				.run();
 			editorRevision += 1;
@@ -905,7 +923,11 @@
 							void replaceCurrentImage(file);
 						}}
 					/>
-					<ImageTitleControls value={currentImageTitle()} onSave={applyImageTitle} />
+					<ImageTitleControls
+						titleValue={currentImageTitle()}
+						descriptionValue={currentImageDescription()}
+						onSave={applyImageTitle}
+					/>
 					<ImageSizeControls currentWidth={currentImageWidth()} onSelect={applyImageWidth} />
 					<ImageLayoutControls currentAlign={currentImageAlign()} onSelect={applyImageAlign} />
 				</div>

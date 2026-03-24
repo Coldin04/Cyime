@@ -7,6 +7,23 @@ export const CyImage = Image.extend({
 	addAttributes() {
 		return {
 			...this.parent?.(),
+			alt: {
+				default: null,
+				parseHTML: (element) => element.getAttribute('alt'),
+				renderHTML: (attributes) => {
+					const alt = typeof attributes.alt === 'string' ? attributes.alt.trim() : '';
+					if (alt !== '') {
+						return { alt };
+					}
+
+					const title = typeof attributes.title === 'string' ? attributes.title.trim() : '';
+					if (title !== '') {
+						return { alt: title };
+					}
+
+					return {};
+				}
+			},
 			width: {
 				default: null,
 				parseHTML: (element) =>
