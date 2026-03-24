@@ -68,7 +68,7 @@
 		class="inline-flex h-8 shrink-0 items-center justify-center rounded-md px-2 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 		onclick={togglePanel}
 	>
-		<span class="text-[11px] font-semibold tracking-[0.02em]">Title</span>
+		<span class="text-[11px] font-semibold tracking-[0.02em]">{m.editor_image_title_label()}</span>
 	</button>
 
 	{#if open}

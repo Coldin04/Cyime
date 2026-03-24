@@ -160,6 +160,7 @@
   "editor_image_title_placeholder": "Enter image hover title",
   "editor_toolbar_insert_table": "Insert Table",
   "editor_toolbar_insert_table_short": "Table",
+  "editor_table_picker_placeholder": "Select table size",
   "editor_table_rows_label": "Rows",
   "editor_table_columns_label": "Cols",
   "editor_table_create_action": "Create",
