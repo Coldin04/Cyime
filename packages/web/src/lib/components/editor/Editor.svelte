@@ -236,7 +236,8 @@
 
 		insertUploadedImage({
 			src: normalized,
-			title: buildExternalImageTitle(normalized)
+			title: buildExternalImageTitle(normalized),
+			alt: buildExternalImageTitle(normalized)
 		});
 		return true;
 	}

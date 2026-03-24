@@ -100,11 +100,11 @@
 					/>
 				</label>
 				<label class="flex items-start gap-2">
-					<span class="w-14 shrink-0 pt-1 text-zinc-500 dark:text-zinc-400">描述</span>
+					<span class="w-14 shrink-0 pt-1 text-zinc-500 dark:text-zinc-400">{m.editor_image_alt_label()}</span>
 					<textarea
 						rows="2"
 						class="min-h-12 min-w-0 flex-1 resize-none rounded border border-zinc-200 bg-white px-2 py-1 text-xs outline-none placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500"
-						placeholder="输入图片描述（用于朗读）"
+						placeholder={m.editor_image_alt_placeholder()}
 						bind:value={draftDescription}
 					></textarea>
 				</label>

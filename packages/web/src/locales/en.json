@@ -158,6 +158,8 @@
   "editor_image_replace": "Replace Image",
   "editor_image_title_label": "Title",
   "editor_image_title_placeholder": "Enter image hover title",
+  "editor_image_alt_label": "Description",
+  "editor_image_alt_placeholder": "Enter image description (for screen readers)",
   "editor_toolbar_insert_table": "Insert Table",
   "editor_toolbar_insert_table_short": "Table",
   "editor_table_picker_placeholder": "Select table size",

@@ -157,6 +157,8 @@
   "editor_image_replace": "替换图片",
   "editor_image_title_label": "悬浮标题",
   "editor_image_title_placeholder": "输入图片悬浮标题",
+  "editor_image_alt_label": "描述",
+  "editor_image_alt_placeholder": "输入图片描述（用于朗读）",
   "editor_toolbar_insert_table": "插入表格",
   "editor_toolbar_insert_table_short": "表格",
   "editor_table_picker_placeholder": "选择表格大小",
