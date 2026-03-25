@@ -22,6 +22,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 
 	if err := db.AutoMigrate(
 		&models.User{},
+		&models.UserImageBedConfig{},
 		&models.Folder{},
 		&models.Document{},
 		&models.DocumentBody{},
@@ -104,4 +105,30 @@ func TestDeleteFile_Document_DeniesCrossUserAccessAndKeepsRow(t *testing.T) {
 	if got.DeletedAt.Valid {
 		t.Fatal("expected document to remain undeleted")
 	}
+}
+
+func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	attackerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "owner-doc")
+	config := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       attackerID,
+		Name:         "attacker bed",
+		ProviderType: "see",
+		APIToken:     stringPtr("token"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&config).Error; err != nil {
+		t.Fatalf("create image bed config: %v", err)
+	}
+
+	if err := UpdateDocumentImageTarget(attackerID, docID, config.ID.String()); err == nil {
+		t.Fatal("expected cross-user image target update to fail")
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }

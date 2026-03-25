@@ -14,6 +14,19 @@ export type UserOverview = {
 	unlimited: boolean;
 };
 
+export type ImageBedConfig = {
+	id: string;
+	name: string;
+	providerType: 'see' | 'lsky' | string;
+	baseUrl: string;
+	apiToken: string;
+	isEnabled: boolean;
+	storageId?: number;
+	strategyId?: string;
+};
+
+export type UpsertImageBedConfigRequest = Omit<ImageBedConfig, 'id'>;
+
 async function parseUserResponse(response: Response): Promise<UserProfile> {
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({}));
@@ -68,4 +81,64 @@ export async function getUserOverview(): Promise<UserOverview> {
 	}
 
 	return response.json();
+}
+
+export async function getImageBedConfigs(): Promise<ImageBedConfig[]> {
+	const response = await apiFetch('/api/v1/user/image-beds');
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to load image bed configs');
+	}
+
+	const payload = await response.json();
+	return payload.items ?? [];
+}
+
+export async function createImageBedConfig(request: UpsertImageBedConfigRequest): Promise<ImageBedConfig> {
+	const response = await apiFetch('/api/v1/user/image-beds', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(request)
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to create image bed config');
+	}
+
+	return response.json();
+}
+
+export async function updateImageBedConfig(
+	id: string,
+	request: UpsertImageBedConfigRequest
+): Promise<ImageBedConfig> {
+	const response = await apiFetch(`/api/v1/user/image-beds/${id}`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(request)
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to update image bed config');
+	}
+
+	return response.json();
+}
+
+export async function deleteImageBedConfig(id: string): Promise<void> {
+	const response = await apiFetch(`/api/v1/user/image-beds/${id}`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to delete image bed config');
+	}
 }

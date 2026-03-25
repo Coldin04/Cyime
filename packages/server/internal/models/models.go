@@ -23,8 +23,35 @@ type User struct {
 	AvatarURL       *string
 	AvatarObjectKey *string
 	DocumentQuota   *int
+	SeeAPIToken     *string `gorm:"type:text"`
+	LskyAPIURL      *string `gorm:"type:varchar(255)"`
+	LskyAPIToken    *string `gorm:"type:text"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (uib *UserImageBedConfig) BeforeCreate(tx *gorm.DB) (err error) {
+	if uib.ID == uuid.Nil {
+		uib.ID = uuid.New()
+	}
+	return
+}
+
+// UserImageBedConfig stores one user-defined public image-bed target.
+type UserImageBedConfig struct {
+	ID           uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID       uuid.UUID `gorm:"not null;index"`
+	User         User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
+	Name         string    `gorm:"type:varchar(120);not null"`
+	ProviderType string    `gorm:"type:varchar(50);not null;index"`
+	BaseURL      *string   `gorm:"type:varchar(255)"`
+	APIToken     *string   `gorm:"type:text"`
+	ConfigJSON   *string   `gorm:"type:text"`
+	IsEnabled    bool      `gorm:"not null;default:true"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -149,18 +176,19 @@ func (d *Document) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Document represents an editable workspace document (metadata only).
 type Document struct {
-	ID           uuid.UUID  `gorm:"type:uuid;primary_key"`
-	OwnerUserID  uuid.UUID  `gorm:"not null;index:idx_owner_folder"`
-	FolderID     *uuid.UUID `gorm:"index:idx_owner_folder"`
-	Title        string     `gorm:"type:varchar(255);not null"`
-	Excerpt      string     `gorm:"type:text"`
-	DocumentType string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
-	EditorType   string     `gorm:"type:varchar(50);not null;default:'tiptap'"`
-	CreatedBy    uuid.UUID  `gorm:"not null"`
-	UpdatedBy    uuid.UUID  `gorm:"not null"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
+	ID                     uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID            uuid.UUID  `gorm:"not null;index:idx_owner_folder"`
+	FolderID               *uuid.UUID `gorm:"index:idx_owner_folder"`
+	Title                  string     `gorm:"type:varchar(255);not null"`
+	Excerpt                string     `gorm:"type:text"`
+	DocumentType           string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
+	PreferredImageTargetID string     `gorm:"type:varchar(100)"`
+	EditorType             string     `gorm:"type:varchar(50);not null;default:'tiptap'"`
+	CreatedBy              uuid.UUID  `gorm:"not null"`
+	UpdatedBy              uuid.UUID  `gorm:"not null"`
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.

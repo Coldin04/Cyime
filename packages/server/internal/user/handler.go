@@ -9,6 +9,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // UserResponseDTO defines the data structure for the user profile response.
@@ -33,6 +34,27 @@ type UpdateProfileRequest struct {
 
 type UpdateGitHubAvatarRequest struct {
 	Username string `json:"username"`
+}
+
+type ImageBedConfigDTO struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	ProviderType string    `json:"providerType"`
+	BaseURL      string    `json:"baseUrl"`
+	APIToken     string    `json:"apiToken"`
+	IsEnabled    bool      `json:"isEnabled"`
+	StorageID    int       `json:"storageId,omitempty"`
+	StrategyID   string    `json:"strategyId,omitempty"`
+}
+
+type UpsertImageBedConfigRequest struct {
+	Name         string `json:"name"`
+	ProviderType string `json:"providerType"`
+	BaseURL      string `json:"baseUrl"`
+	APIToken     string `json:"apiToken"`
+	IsEnabled    bool   `json:"isEnabled"`
+	StorageID    int    `json:"storageId"`
+	StrategyID   string `json:"strategyId"`
 }
 
 // GetMe handles the GET /api/v1/user/me request.
@@ -82,6 +104,131 @@ func GetOverview(c *fiber.Ctx) error {
 		DocumentLimit:        stats.DocumentLimit,
 		Unlimited:            stats.Unlimited,
 	})
+}
+
+func ListImageBedConfigsHandler(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized: Invalid token context.",
+		})
+	}
+
+	items, err := ListImageBedConfigs(userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to load image bed configs.",
+		})
+	}
+
+	result := make([]ImageBedConfigDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, imageBedConfigToDTO(item))
+	}
+
+	return c.JSON(fiber.Map{"items": result})
+}
+
+func CreateImageBedConfigHandler(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid user ID format in token.",
+		})
+	}
+
+	var req UpsertImageBedConfigRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body.",
+		})
+	}
+
+	config, err := CreateImageBedConfig(userID, UpsertImageBedConfigInput{
+		Name:         req.Name,
+		ProviderType: req.ProviderType,
+		BaseURL:      req.BaseURL,
+		APIToken:     req.APIToken,
+		IsEnabled:    req.IsEnabled,
+		StorageID:    req.StorageID,
+		StrategyID:   req.StrategyID,
+	})
+	if err != nil {
+		switch err.Error() {
+		case "image bed name is required", "image bed name is too long", "unsupported image bed provider", "invalid lsky api url", "S.EE API token is required", "Lsky API url is required", "Lsky API token is required", "Lsky storage id is required":
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(imageBedConfigToDTO(*config))
+}
+
+func UpdateImageBedConfigHandler(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid user ID format in token.",
+		})
+	}
+
+	configID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid image bed config id."})
+	}
+
+	var req UpsertImageBedConfigRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body.",
+		})
+	}
+
+	config, err := UpdateImageBedConfig(userID, configID, UpsertImageBedConfigInput{
+		Name:         req.Name,
+		ProviderType: req.ProviderType,
+		BaseURL:      req.BaseURL,
+		APIToken:     req.APIToken,
+		IsEnabled:    req.IsEnabled,
+		StorageID:    req.StorageID,
+		StrategyID:   req.StrategyID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Image bed config not found."})
+		case err.Error() == "image bed name is required" || err.Error() == "image bed name is too long" || err.Error() == "unsupported image bed provider" || err.Error() == "invalid lsky api url" || err.Error() == "S.EE API token is required" || err.Error() == "Lsky API url is required" || err.Error() == "Lsky API token is required" || err.Error() == "Lsky storage id is required":
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+
+	return c.JSON(imageBedConfigToDTO(*config))
+}
+
+func DeleteImageBedConfigHandler(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid user ID format in token.",
+		})
+	}
+
+	configID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid image bed config id."})
+	}
+
+	if err := DeleteImageBedConfig(userID, configID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Image bed config not found."})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"success": true})
 }
 
 func UpdateProfileHandler(c *fiber.Ctx) error {
@@ -217,6 +364,19 @@ func GetAvatarContentHandler(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to read avatar content"})
 	}
 	return c.Send(data)
+}
+
+func imageBedConfigToDTO(config ImageBedConfig) ImageBedConfigDTO {
+	return ImageBedConfigDTO{
+		ID:           config.ID,
+		Name:         config.Name,
+		ProviderType: config.ProviderType,
+		BaseURL:      config.BaseURL,
+		APIToken:     config.APIToken,
+		IsEnabled:    config.IsEnabled,
+		StorageID:    config.StorageID,
+		StrategyID:   config.StrategyID,
+	}
 }
 
 func getUserIDFromContext(c *fiber.Ctx) (uuid.UUID, error) {

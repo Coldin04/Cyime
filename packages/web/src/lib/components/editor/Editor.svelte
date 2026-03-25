@@ -24,20 +24,21 @@
 	import Minus from '~icons/ph/minus';
 	import { CyImage, cyImageAlignments, cyImageWidths } from '$lib/components/editor/CyImage';
 	import ImageTitleControls from '$lib/components/editor/ImageTitleControls.svelte';
-	import ExternalImageButton from '$lib/components/editor/ExternalImageButton.svelte';
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
 	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
 	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
-	import ImageUploadButton from '$lib/components/editor/ImageUploadButton.svelte';
+	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
-	import { uploadDocumentAsset } from '$lib/api/editor';
+	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
+	import ImageSquare from '~icons/ph/image-square';
 
 	interface Props {
 		documentId: string;
 		content: JSONContent;
+		currentImageTargetLabel?: string;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
@@ -47,6 +48,7 @@
 	let {
 		documentId,
 		content,
+		currentImageTargetLabel = '',
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
@@ -63,6 +65,7 @@
 	let lastSyncedContent = '';
 	let editorRevision = $state(0);
 	let uploadingImageCount = $state(0);
+	let isImageInsertDialogOpen = $state(false);
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -264,6 +267,21 @@
 		toast.dismiss(imageUploadToastId);
 	}
 
+	function resolveImageUploadErrorMessage(error: unknown): string {
+		const apiError = error as EditorAPIError | undefined;
+		switch (apiError?.code) {
+			case 'DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE':
+				return m.editor_paste_only_support_image_files();
+			case 'DOCUMENT_IMAGE_PROVIDER_NOT_CONFIGURED':
+			case 'DOCUMENT_IMAGE_TARGET_NOT_SUPPORTED':
+				return m.common_unknown_error();
+			default:
+				return error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_image_insert_upload_failed();
+		}
+	}
+
 	async function uploadAndInsertImage(
 		file: File,
 		source: 'picker' | 'paste' = 'picker'
@@ -275,16 +293,16 @@
 		}
 		beginImageUpload();
 		try {
-			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			const uploaded = await pasteDocumentImage(documentId, file);
 			insertUploadedImage({
 				src: uploaded.url,
 				title: file.name,
-				assetId: uploaded.assetId
+				...(uploaded.assetId ? { assetId: uploaded.assetId } : {})
 			});
 			return true;
 		} catch (error) {
 			console.error(`[${source === 'paste' ? 'Paste' : 'Upload'}] Failed to upload image:`, error);
-			toast.error(error instanceof Error ? error.message : '上传图片失败');
+			toast.error(resolveImageUploadErrorMessage(error));
 			return false;
 		} finally {
 			endImageUpload();
@@ -677,7 +695,7 @@
 
 		beginImageUpload();
 		try {
-			const uploaded = await uploadDocumentAsset(documentId, file, 'private');
+			const uploaded = await pasteDocumentImage(documentId, file);
 			const attrs = editor.getAttributes('image');
 			const currentAlt = typeof attrs.alt === 'string' ? attrs.alt : '';
 			const nextTitle = file.name;
@@ -688,16 +706,16 @@
 				.focus()
 				.updateAttributes('image', {
 					src: uploaded.url,
-					assetId: uploaded.assetId,
+					...(uploaded.assetId ? { assetId: uploaded.assetId } : { assetId: null }),
 					title: nextTitle,
 					alt: nextAlt
 				})
 				.run();
 			editorRevision += 1;
-			toast.success('图片替换完成');
+			toast.success(m.editor_image_replace_success());
 		} catch (error) {
 			console.error('[Replace] Failed to replace image:', error);
-			toast.error(error instanceof Error ? error.message : '替换图片失败');
+			toast.error(resolveImageUploadErrorMessage(error));
 		} finally {
 			endImageUpload();
 		}
@@ -898,18 +916,19 @@
 				<Minus class="h-4 w-4" />
 			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
-			<ImageUploadButton
-				accept={imageUploadAccept}
-				label={m.editor_toolbar_upload_image()}
-				uploadingLabel={m.common_uploading()}
-				isUploading={uploadingImageCount > 0}
-				onFilesSelected={(files) => {
-					void uploadAndInsertImages(Array.from(files), 'picker');
-				}}
-			/>
-			<ExternalImageButton
-				onInsert={(src) => insertExternalImage(src)}
-			/>
+			<button
+				type="button"
+				title={m.editor_toolbar_upload_image()}
+				aria-label={m.editor_toolbar_upload_image()}
+				disabled={uploadingImageCount > 0}
+				class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 leading-none text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+				onclick={() => (isImageInsertDialogOpen = true)}
+			>
+				<ImageSquare class="h-4 w-4" />
+				{#if uploadingImageCount > 0}
+					<span class="text-xs font-medium">{m.common_uploading()}</span>
+				{/if}
+			</button>
 			{#if isActive('image')}
 				<div
 					in:fade={{ duration: 120 }}
@@ -981,3 +1000,14 @@
 		<div bind:this={editorElement} class="h-full w-full"></div>
 	</div>
 </div>
+
+<ImageInsertDialog
+	bind:open={isImageInsertDialogOpen}
+	accept={imageUploadAccept}
+	isUploading={uploadingImageCount > 0}
+	currentTargetLabel={currentImageTargetLabel}
+	onFilesSelected={(files) => {
+		void uploadAndInsertImages(files, 'picker');
+	}}
+	onInsertLink={async (src) => insertExternalImage(src)}
+/>

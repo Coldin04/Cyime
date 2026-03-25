@@ -3,6 +3,8 @@
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
+	import EditorImageTargetMenu from '$lib/components/editor/EditorImageTargetMenu.svelte';
+	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 
 	// Icons
 	import Home from '~icons/ph/house';
@@ -14,17 +16,25 @@
 	let {
 		documentId,
 		initialTitle,
+		preferredImageTargetId,
+		availableImageTargets,
+		isUpdatingImageTarget = false,
 		isSaving,
 		lastSaved,
 		hasUnsavedChanges,
-		onTitleChange
+		onTitleChange,
+		onImageTargetChange
 	}: {
 		documentId: string;
 		initialTitle: string;
+		preferredImageTargetId: string;
+		availableImageTargets: DocumentImageTargetOption[];
+		isUpdatingImageTarget?: boolean;
 		isSaving: boolean;
 		lastSaved: Date | null;
 		hasUnsavedChanges: boolean;
 		onTitleChange?: (title: string) => void;
+		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
 	} = $props();
 
 	let title = $state('');
@@ -166,6 +176,12 @@
 
 	<!-- Right Controls -->
 	<div class="flex items-center gap-4 pr-4">
+		<EditorImageTargetMenu
+			currentTargetId={preferredImageTargetId}
+			options={availableImageTargets}
+			isUpdating={isUpdatingImageTarget}
+			onSelect={(targetId) => onImageTargetChange?.(targetId)}
+		/>
 		<button
 			class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 			title={m.common_search_placeholder()}

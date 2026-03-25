@@ -67,6 +67,10 @@ func main() {
 	userRoutes := api.Group("/user", middleware.Protected())
 	userRoutes.Get("/me", user.GetMe)
 	userRoutes.Get("/overview", user.GetOverview)
+	userRoutes.Get("/image-beds", user.ListImageBedConfigsHandler)
+	userRoutes.Post("/image-beds", user.CreateImageBedConfigHandler)
+	userRoutes.Put("/image-beds/:id", user.UpdateImageBedConfigHandler)
+	userRoutes.Delete("/image-beds/:id", user.DeleteImageBedConfigHandler)
 	userRoutes.Put("/profile", user.UpdateProfileHandler)
 	userRoutes.Post("/avatar", user.UploadAvatarHandler)
 	userRoutes.Put("/avatar/github", user.UpdateGitHubAvatarHandler)
@@ -86,6 +90,7 @@ func main() {
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
 	// Update document title
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
+	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document
@@ -100,6 +105,7 @@ func main() {
 	editRoutes.Get("/:id/content", content.GetContentHandler)
 	editRoutes.Put("/:id/content", content.UpdateContentHandler)
 	editRoutes.Post("/:id/assets", media.UploadDocumentAssetHandler)
+	editRoutes.Post("/:id/paste-image", media.UploadDocumentImageHandler)
 
 	// Media read routes:
 	// - URL exchange is protected by JWT.

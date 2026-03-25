@@ -38,6 +38,18 @@ export type AssetReadURLResponse = {
 	expiresAt: string;
 };
 
+export type UploadDocumentImageResponse = {
+	targetId: 'managed-r2' | 'see-public' | 'lsky-public' | string;
+	mode: 'managed_asset' | 'external_url' | string;
+	url: string;
+	assetId?: string;
+	expiresAt?: string;
+};
+
+export type EditorAPIError = Error & {
+	code?: string;
+};
+
 async function parseJSONResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
 	const raw = await response.text();
 	if (!raw) {
@@ -113,6 +125,36 @@ export async function uploadDocumentAsset(
 	}
 
 	return parseJSONResponse<UploadAssetResponse>(response, 'Failed to parse upload response');
+}
+
+export async function pasteDocumentImage(
+	documentId: string,
+	file: File
+): Promise<UploadDocumentImageResponse> {
+	const formData = new FormData();
+	formData.append('file', file);
+
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/paste-image`, {
+		method: 'POST',
+		body: formData
+	});
+
+	if (!response.ok) {
+		const error = await parseJSONResponse<{ message?: string; code?: string }>(
+			response,
+			'Failed to upload pasted image'
+		);
+		const apiError = new Error(
+			error.message || 'Failed to upload pasted image'
+		) as EditorAPIError;
+		apiError.code = error.code;
+		throw apiError;
+	}
+
+	return parseJSONResponse<UploadDocumentImageResponse>(
+		response,
+		'Failed to parse pasted image upload response'
+	);
 }
 
 export async function getAssetReadURL(assetId: string): Promise<AssetReadURLResponse> {

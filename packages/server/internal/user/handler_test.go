@@ -28,7 +28,7 @@ func setupUserTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.UserImageBedConfig{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	database.DB = db
@@ -57,6 +57,10 @@ func newUserTestApp(userID uuid.UUID) *fiber.App {
 		return c.Next()
 	})
 	app.Get("/user/me", GetMe)
+	app.Get("/user/image-beds", ListImageBedConfigsHandler)
+	app.Post("/user/image-beds", CreateImageBedConfigHandler)
+	app.Put("/user/image-beds/:id", UpdateImageBedConfigHandler)
+	app.Delete("/user/image-beds/:id", DeleteImageBedConfigHandler)
 	app.Put("/user/profile", UpdateProfileHandler)
 	app.Post("/user/avatar", UploadAvatarHandler)
 	app.Put("/user/avatar/github", UpdateGitHubAvatarHandler)
@@ -108,6 +112,34 @@ func TestUpdateProfileHandler_UpdatesDisplayName(t *testing.T) {
 	}
 	if payload.DisplayName == nil || *payload.DisplayName != "New Name" {
 		t.Fatalf("unexpected displayName: %+v", payload.DisplayName)
+	}
+}
+
+func TestCreateImageBedConfigHandler_StoresConfig(t *testing.T) {
+	db := setupUserTestDB(t)
+	user := seedUser(t, db)
+
+	app := newUserTestApp(user.ID)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/user/image-beds",
+		strings.NewReader(`{"name":"Blog","providerType":"lsky","baseUrl":"https://img.example.com","apiToken":"lsky-token","isEnabled":true,"storageId":3,"strategyId":"posters"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var payload ImageBedConfigDTO
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Name != "Blog" || payload.ProviderType != "lsky" || payload.BaseURL != "https://img.example.com" || payload.APIToken != "lsky-token" || payload.StorageID != 3 || payload.StrategyID != "posters" {
+		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
 
