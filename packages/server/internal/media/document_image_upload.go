@@ -9,10 +9,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -25,8 +28,33 @@ const (
 	documentImageTargetManagedR2 = "managed-r2"
 )
 
-var seeHTTPClient = &http.Client{}
-var lskyHTTPClient = &http.Client{}
+type DocumentImageErrorCode string
+
+const (
+	DocumentImageErrUnsupportedTarget  DocumentImageErrorCode = "unsupported_target"
+	DocumentImageErrProviderNotFound   DocumentImageErrorCode = "provider_not_found"
+	DocumentImageErrProviderConfig     DocumentImageErrorCode = "provider_config_invalid"
+	DocumentImageErrProviderNotReady   DocumentImageErrorCode = "provider_not_configured"
+	DocumentImageErrProviderUploadFail DocumentImageErrorCode = "provider_upload_failed"
+)
+
+type DocumentImageError struct {
+	Code    DocumentImageErrorCode
+	Message string
+}
+
+func (e *DocumentImageError) Error() string {
+	return e.Message
+}
+
+func newDocumentImageError(code DocumentImageErrorCode, message string) error {
+	return &DocumentImageError{
+		Code:    code,
+		Message: message,
+	}
+}
+
+var imageBedHTTPClient = &http.Client{}
 
 type UploadDocumentImageRequest struct {
 	DocumentID uuid.UUID
@@ -66,88 +94,76 @@ func (u *managedDocumentImageUploader) Upload(ctx context.Context, req UploadDoc
 	}, nil
 }
 
-type seeDocumentImageUploader struct {
-	targetID   string
-	apiBaseURL string
-	apiToken   string
+type genericImageBedUploader struct {
+	targetID string
+	provider imagebeds.Provider
+	config   *models.UserImageBedConfig
 }
 
-type seeUploadResponse struct {
-	Success bool   `json:"success"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Images  string `json:"images"`
-	Data    struct {
-		URL string `json:"url"`
-	} `json:"data"`
-}
-
-func (u *seeDocumentImageUploader) Upload(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
-	if strings.TrimSpace(u.apiToken) == "" {
-		return nil, errors.New("S.EE API token is not configured")
-	}
+func (u *genericImageBedUploader) Upload(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
 	if req.FileHeader == nil {
 		return nil, errors.New("file is required")
 	}
 
-	file, err := req.FileHeader.Open()
+	variables, err := buildProviderVariables(u.provider, u.config)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("smfile", req.FileHeader.Filename)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
+	if err := validateProviderVariables(u.provider, variables); err != nil {
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		strings.TrimRight(u.apiBaseURL, "/")+"/upload",
-		body,
-	)
+	requestURL, err := buildRequestURL(u.provider.Upload.URLTemplate, variables, u.provider.Upload.Query)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Authorization", u.apiToken)
-	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := seeHTTPClient.Do(httpReq)
+	body, contentType, err := buildMultipartPayload(req.FileHeader, u.provider, variables)
 	if err != nil {
 		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, strings.ToUpper(u.provider.Upload.Method), requestURL, body)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", contentType)
+	if err := applyRequestHeaders(httpReq, u.provider.Upload.Headers, variables); err != nil {
+		return nil, err
+	}
+
+	resp, err := imageBedHTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, newDocumentImageError(DocumentImageErrProviderUploadFail, err.Error())
 	}
 	defer resp.Body.Close()
 
-	var payload seeUploadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
+	payloadBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, newDocumentImageError(DocumentImageErrProviderUploadFail, err.Error())
 	}
 
-	if resp.StatusCode >= 400 {
-		if payload.Message != "" {
-			return nil, fmt.Errorf("S.EE upload failed: %s", payload.Message)
+	var payload any
+	if len(payloadBytes) > 0 {
+		if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+			return nil, newDocumentImageError(DocumentImageErrProviderUploadFail, "Invalid provider response")
 		}
-		return nil, fmt.Errorf("S.EE upload failed with status %d", resp.StatusCode)
 	}
 
-	uploadedURL := strings.TrimSpace(payload.Data.URL)
-	if uploadedURL == "" {
-		uploadedURL = strings.TrimSpace(payload.Images)
+	success, successErr := evaluateUploadSuccess(u.provider, resp.StatusCode, payload)
+	if successErr != nil {
+		return nil, successErr
 	}
+	uploadedURL := normalizeProviderResultURL(extractResultURL(u.provider.Upload.ResultURLPaths, payload), requestURL)
+	if !success && uploadedURL != "" {
+		success = true
+	}
+	if !success {
+		return nil, newDocumentImageError(DocumentImageErrProviderUploadFail, extractProviderErrorMessage(u.provider, payload))
+	}
+
 	if uploadedURL == "" {
-		if payload.Message != "" {
-			return nil, fmt.Errorf("S.EE upload failed: %s", payload.Message)
-		}
-		return nil, errors.New("S.EE upload did not return a usable URL")
+		return nil, newDocumentImageError(DocumentImageErrProviderUploadFail, "Provider upload did not return a usable URL")
 	}
 
 	return &UploadDocumentImageResult{
@@ -157,103 +173,303 @@ func (u *seeDocumentImageUploader) Upload(ctx context.Context, req UploadDocumen
 	}, nil
 }
 
-type lskyDocumentImageUploader struct {
-	targetID  string
-	apiURL    string
-	apiToken  string
-	storageID int
-	strategy  string
+func buildProviderVariables(provider imagebeds.Provider, config *models.UserImageBedConfig) (map[string]string, error) {
+	values := map[string]string{
+		"providerType": provider.ProviderType,
+		"baseUrl":      strings.TrimSpace(stringPtrValue(config.BaseURL)),
+		"apiToken":     strings.TrimSpace(stringPtrValue(config.APIToken)),
+	}
+
+	if provider.Runtime.BaseURLEnv != "" {
+		if values["baseUrl"] == "" {
+			values["baseUrl"] = strings.TrimSpace(os.Getenv(provider.Runtime.BaseURLEnv))
+		}
+	}
+	if values["baseUrl"] == "" {
+		values["baseUrl"] = strings.TrimSpace(provider.Runtime.DefaultBaseURL)
+	}
+
+	if provider.Runtime.APITokenEnv != "" {
+		if values["apiToken"] == "" {
+			values["apiToken"] = strings.TrimSpace(os.Getenv(provider.Runtime.APITokenEnv))
+		}
+	}
+
+	for key, value := range parseProviderConfigJSON(config.ConfigJSON) {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		values[key] = strings.TrimSpace(value)
+	}
+	values["baseUrl"] = normalizeBaseURL(values["baseUrl"], provider.Upload.URLTemplate)
+
+	return values, nil
 }
 
-type lskyUploadResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	Data    struct {
-		PublicURL string `json:"public_url"`
-		URL       string `json:"url"`
-	} `json:"data"`
+func validateProviderVariables(provider imagebeds.Provider, variables map[string]string) error {
+	for _, field := range provider.Fields {
+		if !field.Required {
+			continue
+		}
+		value := strings.TrimSpace(variables[field.Key])
+		if value == "" {
+			return newDocumentImageError(DocumentImageErrProviderNotReady, fmt.Sprintf("%s %s is required", provider.DisplayName, field.Key))
+		}
+
+		if field.Type == "url" {
+			parsed, err := url.Parse(value)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return newDocumentImageError(DocumentImageErrProviderConfig, fmt.Sprintf("Invalid URL for %s", field.Key))
+			}
+		}
+		if field.Type == "number" {
+			num, err := strconv.Atoi(value)
+			if err != nil || num <= 0 {
+				return newDocumentImageError(DocumentImageErrProviderConfig, fmt.Sprintf("Invalid number for %s", field.Key))
+			}
+		}
+	}
+	return nil
 }
 
-func (u *lskyDocumentImageUploader) Upload(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
-	if strings.TrimSpace(u.apiToken) == "" {
-		return nil, errors.New("Lsky API token is not configured")
-	}
-	if strings.TrimSpace(u.apiURL) == "" {
-		return nil, errors.New("Lsky API url is not configured")
-	}
-	if u.storageID <= 0 {
-		return nil, errors.New("Lsky storage id is not configured")
-	}
-	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
-	}
-
-	file, err := req.FileHeader.Open()
+func buildRequestURL(urlTemplate string, variables map[string]string, queryParams []imagebeds.QueryParam) (string, error) {
+	renderedURL := renderTemplate(urlTemplate, variables)
+	parsedURL, err := url.Parse(renderedURL)
 	if err != nil {
-		return nil, err
+		return "", newDocumentImageError(DocumentImageErrProviderConfig, "Invalid upload url")
+	}
+
+	query := parsedURL.Query()
+	for _, param := range queryParams {
+		renderedValue := strings.TrimSpace(renderTemplate(param.ValueTemplate, variables))
+		if renderedValue == "" {
+			if param.Required {
+				return "", newDocumentImageError(DocumentImageErrProviderNotReady, fmt.Sprintf("Missing query parameter: %s", param.Key))
+			}
+			continue
+		}
+		query.Set(param.Key, renderedValue)
+	}
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String(), nil
+}
+
+func buildMultipartPayload(fileHeader *multipart.FileHeader, provider imagebeds.Provider, variables map[string]string) (*bytes.Buffer, string, error) {
+	file, err := fileHeader.Open()
+	if err != nil {
+		return nil, "", err
 	}
 	defer file.Close()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", req.FileHeader.Filename)
+	filePart, err := writer.CreateFormFile(provider.Upload.FileField, fileHeader.Filename)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, err
+	if _, err := io.Copy(filePart, file); err != nil {
+		return nil, "", err
 	}
-	if err := writer.WriteField("storage_id", fmt.Sprintf("%d", u.storageID)); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(u.strategy) != "" {
-		if err := writer.WriteField("strategy_id", strings.TrimSpace(u.strategy)); err != nil {
-			return nil, err
+
+	for _, field := range provider.Upload.FormFields {
+		renderedValue := strings.TrimSpace(renderTemplate(field.ValueTemplate, variables))
+		if renderedValue == "" {
+			if field.Required {
+				return nil, "", newDocumentImageError(DocumentImageErrProviderNotReady, fmt.Sprintf("Missing form field: %s", field.Key))
+			}
+			if field.OmitIfEmpty {
+				continue
+			}
+		}
+		if err := writer.WriteField(field.Key, renderedValue); err != nil {
+			return nil, "", err
 		}
 	}
+
 	if err := writer.Close(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	return body, writer.FormDataContentType(), nil
+}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.apiURL, body)
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+u.apiToken)
-	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := lskyHTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var payload lskyUploadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode >= 400 || !strings.EqualFold(strings.TrimSpace(payload.Status), "success") {
-		if payload.Message != "" {
-			return nil, fmt.Errorf("Lsky upload failed: %s", payload.Message)
+func applyRequestHeaders(req *http.Request, headers []imagebeds.RequestHeader, variables map[string]string) error {
+	for _, header := range headers {
+		value := strings.TrimSpace(renderTemplate(header.ValueTemplate, variables))
+		if value == "" {
+			return newDocumentImageError(DocumentImageErrProviderNotReady, fmt.Sprintf("Missing header value for %s", header.Key))
 		}
-		return nil, errors.New("Lsky upload failed")
+		req.Header.Set(header.Key, value)
+	}
+	return nil
+}
+
+func evaluateUploadSuccess(provider imagebeds.Provider, statusCode int, payload any) (bool, error) {
+	if statusCode >= 400 {
+		return false, nil
 	}
 
-	uploadedURL := strings.TrimSpace(payload.Data.PublicURL)
-	if uploadedURL == "" {
-		uploadedURL = strings.TrimSpace(payload.Data.URL)
-	}
-	if uploadedURL == "" {
-		return nil, errors.New("Lsky upload did not return a usable URL")
+	successPath := strings.TrimSpace(provider.Upload.SuccessJSONPath)
+	if successPath == "" {
+		return true, nil
 	}
 
-	return &UploadDocumentImageResult{
-		TargetID: u.targetID,
-		Mode:     documentImageModeExternalURL,
-		URL:      uploadedURL,
-	}, nil
+	raw := lookupJSONPath(payload, successPath)
+	if raw == nil {
+		return false, nil
+	}
+	expected := strings.ToLower(strings.TrimSpace(provider.Upload.SuccessEquals))
+	actual := strings.ToLower(strings.TrimSpace(stringifyAny(raw)))
+	return actual == expected, nil
+}
+
+func extractProviderErrorMessage(provider imagebeds.Provider, payload any) string {
+	for _, path := range provider.Upload.ErrorMessagePaths {
+		value := strings.TrimSpace(stringifyAny(lookupJSONPath(payload, path)))
+		if value != "" {
+			return value
+		}
+	}
+	return "Provider upload failed"
+}
+
+func extractResultURL(paths []string, payload any) string {
+	for _, path := range paths {
+		value := strings.TrimSpace(stringifyAny(lookupJSONPath(payload, path)))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeProviderResultURL(rawURL string, requestURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return "https:" + trimmed
+	}
+
+	base, err := url.Parse(requestURL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return trimmed
+	}
+
+	if strings.HasPrefix(trimmed, "/") {
+		return base.Scheme + "://" + base.Host + trimmed
+	}
+	return trimmed
+}
+
+func lookupJSONPath(payload any, path string) any {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+
+	current := payload
+	for _, segment := range strings.Split(path, ".") {
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		next, exists := obj[segment]
+		if !exists {
+			return nil
+		}
+		current = next
+	}
+	return current
+}
+
+func stringifyAny(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case float64:
+		return fmt.Sprintf("%.0f", typed)
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
+}
+
+func renderTemplate(template string, values map[string]string) string {
+	rendered := template
+	for key, value := range values {
+		rendered = strings.ReplaceAll(rendered, "{{"+key+"}}", value)
+	}
+	return rendered
+}
+
+func normalizeBaseURL(baseURL string, urlTemplate string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.Contains(urlTemplate, "{{baseUrl}}/api/v2") && strings.HasSuffix(normalized, "/api/v2") {
+		normalized = strings.TrimSuffix(normalized, "/api/v2")
+	}
+	if strings.Contains(urlTemplate, "{{baseUrl}}/api/v1") && strings.HasSuffix(normalized, "/api/v1") {
+		normalized = strings.TrimSuffix(normalized, "/api/v1")
+	}
+	if strings.Contains(urlTemplate, "{{baseUrl}}/upload") && strings.HasSuffix(normalized, "/upload") {
+		normalized = strings.TrimSuffix(normalized, "/upload")
+	}
+	return normalized
+}
+
+func parseProviderConfigJSON(raw *string) map[string]string {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return map[string]string{}
+	}
+
+	var payload struct {
+		Fields map[string]any `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(*raw), &payload); err == nil && len(payload.Fields) > 0 {
+		values := map[string]string{}
+		for key, value := range payload.Fields {
+			stringified := strings.TrimSpace(stringifyAny(value))
+			if stringified == "" {
+				continue
+			}
+			if strings.HasSuffix(stringified, ".0") {
+				stringified = strings.TrimSuffix(stringified, ".0")
+			}
+			values[key] = stringified
+		}
+		return values
+	}
+
+	var legacy map[string]any
+	if err := json.Unmarshal([]byte(*raw), &legacy); err != nil {
+		return map[string]string{}
+	}
+
+	values := map[string]string{}
+	if storage, exists := legacy["storageId"]; exists {
+		stringified := strings.TrimSpace(stringifyAny(storage))
+		if strings.HasSuffix(stringified, ".0") {
+			stringified = strings.TrimSuffix(stringified, ".0")
+		}
+		if stringified != "" {
+			values["storageId"] = stringified
+		}
+	}
+	if strategy, exists := legacy["strategyId"]; exists {
+		stringified := strings.TrimSpace(stringifyAny(strategy))
+		if stringified != "" {
+			values["strategyId"] = stringified
+		}
+	}
+	return values
 }
 
 func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error) {
@@ -276,7 +492,7 @@ func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error
 		return document.PreferredImageTargetID, nil
 	default:
 		if _, err := uuid.Parse(strings.TrimSpace(document.PreferredImageTargetID)); err != nil {
-			return "", errors.New("document image target is not supported")
+			return "", newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
 		}
 		return strings.TrimSpace(document.PreferredImageTargetID), nil
 	}
@@ -289,46 +505,25 @@ func newDocumentImageUploader(userID uuid.UUID, targetID string) (documentImageU
 	default:
 		configID, err := uuid.Parse(targetID)
 		if err != nil {
-			return nil, errors.New("document image target is not supported")
+			return nil, newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
 		}
+
 		config, err := getUserImageBedConfig(userID, configID)
 		if err != nil {
 			return nil, err
 		}
-		switch config.ProviderType {
-		case "see":
-			apiToken, err := getEffectiveSeeAPIToken(config)
-			if err != nil {
-				return nil, err
-			}
-			return &seeDocumentImageUploader{
-				targetID:   config.ID.String(),
-				apiBaseURL: getSeeAPIBaseURL(),
-				apiToken:   apiToken,
-			}, nil
-		case "lsky":
-			apiURL, apiToken, storageID, strategy, err := buildLskyUploadConfig(config)
-			if err != nil {
-				return nil, err
-			}
-			return &lskyDocumentImageUploader{
-				targetID:  config.ID.String(),
-				apiURL:    apiURL,
-				apiToken:  apiToken,
-				storageID: storageID,
-				strategy:  strategy,
-			}, nil
-		default:
-			return nil, errors.New("document image target is not supported")
-		}
-	}
-}
 
-func getSeeAPIBaseURL() string {
-	if value := strings.TrimSpace(os.Getenv("SEE_API_BASE_URL")); value != "" {
-		return value
+		provider, ok := imagebeds.GetProviderByType(config.ProviderType)
+		if !ok {
+			return nil, newDocumentImageError(DocumentImageErrProviderNotFound, "provider is not registered")
+		}
+
+		return &genericImageBedUploader{
+			targetID: config.ID.String(),
+			provider: provider,
+			config:   config,
+		}, nil
 	}
-	return "https://s.ee/api/v1/file"
 }
 
 func getUserImageBedConfig(userID, configID uuid.UUID) (*models.UserImageBedConfig, error) {
@@ -336,65 +531,15 @@ func getUserImageBedConfig(userID, configID uuid.UUID) (*models.UserImageBedConf
 	if err := database.DB.
 		Where("id = ? AND user_id = ? AND deleted_at IS NULL", configID, userID).
 		First(&config).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, newDocumentImageError(DocumentImageErrUnsupportedTarget, "image bed config not found")
+		}
 		return nil, err
 	}
 	if !config.IsEnabled {
-		return nil, errors.New("image bed config is disabled")
+		return nil, newDocumentImageError(DocumentImageErrProviderNotReady, "image bed config is disabled")
 	}
 	return &config, nil
-}
-
-func buildLskyUploadConfig(config *models.UserImageBedConfig) (string, string, int, string, error) {
-	apiURL := strings.TrimRight(strings.TrimSpace(stringPtrValue(config.BaseURL)), "/")
-	if apiURL == "" {
-		apiURL = strings.TrimRight(strings.TrimSpace(os.Getenv("LSKY_API_URL")), "/")
-	}
-	if apiURL == "" {
-		return "", "", 0, "", errors.New("Lsky API url is not configured")
-	}
-	if strings.HasSuffix(apiURL, "/upload") {
-		// keep as-is
-	} else if strings.HasSuffix(apiURL, "/api/v1") || strings.HasSuffix(apiURL, "/api/v2") {
-		apiURL = apiURL + "/upload"
-	} else {
-		apiURL = apiURL + "/api/v2/upload"
-	}
-
-	apiToken := strings.TrimSpace(stringPtrValue(config.APIToken))
-	if apiToken == "" {
-		apiToken = strings.TrimSpace(os.Getenv("LSKY_API_TOKEN"))
-	}
-	if apiToken == "" {
-		return "", "", 0, "", errors.New("Lsky API token is not configured")
-	}
-
-	storageID := 0
-	strategy := ""
-	if config.ConfigJSON != nil && strings.TrimSpace(*config.ConfigJSON) != "" {
-		var payload struct {
-			StorageID  int    `json:"storageId"`
-			StrategyID string `json:"strategyId"`
-		}
-		if err := json.Unmarshal([]byte(*config.ConfigJSON), &payload); err == nil {
-			storageID = payload.StorageID
-			strategy = strings.TrimSpace(payload.StrategyID)
-		}
-	}
-	if storageID <= 0 {
-		return "", "", 0, "", errors.New("Lsky storage id is not configured")
-	}
-
-	return apiURL, apiToken, storageID, strategy, nil
-}
-
-func getEffectiveSeeAPIToken(config *models.UserImageBedConfig) (string, error) {
-	if value := strings.TrimSpace(stringPtrValue(config.APIToken)); value != "" {
-		return value, nil
-	}
-	if value := strings.TrimSpace(os.Getenv("SEE_API_TOKEN")); value != "" {
-		return value, nil
-	}
-	return "", errors.New("S.EE API token is not configured")
 }
 
 func stringPtrValue(value *string) string {

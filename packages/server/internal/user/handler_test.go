@@ -57,6 +57,7 @@ func newUserTestApp(userID uuid.UUID) *fiber.App {
 		return c.Next()
 	})
 	app.Get("/user/me", GetMe)
+	app.Get("/user/image-beds/providers", ListImageBedProvidersHandler)
 	app.Get("/user/image-beds", ListImageBedConfigsHandler)
 	app.Post("/user/image-beds", CreateImageBedConfigHandler)
 	app.Put("/user/image-beds/:id", UpdateImageBedConfigHandler)
@@ -140,6 +141,59 @@ func TestCreateImageBedConfigHandler_StoresConfig(t *testing.T) {
 	}
 	if payload.Name != "Blog" || payload.ProviderType != "lsky" || payload.BaseURL != "https://img.example.com" || payload.APIToken != "lsky-token" || payload.StorageID != 3 || payload.StrategyID != "posters" {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestCreateImageBedConfigHandler_StoresImgBBConfig(t *testing.T) {
+	db := setupUserTestDB(t)
+	user := seedUser(t, db)
+
+	app := newUserTestApp(user.ID)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/user/image-beds",
+		strings.NewReader(`{"name":"ImgBB","providerType":"imgbb","apiToken":"imgbb-key","isEnabled":true}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var payload ImageBedConfigDTO
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Name != "ImgBB" || payload.ProviderType != "imgbb" || payload.APIToken != "imgbb-key" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestListImageBedProvidersHandler_ReturnsBuiltins(t *testing.T) {
+	db := setupUserTestDB(t)
+	user := seedUser(t, db)
+
+	app := newUserTestApp(user.ID)
+	req := httptest.NewRequest(http.MethodGet, "/user/image-beds/providers", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Items []ImageBedProviderDTO `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Items) < 2 {
+		t.Fatalf("expected built-in providers, got %+v", payload.Items)
 	}
 }
 

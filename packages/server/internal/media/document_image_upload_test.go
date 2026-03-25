@@ -80,9 +80,17 @@ func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;") {
 			t.Fatalf("expected multipart form upload, got %q", r.Header.Get("Content-Type"))
 		}
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		fileHeaders := r.MultipartForm.File["file"]
+		if len(fileHeaders) != 1 {
+			t.Fatalf("expected one file part, got %d", len(fileHeaders))
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"success": true,
+			"code": 200,
 			"data": map[string]any{
+				"upload_status": 1,
 				"url": "https://s.ee/example.png",
 			},
 		})
@@ -187,6 +195,153 @@ func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
 		t.Fatalf("expected external url mode, got %s", result.Mode)
 	}
 	if result.URL != "https://cdn.example.test/demo.png" {
+		t.Fatalf("unexpected normalized url: %s", result.URL)
+	}
+}
+
+func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/1/upload" {
+			t.Fatalf("expected /1/upload, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("key"); got != "imgbb-key" {
+			t.Fatalf("expected key=imgbb-key, got %q", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("expected accept header, got %q", got)
+		}
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;") {
+			t.Fatalf("expected multipart form upload, got %q", r.Header.Get("Content-Type"))
+		}
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		fileHeaders := r.MultipartForm.File["image"]
+		if len(fileHeaders) != 1 {
+			t.Fatalf("expected one image part, got %d", len(fileHeaders))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"status":  200,
+			"data": map[string]any{
+				"url": "https://i.ibb.co/demo/demo.png",
+			},
+		})
+	}))
+	defer server.Close()
+
+	if err := db.Create(&models.User{ID: userID}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	config := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       userID,
+		Name:         "imgbb",
+		ProviderType: "imgbb",
+		APIToken:     stringPtr("imgbb-key"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&config).Error; err != nil {
+		t.Fatalf("create image bed config: %v", err)
+	}
+	docID := seedOwnedDocumentWithImageTarget(t, db, userID, config.ID.String())
+	t.Setenv("IMGBB_API_BASE_URL", server.URL+"/1")
+
+	header := makeFileHeader(t, "file", "public.png", []byte("imgbb"))
+	result, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
+		DocumentID: docID,
+		UserID:     userID,
+		FileHeader: header,
+	})
+	if err != nil {
+		t.Fatalf("upload document image: %v", err)
+	}
+
+	if result.TargetID != config.ID.String() {
+		t.Fatalf("expected config target, got %s", result.TargetID)
+	}
+	if result.Mode != documentImageModeExternalURL {
+		t.Fatalf("expected external url mode, got %s", result.Mode)
+	}
+	if result.URL != "https://i.ibb.co/demo/demo.png" {
+		t.Fatalf("unexpected normalized url: %s", result.URL)
+	}
+}
+
+func TestUploadDocumentImage_UsesCheveretoForUserConfigTargets(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/1/upload" {
+			t.Fatalf("expected /api/1/upload, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("key"); got != "chevereto-key" {
+			t.Fatalf("expected key=chevereto-key, got %q", got)
+		}
+		if got := r.URL.Query().Get("format"); got != "json" {
+			t.Fatalf("expected format=json, got %q", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("expected accept header, got %q", got)
+		}
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		fileHeaders := r.MultipartForm.File["source"]
+		if len(fileHeaders) != 1 {
+			t.Fatalf("expected one source part, got %d", len(fileHeaders))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status_code": 200,
+			"image": map[string]any{
+				"url": "https://img.example.test/uploads/chevereto-demo.png",
+			},
+		})
+	}))
+	defer server.Close()
+
+	if err := db.Create(&models.User{ID: userID}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	config := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       userID,
+		Name:         "chevereto",
+		ProviderType: "chevereto",
+		BaseURL:      stringPtr(server.URL),
+		APIToken:     stringPtr("chevereto-key"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&config).Error; err != nil {
+		t.Fatalf("create image bed config: %v", err)
+	}
+	docID := seedOwnedDocumentWithImageTarget(t, db, userID, config.ID.String())
+
+	header := makeFileHeader(t, "file", "public.png", []byte("chevereto"))
+	result, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
+		DocumentID: docID,
+		UserID:     userID,
+		FileHeader: header,
+	})
+	if err != nil {
+		t.Fatalf("upload document image: %v", err)
+	}
+
+	if result.TargetID != config.ID.String() {
+		t.Fatalf("expected config target, got %s", result.TargetID)
+	}
+	if result.Mode != documentImageModeExternalURL {
+		t.Fatalf("expected external url mode, got %s", result.Mode)
+	}
+	if result.URL != "https://img.example.test/uploads/chevereto-demo.png" {
 		t.Fatalf("unexpected normalized url: %s", result.URL)
 	}
 }

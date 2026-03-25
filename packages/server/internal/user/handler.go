@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
@@ -37,24 +38,46 @@ type UpdateGitHubAvatarRequest struct {
 }
 
 type ImageBedConfigDTO struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	ProviderType string    `json:"providerType"`
-	BaseURL      string    `json:"baseUrl"`
-	APIToken     string    `json:"apiToken"`
-	IsEnabled    bool      `json:"isEnabled"`
-	StorageID    int       `json:"storageId,omitempty"`
-	StrategyID   string    `json:"strategyId,omitempty"`
+	ID           uuid.UUID         `json:"id"`
+	Name         string            `json:"name"`
+	ProviderType string            `json:"providerType"`
+	BaseURL      string            `json:"baseUrl"`
+	APIToken     string            `json:"apiToken"`
+	IsEnabled    bool              `json:"isEnabled"`
+	StorageID    int               `json:"storageId,omitempty"`
+	StrategyID   string            `json:"strategyId,omitempty"`
+	FieldValues  map[string]string `json:"fieldValues,omitempty"`
 }
 
 type UpsertImageBedConfigRequest struct {
-	Name         string `json:"name"`
-	ProviderType string `json:"providerType"`
-	BaseURL      string `json:"baseUrl"`
-	APIToken     string `json:"apiToken"`
-	IsEnabled    bool   `json:"isEnabled"`
-	StorageID    int    `json:"storageId"`
-	StrategyID   string `json:"strategyId"`
+	Name         string            `json:"name"`
+	ProviderType string            `json:"providerType"`
+	BaseURL      string            `json:"baseUrl"`
+	APIToken     string            `json:"apiToken"`
+	IsEnabled    bool              `json:"isEnabled"`
+	StorageID    int               `json:"storageId"`
+	StrategyID   string            `json:"strategyId"`
+	FieldValues  map[string]string `json:"fieldValues"`
+}
+
+type ImageBedProviderFieldDTO struct {
+	Key            string `json:"key"`
+	Type           string `json:"type"`
+	Label          string `json:"label"`
+	LabelKey       string `json:"labelKey,omitempty"`
+	Placeholder    string `json:"placeholder"`
+	PlaceholderKey string `json:"placeholderKey,omitempty"`
+	HelpText       string `json:"helpText,omitempty"`
+	HelpTextKey    string `json:"helpTextKey,omitempty"`
+	InputMode      string `json:"inputMode,omitempty"`
+	Required       bool   `json:"required"`
+}
+
+type ImageBedProviderDTO struct {
+	ProviderType string                     `json:"providerType"`
+	DisplayName  string                     `json:"displayName"`
+	Description  string                     `json:"description"`
+	Fields       []ImageBedProviderFieldDTO `json:"fields"`
 }
 
 // GetMe handles the GET /api/v1/user/me request.
@@ -129,6 +152,37 @@ func ListImageBedConfigsHandler(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"items": result})
 }
 
+func ListImageBedProvidersHandler(c *fiber.Ctx) error {
+	providers := imagebeds.ListProviders()
+	items := make([]ImageBedProviderDTO, 0, len(providers))
+	for _, provider := range providers {
+		fieldItems := make([]ImageBedProviderFieldDTO, 0, len(provider.Fields))
+		for _, field := range provider.Fields {
+			fieldItems = append(fieldItems, ImageBedProviderFieldDTO{
+				Key:            field.Key,
+				Type:           field.Type,
+				Label:          field.Label,
+				LabelKey:       field.LabelKey,
+				Placeholder:    field.Placeholder,
+				PlaceholderKey: field.PlaceholderKey,
+				HelpText:       field.HelpText,
+				HelpTextKey:    field.HelpTextKey,
+				InputMode:      field.InputMode,
+				Required:       field.Required,
+			})
+		}
+
+		items = append(items, ImageBedProviderDTO{
+			ProviderType: provider.ProviderType,
+			DisplayName:  provider.DisplayName,
+			Description:  provider.Description,
+			Fields:       fieldItems,
+		})
+	}
+
+	return c.JSON(fiber.Map{"items": items})
+}
+
 func CreateImageBedConfigHandler(c *fiber.Ctx) error {
 	userID, err := getUserIDFromContext(c)
 	if err != nil {
@@ -152,14 +206,14 @@ func CreateImageBedConfigHandler(c *fiber.Ctx) error {
 		IsEnabled:    req.IsEnabled,
 		StorageID:    req.StorageID,
 		StrategyID:   req.StrategyID,
+		FieldValues:  req.FieldValues,
 	})
 	if err != nil {
-		switch err.Error() {
-		case "image bed name is required", "image bed name is too long", "unsupported image bed provider", "invalid lsky api url", "S.EE API token is required", "Lsky API url is required", "Lsky API token is required", "Lsky storage id is required":
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		var configErr *ImageBedConfigError
+		if errors.As(err, &configErr) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": configErr.Message})
 		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(imageBedConfigToDTO(*config))
@@ -193,13 +247,15 @@ func UpdateImageBedConfigHandler(c *fiber.Ctx) error {
 		IsEnabled:    req.IsEnabled,
 		StorageID:    req.StorageID,
 		StrategyID:   req.StrategyID,
+		FieldValues:  req.FieldValues,
 	})
 	if err != nil {
+		var configErr *ImageBedConfigError
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Image bed config not found."})
-		case err.Error() == "image bed name is required" || err.Error() == "image bed name is too long" || err.Error() == "unsupported image bed provider" || err.Error() == "invalid lsky api url" || err.Error() == "S.EE API token is required" || err.Error() == "Lsky API url is required" || err.Error() == "Lsky API token is required" || err.Error() == "Lsky storage id is required":
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		case errors.As(err, &configErr):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": configErr.Message})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -376,6 +432,7 @@ func imageBedConfigToDTO(config ImageBedConfig) ImageBedConfigDTO {
 		IsEnabled:    config.IsEnabled,
 		StorageID:    config.StorageID,
 		StrategyID:   config.StrategyID,
+		FieldValues:  config.FieldValues,
 	}
 }
 

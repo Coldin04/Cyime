@@ -9,10 +9,12 @@ import (
 	"mime/multipart"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
@@ -29,10 +31,36 @@ type OverviewStats struct {
 	Unlimited            bool
 }
 
+type ImageBedConfigErrorCode string
+
 const (
-	ImageBedProviderSEE  = "see"
-	ImageBedProviderLsky = "lsky"
+	ImageBedConfigErrNameRequired        ImageBedConfigErrorCode = "image_bed_name_required"
+	ImageBedConfigErrNameTooLong         ImageBedConfigErrorCode = "image_bed_name_too_long"
+	ImageBedConfigErrUnsupportedProvider ImageBedConfigErrorCode = "image_bed_unsupported_provider"
+	ImageBedConfigErrFieldRequired       ImageBedConfigErrorCode = "image_bed_field_required"
+	ImageBedConfigErrFieldInvalid        ImageBedConfigErrorCode = "image_bed_field_invalid"
 )
+
+type ImageBedConfigError struct {
+	Code    ImageBedConfigErrorCode
+	Field   string
+	Message string
+}
+
+func (e *ImageBedConfigError) Error() string {
+	return e.Message
+}
+
+func newImageBedConfigError(code ImageBedConfigErrorCode, field string, message string) error {
+	return &ImageBedConfigError{
+		Code:    code,
+		Field:   field,
+		Message: message,
+	}
+}
+
+type ImageBedProviderField = imagebeds.ProviderField
+type ImageBedProvider = imagebeds.Provider
 
 func GetUserByID(userID uuid.UUID) (*models.User, error) {
 	var user models.User
@@ -112,6 +140,7 @@ type ImageBedConfig struct {
 	IsEnabled    bool
 	StorageID    int
 	StrategyID   string
+	FieldValues  map[string]string
 }
 
 type UpsertImageBedConfigInput struct {
@@ -122,11 +151,11 @@ type UpsertImageBedConfigInput struct {
 	IsEnabled    bool
 	StorageID    int
 	StrategyID   string
+	FieldValues  map[string]string
 }
 
-type imageBedConfigExtras struct {
-	StorageID  int    `json:"storageId,omitempty"`
-	StrategyID string `json:"strategyId,omitempty"`
+type imageBedConfigPayload struct {
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 func ListImageBedConfigs(userID uuid.UUID) ([]ImageBedConfig, error) {
@@ -157,7 +186,7 @@ func CreateImageBedConfig(userID uuid.UUID, input UpsertImageBedConfigInput) (*I
 		ProviderType: normalized.ProviderType,
 		BaseURL:      stringPtrOrNil(normalized.BaseURL),
 		APIToken:     stringPtrOrNil(normalized.APIToken),
-		ConfigJSON:   stringPtrOrNil(buildImageBedConfigJSON(normalized.StorageID, normalized.StrategyID)),
+		ConfigJSON:   stringPtrOrNil(buildImageBedConfigJSON(normalized.FieldValues)),
 		IsEnabled:    normalized.IsEnabled,
 	}
 	if err := database.DB.Create(&row).Error; err != nil {
@@ -186,7 +215,7 @@ func UpdateImageBedConfig(userID uuid.UUID, configID uuid.UUID, input UpsertImag
 		"provider_type": normalized.ProviderType,
 		"base_url":      nullableTrimmedString(normalized.BaseURL),
 		"api_token":     nullableTrimmedString(normalized.APIToken),
-		"config_json":   nullableTrimmedString(buildImageBedConfigJSON(normalized.StorageID, normalized.StrategyID)),
+		"config_json":   nullableTrimmedString(buildImageBedConfigJSON(normalized.FieldValues)),
 		"is_enabled":    normalized.IsEnabled,
 	}
 	if err := database.DB.Model(&row).Updates(updates).Error; err != nil {
@@ -231,91 +260,183 @@ func GetImageBedConfigByID(userID uuid.UUID, configID uuid.UUID) (*ImageBedConfi
 func normalizeImageBedConfigInput(input UpsertImageBedConfigInput) (*UpsertImageBedConfigInput, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		return nil, errors.New("image bed name is required")
+		return nil, newImageBedConfigError(ImageBedConfigErrNameRequired, "name", "image bed name is required")
 	}
 	if len([]rune(name)) > 120 {
-		return nil, errors.New("image bed name is too long")
+		return nil, newImageBedConfigError(ImageBedConfigErrNameTooLong, "name", "image bed name is too long")
 	}
 
 	providerType := strings.TrimSpace(input.ProviderType)
-	switch providerType {
-	case ImageBedProviderSEE:
-		if strings.TrimSpace(input.APIToken) == "" {
-			return nil, errors.New("S.EE API token is required")
-		}
-	case ImageBedProviderLsky:
-		baseURL := strings.TrimSpace(input.BaseURL)
-		if baseURL == "" {
-			return nil, errors.New("Lsky API url is required")
-		}
-		parsed, err := url.Parse(baseURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return nil, errors.New("invalid lsky api url")
-		}
-		input.BaseURL = strings.TrimRight(parsed.String(), "/")
-		if strings.TrimSpace(input.APIToken) == "" {
-			return nil, errors.New("Lsky API token is required")
-		}
-		if input.StorageID <= 0 {
-			return nil, errors.New("Lsky storage id is required")
-		}
-	default:
-		return nil, errors.New("unsupported image bed provider")
+	provider, ok := imagebeds.GetProviderByType(providerType)
+	if !ok {
+		return nil, newImageBedConfigError(ImageBedConfigErrUnsupportedProvider, "providerType", "unsupported image bed provider")
 	}
 
-	if providerType != ImageBedProviderLsky {
-		input.BaseURL = ""
-		input.StorageID = 0
-		input.StrategyID = ""
+	fieldValues := normalizeFieldValues(input)
+	for _, field := range provider.Fields {
+		value := strings.TrimSpace(fieldValues[field.Key])
+		if field.Required && value == "" {
+			return nil, newImageBedConfigError(ImageBedConfigErrFieldRequired, field.Key, fmt.Sprintf("%s is required", field.Key))
+		}
+		if value == "" {
+			continue
+		}
+		switch field.Type {
+		case "url":
+			parsed, err := url.Parse(value)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return nil, newImageBedConfigError(ImageBedConfigErrFieldInvalid, field.Key, fmt.Sprintf("invalid url for %s", field.Key))
+			}
+			fieldValues[field.Key] = strings.TrimRight(parsed.String(), "/")
+		case "number":
+			num, err := strconv.Atoi(value)
+			if err != nil || num <= 0 {
+				return nil, newImageBedConfigError(ImageBedConfigErrFieldInvalid, field.Key, fmt.Sprintf("invalid number for %s", field.Key))
+			}
+			fieldValues[field.Key] = strconv.Itoa(num)
+		default:
+			fieldValues[field.Key] = value
+		}
 	}
 
 	input.Name = name
 	input.ProviderType = providerType
-	input.APIToken = strings.TrimSpace(input.APIToken)
-	input.StrategyID = strings.TrimSpace(input.StrategyID)
+	input.FieldValues = fieldValues
+	input.BaseURL = strings.TrimSpace(fieldValues["baseUrl"])
+	input.APIToken = strings.TrimSpace(fieldValues["apiToken"])
+	input.StrategyID = strings.TrimSpace(fieldValues["strategyId"])
+	input.StorageID = 0
+	if storageIDRaw := strings.TrimSpace(fieldValues["storageId"]); storageIDRaw != "" {
+		storageID, _ := strconv.Atoi(storageIDRaw)
+		input.StorageID = storageID
+	}
 	return &input, nil
 }
 
 func imageBedModelToConfig(row models.UserImageBedConfig) ImageBedConfig {
-	extras := parseImageBedConfigJSON(row.ConfigJSON)
+	fieldValues := parseImageBedConfigJSON(row.ConfigJSON)
+	baseURL := trimStringPtr(row.BaseURL)
+	apiToken := trimStringPtr(row.APIToken)
+	if baseURL != "" && strings.TrimSpace(fieldValues["baseUrl"]) == "" {
+		fieldValues["baseUrl"] = baseURL
+	}
+	if apiToken != "" && strings.TrimSpace(fieldValues["apiToken"]) == "" {
+		fieldValues["apiToken"] = apiToken
+	}
+
+	storageID := 0
+	if storageIDRaw := strings.TrimSpace(fieldValues["storageId"]); storageIDRaw != "" {
+		parsed, err := strconv.Atoi(storageIDRaw)
+		if err == nil {
+			storageID = parsed
+		}
+	}
+	strategyID := strings.TrimSpace(fieldValues["strategyId"])
+
 	return ImageBedConfig{
 		ID:           row.ID,
 		Name:         row.Name,
 		ProviderType: row.ProviderType,
-		BaseURL:      trimStringPtr(row.BaseURL),
-		APIToken:     trimStringPtr(row.APIToken),
+		BaseURL:      baseURL,
+		APIToken:     apiToken,
 		IsEnabled:    row.IsEnabled,
-		StorageID:    extras.StorageID,
-		StrategyID:   extras.StrategyID,
+		StorageID:    storageID,
+		StrategyID:   strategyID,
+		FieldValues:  fieldValues,
 	}
 }
 
-func parseImageBedConfigJSON(value *string) imageBedConfigExtras {
+func parseImageBedConfigJSON(value *string) map[string]string {
 	if value == nil || strings.TrimSpace(*value) == "" {
-		return imageBedConfigExtras{}
+		return map[string]string{}
 	}
 
-	var extras imageBedConfigExtras
-	if err := json.Unmarshal([]byte(*value), &extras); err != nil {
-		return imageBedConfigExtras{}
+	var payload imageBedConfigPayload
+	if err := json.Unmarshal([]byte(*value), &payload); err == nil && len(payload.Fields) > 0 {
+		return normalizeFieldValueMap(payload.Fields)
 	}
-	return extras
+
+	var legacy map[string]any
+	if err := json.Unmarshal([]byte(*value), &legacy); err != nil {
+		return map[string]string{}
+	}
+
+	fieldValues := map[string]string{}
+	if fieldsRaw, ok := legacy["fields"]; ok {
+		if fields, ok := fieldsRaw.(map[string]any); ok {
+			for key, raw := range fields {
+				stringified := strings.TrimSpace(fmt.Sprintf("%v", raw))
+				if stringified != "" {
+					fieldValues[key] = stringified
+				}
+			}
+		}
+	}
+	if storageRaw, ok := legacy["storageId"]; ok {
+		stringified := strings.TrimSpace(fmt.Sprintf("%v", storageRaw))
+		stringified = strings.TrimSuffix(stringified, ".0")
+		if stringified != "" {
+			fieldValues["storageId"] = stringified
+		}
+	}
+	if strategyRaw, ok := legacy["strategyId"]; ok {
+		stringified := strings.TrimSpace(fmt.Sprintf("%v", strategyRaw))
+		if stringified != "" {
+			fieldValues["strategyId"] = stringified
+		}
+	}
+	return normalizeFieldValueMap(fieldValues)
 }
 
-func buildImageBedConfigJSON(storageID int, strategyID string) string {
-	extras := imageBedConfigExtras{
-		StorageID:  storageID,
-		StrategyID: strings.TrimSpace(strategyID),
-	}
-	if extras.StrategyID == "" && extras.StorageID == 0 {
+func buildImageBedConfigJSON(fieldValues map[string]string) string {
+	normalized := normalizeFieldValueMap(fieldValues)
+	if len(normalized) == 0 {
 		return ""
 	}
 
-	payload, err := json.Marshal(extras)
+	payload, err := json.Marshal(imageBedConfigPayload{
+		Fields: normalized,
+	})
 	if err != nil {
 		return ""
 	}
 	return string(payload)
+}
+
+func normalizeFieldValues(input UpsertImageBedConfigInput) map[string]string {
+	values := normalizeFieldValueMap(input.FieldValues)
+
+	if trimmed := strings.TrimSpace(input.BaseURL); trimmed != "" {
+		values["baseUrl"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(input.APIToken); trimmed != "" {
+		values["apiToken"] = trimmed
+	}
+	if input.StorageID > 0 {
+		values["storageId"] = strconv.Itoa(input.StorageID)
+	}
+	if trimmed := strings.TrimSpace(input.StrategyID); trimmed != "" {
+		values["strategyId"] = trimmed
+	}
+
+	return values
+}
+
+func normalizeFieldValueMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return map[string]string{}
+	}
+
+	values := make(map[string]string, len(input))
+	for key, value := range input {
+		trimmedKey := strings.TrimSpace(key)
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedKey == "" || trimmedValue == "" {
+			continue
+		}
+		values[trimmedKey] = trimmedValue
+	}
+	return values
 }
 
 func ResolveAvatarURL(baseURL string, user *models.User) (*string, error) {

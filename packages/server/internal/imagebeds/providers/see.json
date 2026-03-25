@@ -1,0 +1,41 @@
+{
+  "providerType": "see",
+  "displayName": "S.EE",
+  "description": "S.EE compatible image bed",
+  "fields": [
+    {
+      "key": "apiToken",
+      "type": "password",
+      "label": "API Token",
+      "labelKey": "user_image_beds_api_token_label",
+      "placeholder": "Enter S.EE API token",
+      "placeholderKey": "user_image_beds_api_token_placeholder",
+      "helpText": "在 S.EE 后台申请上传 Token，并粘贴到这里",
+      "helpTextKey": "user_image_beds_api_token_help",
+      "inputMode": "text",
+      "required": true
+    }
+  ],
+  "runtime": {
+    "defaultBaseUrl": "https://s.ee/api/v1/file",
+    "baseUrlEnv": "SEE_API_BASE_URL",
+    "apiTokenEnv": "SEE_API_TOKEN"
+  },
+  "upload": {
+    "method": "POST",
+    "urlTemplate": "{{baseUrl}}/upload",
+    "fileField": "file",
+    "headers": [
+      {
+        "key": "Authorization",
+        "valueTemplate": "{{apiToken}}"
+      }
+    ],
+    "query": [],
+    "formFields": [],
+    "successJsonPath": "data.upload_status",
+    "successEquals": "1",
+    "resultUrlPaths": ["data.url", "images"],
+    "errorMessagePaths": ["message"]
+  }
+}

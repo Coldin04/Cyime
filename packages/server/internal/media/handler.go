@@ -515,28 +515,32 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 	if err != nil {
 		status := fiber.StatusInternalServerError
 		code := "DOCUMENT_IMAGE_UPLOAD_FAILED"
-		switch err.Error() {
-		case "文档不存在或无权访问", "file is required":
+		var docErr *DocumentImageError
+		switch {
+		case err.Error() == "文档不存在或无权访问":
 			status = fiber.StatusBadRequest
-			if err.Error() == "文档不存在或无权访问" {
-				code = "DOCUMENT_IMAGE_FORBIDDEN"
-			} else {
-				code = "DOCUMENT_IMAGE_FILE_REQUIRED"
-			}
-		case "document image target is not supported":
-			status = fiber.StatusConflict
-			code = "DOCUMENT_IMAGE_TARGET_NOT_SUPPORTED"
-		case "S.EE API token is not configured", "Lsky API token is not configured", "Lsky API url is not configured", "Lsky storage id is not configured":
-			code = "DOCUMENT_IMAGE_PROVIDER_NOT_CONFIGURED"
-		default:
-			if errors.Is(err, context.Canceled) {
-				status = fiber.StatusRequestTimeout
-				code = "DOCUMENT_IMAGE_UPLOAD_TIMEOUT"
-			}
-			if len(err.Error()) >= len("unsupported file type:") && err.Error()[:len("unsupported file type:")] == "unsupported file type:" {
+			code = "DOCUMENT_IMAGE_FORBIDDEN"
+		case err.Error() == "file is required":
+			status = fiber.StatusBadRequest
+			code = "DOCUMENT_IMAGE_FILE_REQUIRED"
+		case errors.As(err, &docErr):
+			switch docErr.Code {
+			case DocumentImageErrUnsupportedTarget, DocumentImageErrProviderNotFound:
+				status = fiber.StatusConflict
+				code = "DOCUMENT_IMAGE_TARGET_NOT_SUPPORTED"
+			case DocumentImageErrProviderNotReady, DocumentImageErrProviderConfig:
 				status = fiber.StatusBadRequest
-				code = "DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE"
+				code = "DOCUMENT_IMAGE_PROVIDER_NOT_CONFIGURED"
+			case DocumentImageErrProviderUploadFail:
+				status = fiber.StatusBadGateway
+				code = "DOCUMENT_IMAGE_PROVIDER_UPLOAD_FAILED"
 			}
+		case errors.Is(err, context.Canceled):
+			status = fiber.StatusRequestTimeout
+			code = "DOCUMENT_IMAGE_UPLOAD_TIMEOUT"
+		case len(err.Error()) >= len("unsupported file type:") && err.Error()[:len("unsupported file type:")] == "unsupported file type:":
+			status = fiber.StatusBadRequest
+			code = "DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE"
 		}
 		return c.Status(status).JSON(ErrorResponse{
 			Error:   "Upload Failed",

@@ -6,31 +6,28 @@
 		createImageBedConfig,
 		deleteImageBedConfig,
 		getImageBedConfigs,
+		getImageBedProviders,
 		updateImageBedConfig,
 		type ImageBedConfig,
+		type ImageBedProvider,
+		type ImageBedProviderField,
 		type UpsertImageBedConfigRequest
 	} from '$lib/api/user';
 
-	type ProviderType = 'see' | 'lsky';
+	type ProviderType = string;
 
 	type FormState = {
 		name: string;
 		providerType: ProviderType;
-		baseUrl: string;
-		apiToken: string;
 		isEnabled: boolean;
-		storageId: number | null;
-		strategyId: string;
+		fieldValues: Record<string, string>;
 	};
 
 	const emptyForm = (): FormState => ({
 		name: '',
 		providerType: 'see',
-		baseUrl: '',
-		apiToken: '',
 		isEnabled: true,
-		storageId: null,
-		strategyId: ''
+		fieldValues: {}
 	});
 
 	let loading = $state(false);
@@ -38,16 +35,25 @@
 	let deletingId = $state<string | null>(null);
 	let editingId = $state<string | null>(null);
 	let items = $state<ImageBedConfig[]>([]);
+	let providers = $state<ImageBedProvider[]>([]);
 	let form = $state<FormState>(emptyForm());
 
 	onMount(() => {
-		void loadConfigs();
+		void loadInitialData();
 	});
 
-	async function loadConfigs() {
+	async function loadInitialData() {
 		loading = true;
 		try {
-			items = await getImageBedConfigs();
+			const [loadedProviders, loadedConfigs] = await Promise.all([
+				getImageBedProviders(),
+				getImageBedConfigs()
+			]);
+			providers = loadedProviders;
+			items = loadedConfigs;
+			if (providers.length > 0 && !providers.some((provider) => provider.providerType === form.providerType)) {
+				form.providerType = providers[0].providerType;
+			}
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : m.user_image_beds_load_failed());
 		} finally {
@@ -58,30 +64,55 @@
 	function startCreate() {
 		editingId = null;
 		form = emptyForm();
+		if (providers.length > 0) {
+			form.providerType = providers[0].providerType;
+		}
 	}
 
 	function startEdit(item: ImageBedConfig) {
 		editingId = item.id;
+		const fieldValues: Record<string, string> = {
+			...(item.fieldValues ?? {})
+		};
+		if (!fieldValues.baseUrl && item.baseUrl) {
+			fieldValues.baseUrl = item.baseUrl;
+		}
+		if (!fieldValues.apiToken && item.apiToken) {
+			fieldValues.apiToken = item.apiToken;
+		}
+		if (!fieldValues.storageId && item.storageId) {
+			fieldValues.storageId = String(item.storageId);
+		}
+		if (!fieldValues.strategyId && item.strategyId) {
+			fieldValues.strategyId = item.strategyId;
+		}
+
 		form = {
 			name: item.name,
-			providerType: item.providerType === 'lsky' ? 'lsky' : 'see',
-			baseUrl: item.baseUrl ?? '',
-			apiToken: item.apiToken ?? '',
+			providerType: item.providerType,
 			isEnabled: item.isEnabled,
-			storageId: item.storageId ?? null,
-			strategyId: item.strategyId ?? ''
+			fieldValues
 		};
 	}
 
+	const currentProvider = $derived(
+		providers.find((provider) => provider.providerType === form.providerType) ?? null
+	);
+
+	const currentProviderFields = $derived(currentProvider?.fields ?? []);
+
 	function toRequestBody(input: FormState): UpsertImageBedConfigRequest {
+		const fieldValues = { ...input.fieldValues };
+		const storageID = Number.parseInt(fieldValues.storageId ?? '', 10);
 		return {
 			name: input.name,
 			providerType: input.providerType,
-			baseUrl: input.providerType === 'lsky' ? input.baseUrl : '',
-			apiToken: input.apiToken,
+			baseUrl: fieldValues.baseUrl ?? '',
+			apiToken: fieldValues.apiToken ?? '',
 			isEnabled: input.isEnabled,
-			storageId: input.providerType === 'lsky' ? (input.storageId ?? 0) : 0,
-			strategyId: input.providerType === 'lsky' ? input.strategyId : ''
+			storageId: Number.isNaN(storageID) ? 0 : storageID,
+			strategyId: fieldValues.strategyId ?? '',
+			fieldValues
 		};
 	}
 
@@ -124,6 +155,82 @@
 			toast.error(error instanceof Error ? error.message : m.user_image_beds_delete_failed());
 		} finally {
 			deletingId = null;
+		}
+	}
+
+	function getProviderDisplayName(providerType: string): string {
+		return providers.find((provider) => provider.providerType === providerType)?.displayName ?? providerType;
+	}
+
+	function getFieldValue(fieldKey: string): string {
+		return form.fieldValues[fieldKey] ?? '';
+	}
+
+	function setFieldValue(fieldKey: string, value: string) {
+		const trimmed = value.trim();
+		if (trimmed === '') {
+			delete form.fieldValues[fieldKey];
+			form.fieldValues = { ...form.fieldValues };
+			return;
+		}
+		form.fieldValues[fieldKey] = value;
+		form.fieldValues = { ...form.fieldValues };
+	}
+
+	type MessageFn = (args?: Record<string, unknown>, options?: Record<string, unknown>) => string;
+	const messageMap = m as unknown as Record<string, MessageFn>;
+
+	function resolveI18nKey(key: string | undefined, fallback: string): string {
+		if (!key) {
+			return fallback;
+		}
+		const fn = messageMap[key];
+		if (!fn) {
+			return fallback;
+		}
+		try {
+			return fn();
+		} catch {
+			return fallback;
+		}
+	}
+
+	function getFieldLabel(field: ImageBedProviderField): string {
+		return resolveI18nKey(field.labelKey, field.label);
+	}
+
+	function getFieldPlaceholder(field: ImageBedProviderField): string {
+		return resolveI18nKey(field.placeholderKey, field.placeholder ?? '');
+	}
+
+	function getFieldHelpText(field: ImageBedProviderField): string {
+		return resolveI18nKey(field.helpTextKey, field.helpText ?? '');
+	}
+
+	type SupportedInputMode =
+		| 'none'
+		| 'text'
+		| 'tel'
+		| 'url'
+		| 'email'
+		| 'numeric'
+		| 'decimal'
+		| 'search'
+		| undefined;
+
+	function normalizeInputMode(value: string | undefined): SupportedInputMode {
+		switch (value) {
+			case 'none':
+			case 'text':
+			case 'tel':
+			case 'url':
+			case 'email':
+			case 'numeric':
+			case 'decimal':
+			case 'search':
+				return value;
+			default:
+				return undefined;
 		}
 	}
 </script>
@@ -170,11 +277,7 @@
 										{item.isEnabled ? m.user_image_beds_enabled() : m.user_image_beds_disabled()}
 									</span>
 								</div>
-								<p class="text-xs text-zinc-500 dark:text-zinc-400">
-									{item.providerType === 'lsky'
-										? m.user_image_beds_provider_lsky()
-										: m.user_image_beds_provider_see()}
-								</p>
+								<p class="text-xs text-zinc-500 dark:text-zinc-400">{getProviderDisplayName(item.providerType)}</p>
 								{#if item.baseUrl}
 									<p class="text-xs text-zinc-500 dark:text-zinc-400">{item.baseUrl}</p>
 								{/if}
@@ -247,71 +350,35 @@
 						bind:value={form.providerType}
 						class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 					>
-						<option value="see">{m.user_image_beds_provider_see()}</option>
-						<option value="lsky">{m.user_image_beds_provider_lsky()}</option>
+						{#each providers as provider (provider.providerType)}
+							<option value={provider.providerType}>{provider.displayName}</option>
+						{/each}
 					</select>
 				</div>
 			</div>
 
-			{#if form.providerType === 'lsky'}
+			{#each currentProviderFields as field (field.key)}
 				<div class="space-y-1">
-					<label class="text-sm font-medium text-zinc-900 dark:text-zinc-100" for="image-bed-base-url">
-						{m.user_image_beds_base_url_label()}
+					<label class="text-sm font-medium text-zinc-900 dark:text-zinc-100" for={`image-bed-field-${field.key}`}>
+						{getFieldLabel(field)}
 					</label>
 					<input
-						id="image-bed-base-url"
-						bind:value={form.baseUrl}
-						type="url"
+						id={`image-bed-field-${field.key}`}
+						value={getFieldValue(field.key) ?? ''}
+						oninput={(event) => setFieldValue(field.key, event.currentTarget.value)}
+						type={field.type === 'number' ? 'number' : field.type}
+						inputmode={normalizeInputMode(field.inputMode)}
+						min={field.type === 'number' ? '1' : undefined}
+						step={field.type === 'number' ? '1' : undefined}
+						required={field.required}
 						class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
-						placeholder={m.user_image_beds_base_url_placeholder()}
+						placeholder={getFieldPlaceholder(field)}
 					/>
+					{#if getFieldHelpText(field)}
+						<p class="text-xs text-zinc-500 dark:text-zinc-400">{getFieldHelpText(field)}</p>
+					{/if}
 				</div>
-			{/if}
-
-			<div class="space-y-1">
-				<label class="text-sm font-medium text-zinc-900 dark:text-zinc-100" for="image-bed-api-token">
-					{m.user_image_beds_api_token_label()}
-				</label>
-				<input
-					id="image-bed-api-token"
-					bind:value={form.apiToken}
-					type="password"
-					class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
-					placeholder={m.user_image_beds_api_token_placeholder()}
-				/>
-			</div>
-
-			{#if form.providerType === 'lsky'}
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div class="space-y-1">
-						<label class="text-sm font-medium text-zinc-900 dark:text-zinc-100" for="image-bed-storage-id">
-							{m.user_image_beds_storage_id_label()}
-						</label>
-						<input
-							id="image-bed-storage-id"
-							bind:value={form.storageId}
-							type="number"
-							min="1"
-							step="1"
-							class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
-							placeholder={m.user_image_beds_storage_id_placeholder()}
-						/>
-					</div>
-				</div>
-
-				<div class="space-y-1">
-					<label class="text-sm font-medium text-zinc-900 dark:text-zinc-100" for="image-bed-strategy-id">
-						{m.user_image_beds_strategy_label()}
-					</label>
-					<input
-						id="image-bed-strategy-id"
-						bind:value={form.strategyId}
-						type="text"
-						class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
-						placeholder={m.user_image_beds_strategy_placeholder()}
-					/>
-				</div>
-			{/if}
+			{/each}
 
 			<label class="flex items-center gap-3 rounded-xl border border-zinc-200 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
 				<input bind:checked={form.isEnabled} type="checkbox" class="h-4 w-4 rounded border-zinc-300 text-riptide-500 focus:ring-riptide-400" />

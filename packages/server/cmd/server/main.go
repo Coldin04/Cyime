@@ -67,6 +67,7 @@ func main() {
 	userRoutes := api.Group("/user", middleware.Protected())
 	userRoutes.Get("/me", user.GetMe)
 	userRoutes.Get("/overview", user.GetOverview)
+	userRoutes.Get("/image-beds/providers", user.ListImageBedProvidersHandler)
 	userRoutes.Get("/image-beds", user.ListImageBedConfigsHandler)
 	userRoutes.Post("/image-beds", user.CreateImageBedConfigHandler)
 	userRoutes.Put("/image-beds/:id", user.UpdateImageBedConfigHandler)

@@ -23,9 +23,30 @@ export type ImageBedConfig = {
 	isEnabled: boolean;
 	storageId?: number;
 	strategyId?: string;
+	fieldValues?: Record<string, string>;
 };
 
 export type UpsertImageBedConfigRequest = Omit<ImageBedConfig, 'id'>;
+
+export type ImageBedProviderField = {
+	key: string;
+	type: 'text' | 'password' | 'url' | 'number' | string;
+	label: string;
+	labelKey?: string;
+	placeholder?: string;
+	placeholderKey?: string;
+	helpText?: string;
+	helpTextKey?: string;
+	inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search' | string;
+	required: boolean;
+};
+
+export type ImageBedProvider = {
+	providerType: string;
+	displayName: string;
+	description: string;
+	fields: ImageBedProviderField[];
+};
 
 async function parseUserResponse(response: Response): Promise<UserProfile> {
 	if (!response.ok) {
@@ -89,6 +110,18 @@ export async function getImageBedConfigs(): Promise<ImageBedConfig[]> {
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({}));
 		throw new Error(error.error || error.message || 'Failed to load image bed configs');
+	}
+
+	const payload = await response.json();
+	return payload.items ?? [];
+}
+
+export async function getImageBedProviders(): Promise<ImageBedProvider[]> {
+	const response = await apiFetch('/api/v1/user/image-beds/providers');
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.error || error.message || 'Failed to load image bed providers');
 	}
 
 	const payload = await response.json();
