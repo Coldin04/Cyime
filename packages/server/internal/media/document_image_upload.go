@@ -450,9 +450,7 @@ func parseProviderConfigJSON(raw *string) map[string]string {
 			if stringified == "" {
 				continue
 			}
-			if strings.HasSuffix(stringified, ".0") {
-				stringified = strings.TrimSuffix(stringified, ".0")
-			}
+			stringified = strings.TrimSuffix(stringified, ".0")
 			values[key] = stringified
 		}
 		return values
@@ -466,9 +464,7 @@ func parseProviderConfigJSON(raw *string) map[string]string {
 	values := map[string]string{}
 	if storage, exists := legacy["storageId"]; exists {
 		stringified := strings.TrimSpace(stringifyAny(storage))
-		if strings.HasSuffix(stringified, ".0") {
-			stringified = strings.TrimSuffix(stringified, ".0")
-		}
+		stringified = strings.TrimSuffix(stringified, ".0")
 		if stringified != "" {
 			values["storageId"] = stringified
 		}
