@@ -20,13 +20,14 @@ export type ImageBedConfig = {
 	providerType: 'see' | 'lsky' | string;
 	baseUrl: string;
 	apiToken: string;
+	hasApiToken: boolean;
 	isEnabled: boolean;
 	storageId?: number;
 	strategyId?: string;
 	fieldValues?: Record<string, string>;
 };
 
-export type UpsertImageBedConfigRequest = Omit<ImageBedConfig, 'id'>;
+export type UpsertImageBedConfigRequest = Omit<ImageBedConfig, 'id' | 'hasApiToken'>;
 
 export type ImageBedProviderField = {
 	key: string;

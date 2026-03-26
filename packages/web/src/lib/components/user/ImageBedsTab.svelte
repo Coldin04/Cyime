@@ -77,9 +77,7 @@
 		if (!fieldValues.baseUrl && item.baseUrl) {
 			fieldValues.baseUrl = item.baseUrl;
 		}
-		if (!fieldValues.apiToken && item.apiToken) {
-			fieldValues.apiToken = item.apiToken;
-		}
+		// Token is intentionally not returned from server; user can re-enter to rotate it.
 		if (!fieldValues.storageId && item.storageId) {
 			fieldValues.storageId = String(item.storageId);
 		}

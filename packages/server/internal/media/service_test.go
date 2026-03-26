@@ -18,6 +18,7 @@ import (
 
 func setupMediaTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	t.Setenv("APP_ENCRYPTION_KEY", "test-app-encryption-key")
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {

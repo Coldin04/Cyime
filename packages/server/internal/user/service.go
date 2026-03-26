@@ -17,6 +17,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -136,7 +137,7 @@ type ImageBedConfig struct {
 	Name         string
 	ProviderType string
 	BaseURL      string
-	APIToken     string
+	HasAPIToken  bool
 	IsEnabled    bool
 	StorageID    int
 	StrategyID   string
@@ -144,14 +145,15 @@ type ImageBedConfig struct {
 }
 
 type UpsertImageBedConfigInput struct {
-	Name         string
-	ProviderType string
-	BaseURL      string
-	APIToken     string
-	IsEnabled    bool
-	StorageID    int
-	StrategyID   string
-	FieldValues  map[string]string
+	Name              string
+	ProviderType      string
+	BaseURL           string
+	APIToken          string
+	EncryptedAPIToken string
+	IsEnabled         bool
+	StorageID         int
+	StrategyID        string
+	FieldValues       map[string]string
 }
 
 type imageBedConfigPayload struct {
@@ -169,7 +171,11 @@ func ListImageBedConfigs(userID uuid.UUID) ([]ImageBedConfig, error) {
 
 	items := make([]ImageBedConfig, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, imageBedModelToConfig(row))
+		item, err := imageBedModelToConfig(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -185,24 +191,22 @@ func CreateImageBedConfig(userID uuid.UUID, input UpsertImageBedConfigInput) (*I
 		Name:         normalized.Name,
 		ProviderType: normalized.ProviderType,
 		BaseURL:      stringPtrOrNil(normalized.BaseURL),
-		APIToken:     stringPtrOrNil(normalized.APIToken),
-		ConfigJSON:   stringPtrOrNil(buildImageBedConfigJSON(normalized.FieldValues)),
+		APIToken:     stringPtrOrNil(normalized.EncryptedAPIToken),
+		ConfigJSON:   stringPtrOrNil(buildImageBedConfigJSON(stripStoredFieldValues(normalized.FieldValues))),
 		IsEnabled:    normalized.IsEnabled,
 	}
 	if err := database.DB.Create(&row).Error; err != nil {
 		return nil, err
 	}
 
-	config := imageBedModelToConfig(row)
+	config, err := imageBedModelToConfig(row)
+	if err != nil {
+		return nil, err
+	}
 	return &config, nil
 }
 
 func UpdateImageBedConfig(userID uuid.UUID, configID uuid.UUID, input UpsertImageBedConfigInput) (*ImageBedConfig, error) {
-	normalized, err := normalizeImageBedConfigInput(input)
-	if err != nil {
-		return nil, err
-	}
-
 	var row models.UserImageBedConfig
 	if err := database.DB.
 		Where("id = ? AND user_id = ? AND deleted_at IS NULL", configID, userID).
@@ -210,12 +214,26 @@ func UpdateImageBedConfig(userID uuid.UUID, configID uuid.UUID, input UpsertImag
 		return nil, err
 	}
 
+	// Secrets are not returned to the client. Allow leaving token empty to keep existing value.
+	if strings.TrimSpace(input.APIToken) == "" && strings.TrimSpace(input.EncryptedAPIToken) == "" {
+		input.EncryptedAPIToken = trimStringPtr(row.APIToken)
+	}
+	// Allow leaving baseUrl empty to keep existing value.
+	if strings.TrimSpace(input.BaseURL) == "" {
+		input.BaseURL = trimStringPtr(row.BaseURL)
+	}
+
+	normalized, err := normalizeImageBedConfigInput(input)
+	if err != nil {
+		return nil, err
+	}
+
 	updates := map[string]any{
 		"name":          normalized.Name,
 		"provider_type": normalized.ProviderType,
 		"base_url":      nullableTrimmedString(normalized.BaseURL),
-		"api_token":     nullableTrimmedString(normalized.APIToken),
-		"config_json":   nullableTrimmedString(buildImageBedConfigJSON(normalized.FieldValues)),
+		"api_token":     nullableTrimmedString(normalized.EncryptedAPIToken),
+		"config_json":   nullableTrimmedString(buildImageBedConfigJSON(stripStoredFieldValues(normalized.FieldValues))),
 		"is_enabled":    normalized.IsEnabled,
 	}
 	if err := database.DB.Model(&row).Updates(updates).Error; err != nil {
@@ -228,7 +246,10 @@ func UpdateImageBedConfig(userID uuid.UUID, configID uuid.UUID, input UpsertImag
 		return nil, err
 	}
 
-	config := imageBedModelToConfig(row)
+	config, err := imageBedModelToConfig(row)
+	if err != nil {
+		return nil, err
+	}
 	return &config, nil
 }
 
@@ -253,7 +274,10 @@ func GetImageBedConfigByID(userID uuid.UUID, configID uuid.UUID) (*ImageBedConfi
 		return nil, err
 	}
 
-	config := imageBedModelToConfig(row)
+	config, err := imageBedModelToConfig(row)
+	if err != nil {
+		return nil, err
+	}
 	return &config, nil
 }
 
@@ -273,6 +297,10 @@ func normalizeImageBedConfigInput(input UpsertImageBedConfigInput) (*UpsertImage
 	}
 
 	fieldValues := normalizeFieldValues(input)
+	if strings.TrimSpace(fieldValues["apiToken"]) == "" && strings.TrimSpace(input.EncryptedAPIToken) != "" {
+		fieldValues["apiToken"] = "(configured)"
+	}
+
 	for _, field := range provider.Fields {
 		value := strings.TrimSpace(fieldValues[field.Key])
 		if field.Required && value == "" {
@@ -304,6 +332,13 @@ func normalizeImageBedConfigInput(input UpsertImageBedConfigInput) (*UpsertImage
 	input.FieldValues = fieldValues
 	input.BaseURL = strings.TrimSpace(fieldValues["baseUrl"])
 	input.APIToken = strings.TrimSpace(fieldValues["apiToken"])
+	if input.APIToken != "" && input.APIToken != "(configured)" {
+		encryptedToken, err := securevalue.EncryptString(input.APIToken)
+		if err != nil {
+			return nil, err
+		}
+		input.EncryptedAPIToken = encryptedToken
+	}
 	input.StrategyID = strings.TrimSpace(fieldValues["strategyId"])
 	input.StorageID = 0
 	if storageIDRaw := strings.TrimSpace(fieldValues["storageId"]); storageIDRaw != "" {
@@ -313,15 +348,12 @@ func normalizeImageBedConfigInput(input UpsertImageBedConfigInput) (*UpsertImage
 	return &input, nil
 }
 
-func imageBedModelToConfig(row models.UserImageBedConfig) ImageBedConfig {
+func imageBedModelToConfig(row models.UserImageBedConfig) (ImageBedConfig, error) {
 	fieldValues := parseImageBedConfigJSON(row.ConfigJSON)
 	baseURL := trimStringPtr(row.BaseURL)
-	apiToken := trimStringPtr(row.APIToken)
+	hasAPIToken := strings.TrimSpace(trimStringPtr(row.APIToken)) != ""
 	if baseURL != "" && strings.TrimSpace(fieldValues["baseUrl"]) == "" {
 		fieldValues["baseUrl"] = baseURL
-	}
-	if apiToken != "" && strings.TrimSpace(fieldValues["apiToken"]) == "" {
-		fieldValues["apiToken"] = apiToken
 	}
 
 	storageID := 0
@@ -338,12 +370,12 @@ func imageBedModelToConfig(row models.UserImageBedConfig) ImageBedConfig {
 		Name:         row.Name,
 		ProviderType: row.ProviderType,
 		BaseURL:      baseURL,
-		APIToken:     apiToken,
+		HasAPIToken:  hasAPIToken,
 		IsEnabled:    row.IsEnabled,
 		StorageID:    storageID,
 		StrategyID:   strategyID,
 		FieldValues:  fieldValues,
-	}
+	}, nil
 }
 
 func parseImageBedConfigJSON(value *string) map[string]string {
@@ -419,6 +451,13 @@ func normalizeFieldValues(input UpsertImageBedConfigInput) map[string]string {
 		values["strategyId"] = trimmed
 	}
 
+	return values
+}
+
+func stripStoredFieldValues(input map[string]string) map[string]string {
+	values := normalizeFieldValueMap(input)
+	delete(values, "apiToken")
+	delete(values, "baseUrl")
 	return values
 }
 

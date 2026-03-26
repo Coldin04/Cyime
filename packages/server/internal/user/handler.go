@@ -43,6 +43,7 @@ type ImageBedConfigDTO struct {
 	ProviderType string            `json:"providerType"`
 	BaseURL      string            `json:"baseUrl"`
 	APIToken     string            `json:"apiToken"`
+	HasAPIToken  bool              `json:"hasApiToken"`
 	IsEnabled    bool              `json:"isEnabled"`
 	StorageID    int               `json:"storageId,omitempty"`
 	StrategyID   string            `json:"strategyId,omitempty"`
@@ -428,7 +429,8 @@ func imageBedConfigToDTO(config ImageBedConfig) ImageBedConfigDTO {
 		Name:         config.Name,
 		ProviderType: config.ProviderType,
 		BaseURL:      config.BaseURL,
-		APIToken:     config.APIToken,
+		APIToken:     "",
+		HasAPIToken:  config.HasAPIToken,
 		IsEnabled:    config.IsEnabled,
 		StorageID:    config.StorageID,
 		StrategyID:   config.StrategyID,

@@ -10,6 +10,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -97,6 +98,12 @@ func main() {
 		return
 	}
 
+	encryptedSecret, err := securevalue.EncryptString(provider.ClientSecretEncrypted)
+	if err != nil {
+		log.Fatalf("加密提供商密钥失败：%v", err)
+	}
+	provider.ClientSecretEncrypted = encryptedSecret
+
 	// Save to database
 	if err := database.DB.Create(&provider).Error; err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -139,7 +146,7 @@ func configureGitHubProvider(reader *bufio.Reader) models.AuthProvider {
 		TokenURL:              strPtr(providerTemplates["github"].TokenURL),
 		UserInfoURL:           strPtr(providerTemplates["github"].UserInfoURL),
 		ClientID:              clientID,
-		ClientSecretEncrypted: clientSecret, // In production, encrypt this!
+		ClientSecretEncrypted: clientSecret,
 		IconURL:               strPtr(providerTemplates["github"].IconURL),
 		Scopes:                providerTemplates["github"].Scopes,
 		IsActive:              true,
@@ -173,7 +180,7 @@ func configureGoogleProvider(reader *bufio.Reader) models.AuthProvider {
 		TokenURL:              strPtr(providerTemplates["google"].TokenURL),
 		UserInfoURL:           strPtr(providerTemplates["google"].UserInfoURL),
 		ClientID:              clientID,
-		ClientSecretEncrypted: clientSecret, // In production, encrypt this!
+		ClientSecretEncrypted: clientSecret,
 		IconURL:               strPtr(providerTemplates["google"].IconURL),
 		Scopes:                providerTemplates["google"].Scopes,
 		IsActive:              true,
@@ -230,7 +237,7 @@ func configureCustomProvider(reader *bufio.Reader) models.AuthProvider {
 		TokenURL:              &tokenURL,
 		UserInfoURL:           &userInfoURL,
 		ClientID:              clientID,
-		ClientSecretEncrypted: clientSecret, // In production, encrypt this!
+		ClientSecretEncrypted: clientSecret,
 		IconURL:               &iconURL,
 		Scopes:                scopes,
 		IsActive:              true,
@@ -250,7 +257,7 @@ func upsertProvider(provider *models.AuthProvider) error {
 		// Check if provider exists
 		var existing models.AuthProvider
 		result := tx.Where("name = ?", provider.Name).First(&existing)
-		
+
 		if result.Error == nil {
 			// Update existing provider
 			return tx.Model(&existing).Updates(provider).Error
@@ -258,7 +265,7 @@ func upsertProvider(provider *models.AuthProvider) error {
 			// Create new provider
 			return tx.Create(provider).Error
 		}
-		
+
 		return result.Error
 	})
 }

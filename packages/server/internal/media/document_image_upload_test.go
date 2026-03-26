@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/google/uuid"
 )
 
@@ -62,7 +63,7 @@ func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 		UserID:       userID,
 		Name:         "see",
 		ProviderType: "see",
-		APIToken:     stringPtr("test-see-token"),
+		APIToken:     mustEncryptToken(t, "test-see-token"),
 		IsEnabled:    true,
 	}
 	if err := db.Create(&config).Error; err != nil {
@@ -91,7 +92,7 @@ func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 			"code": 200,
 			"data": map[string]any{
 				"upload_status": 1,
-				"url": "https://s.ee/example.png",
+				"url":           "https://s.ee/example.png",
 			},
 		})
 	}))
@@ -169,7 +170,7 @@ func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
 		Name:         "lsky",
 		ProviderType: "lsky",
 		BaseURL:      stringPtr(server.URL),
-		APIToken:     stringPtr("test-lsky-token"),
+		APIToken:     mustEncryptToken(t, "test-lsky-token"),
 		ConfigJSON:   stringPtr(`{"storageId":7,"strategyId":"covers"}`),
 		IsEnabled:    true,
 	}
@@ -243,7 +244,7 @@ func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
 		UserID:       userID,
 		Name:         "imgbb",
 		ProviderType: "imgbb",
-		APIToken:     stringPtr("imgbb-key"),
+		APIToken:     mustEncryptToken(t, "imgbb-key"),
 		IsEnabled:    true,
 	}
 	if err := db.Create(&config).Error; err != nil {
@@ -317,7 +318,7 @@ func TestUploadDocumentImage_UsesCheveretoForUserConfigTargets(t *testing.T) {
 		Name:         "chevereto",
 		ProviderType: "chevereto",
 		BaseURL:      stringPtr(server.URL),
-		APIToken:     stringPtr("chevereto-key"),
+		APIToken:     mustEncryptToken(t, "chevereto-key"),
 		IsEnabled:    true,
 	}
 	if err := db.Create(&config).Error; err != nil {
@@ -348,4 +349,13 @@ func TestUploadDocumentImage_UsesCheveretoForUserConfigTargets(t *testing.T) {
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func mustEncryptToken(t *testing.T, value string) *string {
+	t.Helper()
+	encrypted, err := securevalue.EncryptString(value)
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	return &encrypted
 }

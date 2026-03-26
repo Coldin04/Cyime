@@ -15,6 +15,7 @@ import (
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -125,9 +126,14 @@ func AuthLogin(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	clientSecret, err := securevalue.DecryptString(dbProvider.ClientSecretEncrypted)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
+	}
+
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
-		ClientSecret: dbProvider.ClientSecretEncrypted,
+		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
@@ -161,9 +167,14 @@ func AuthCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	clientSecret, err := securevalue.DecryptString(dbProvider.ClientSecretEncrypted)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
+	}
+
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
-		ClientSecret: dbProvider.ClientSecretEncrypted,
+		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),

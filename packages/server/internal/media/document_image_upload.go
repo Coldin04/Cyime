@@ -17,6 +17,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -174,10 +175,19 @@ func (u *genericImageBedUploader) Upload(ctx context.Context, req UploadDocument
 }
 
 func buildProviderVariables(provider imagebeds.Provider, config *models.UserImageBedConfig) (map[string]string, error) {
+	apiToken := strings.TrimSpace(stringPtrValue(config.APIToken))
+	if apiToken != "" {
+		decryptedToken, err := securevalue.DecryptString(apiToken)
+		if err != nil {
+			return nil, newDocumentImageError(DocumentImageErrProviderConfig, "failed to decrypt provider token")
+		}
+		apiToken = decryptedToken
+	}
+
 	values := map[string]string{
 		"providerType": provider.ProviderType,
 		"baseUrl":      strings.TrimSpace(stringPtrValue(config.BaseURL)),
-		"apiToken":     strings.TrimSpace(stringPtrValue(config.APIToken)),
+		"apiToken":     apiToken,
 	}
 
 	if provider.Runtime.BaseURLEnv != "" {
