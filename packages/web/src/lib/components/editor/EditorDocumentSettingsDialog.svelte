@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 	import { updateDocumentTitle } from '$lib/api/workspace';
@@ -35,6 +36,12 @@
 		{ id: 'image', icon: ImageSquare }
 	];
 
+	const sectionLabelMap: Record<DesignSectionId, () => string> = {
+		basic: m.editor_document_settings_basic_title,
+		permissions: m.editor_document_settings_permissions_title,
+		image: m.editor_document_settings_image_title
+	};
+
 	let {
 		documentId,
 		documentTitle = '',
@@ -56,6 +63,19 @@
 	let permissionsSection: HTMLElement | null = $state(null);
 	let imageSection: HTMLElement | null = $state(null);
 	let sectionObserver: IntersectionObserver | null = null;
+
+	function getSectionElement(id: DesignSectionId): HTMLElement | null {
+		switch (id) {
+			case 'basic':
+				return basicSection;
+			case 'permissions':
+				return permissionsSection;
+			case 'image':
+				return imageSection;
+			default:
+				return null;
+		}
+	}
 
 	$effect(() => {
 		if (!browser) return;
@@ -101,12 +121,7 @@
 		);
 
 		for (const section of sections) {
-			const el =
-				section.id === 'basic'
-					? basicSection
-					: section.id === 'permissions'
-						? permissionsSection
-						: imageSection;
+			const el = getSectionElement(section.id);
 			if (el) {
 				sectionObserver.observe(el);
 			}
@@ -124,7 +139,7 @@
 
 	function scrollToSection(id: DesignSectionId) {
 		activeSection = id;
-		const el = id === 'basic' ? basicSection : id === 'permissions' ? permissionsSection : imageSection;
+		const el = getSectionElement(id);
 		el?.scrollIntoView({
 			behavior: 'smooth',
 			block: 'start'
@@ -138,20 +153,16 @@
 	}
 
 	function getDocumentTypeLabel(type: string) {
-		switch (type) {
-			case 'table':
-				return m.editor_document_settings_doc_type_table();
-			case 'rich_text':
-				return m.editor_document_settings_doc_type_rich_text();
-			default:
-				return m.editor_document_settings_doc_type_default();
-		}
+		if (type === 'table') return m.editor_document_settings_doc_type_table();
+		if (type === 'rich_text') return m.editor_document_settings_doc_type_rich_text();
+		return m.editor_document_settings_doc_type_default();
 	}
 
-	function startEditingTitle() {
+	async function startEditingTitle() {
 		draftTitle = documentTitle;
 		isEditingTitle = true;
-		setTimeout(() => titleInput?.focus(), 0);
+		await tick();
+		titleInput?.focus();
 	}
 
 	function cancelEditingTitle() {
@@ -187,14 +198,7 @@
 	}
 
 	function getSectionLabel(id: DesignSectionId) {
-		switch (id) {
-			case 'basic':
-				return m.editor_document_settings_section_basic();
-			case 'permissions':
-				return m.editor_document_settings_section_permissions();
-			default:
-				return m.editor_document_settings_section_image();
-		}
+		return sectionLabelMap[id]();
 	}
 </script>
 
@@ -217,8 +221,8 @@
 		onclick={closeDialog}
 	>
 		<div class="flex min-h-dvh w-full items-center justify-center p-0 sm:p-4">
-				<div
-					class="flex h-dvh w-full flex-col overflow-hidden bg-white shadow-2xl dark:bg-zinc-950 sm:h-[88vh] sm:max-h-[820px] sm:max-w-[960px] sm:rounded-xl sm:border sm:border-zinc-200 dark:sm:border-zinc-800"
+			<div
+				class="flex h-dvh w-full flex-col overflow-hidden bg-white shadow-2xl dark:bg-zinc-950 sm:h-[88vh] sm:max-h-[820px] sm:max-w-[960px] sm:rounded-xl sm:border sm:border-zinc-200 dark:sm:border-zinc-800"
 				role="dialog"
 				aria-modal="true"
 				aria-label={m.editor_image_target_menu_title()}
@@ -230,15 +234,15 @@
 			>
 				<header class="flex h-16 items-center justify-between gap-4 border-b border-zinc-200 px-5 dark:border-zinc-800 sm:px-6">
 					<div class="flex min-w-0 items-center gap-3">
-							<FileText class="h-5 w-5 shrink-0 text-zinc-400" />
-							<div class="min-w-0 flex flex-col gap-0.5">
-								<h2 class="truncate rounded bg-transparent px-2 text-sm leading-5 text-zinc-900 dark:text-zinc-100">
-									{documentTitle || m.editor_document_settings_untitled()}
-								</h2>
-								<p class="px-2 text-xs leading-4 text-zinc-500 dark:text-zinc-400">
-									{getDocumentTypeLabel(documentType)}
-								</p>
-							</div>
+						<FileText class="h-5 w-5 shrink-0 text-zinc-400" />
+						<div class="min-w-0 flex flex-col gap-0.5">
+							<h2 class="truncate rounded bg-transparent px-2 text-sm leading-5 text-zinc-900 dark:text-zinc-100">
+								{documentTitle || m.editor_document_settings_untitled()}
+							</h2>
+							<p class="px-2 text-xs leading-4 text-zinc-500 dark:text-zinc-400">
+								{getDocumentTypeLabel(documentType)}
+							</p>
+						</div>
 					</div>
 
 					<button
