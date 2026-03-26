@@ -31,12 +31,14 @@
 </svelte:head>
 
 <section class="space-y-6">
-	<div>
-		<h1 class="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{titles[tab]}</h1>
-		<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-			{descriptions[tab] || ''}
-		</p>
-	</div>
+	{#if tab !== 'image-beds'}
+		<div>
+			<h1 class="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{titles[tab]}</h1>
+			<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+				{descriptions[tab] || ''}
+			</p>
+		</div>
+	{/if}
 
 	{#if tab === 'overview'}
 		<OverviewTab />

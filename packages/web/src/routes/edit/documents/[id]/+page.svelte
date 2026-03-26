@@ -315,6 +315,7 @@
 			<EditorTopBar
 				{documentId}
 				initialTitle={title}
+				{documentType}
 				{preferredImageTargetId}
 				{availableImageTargets}
 				{isUpdatingImageTarget}

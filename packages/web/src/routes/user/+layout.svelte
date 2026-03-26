@@ -19,8 +19,8 @@
 	const navItems = [
 		{ href: '/user', label: m.user_nav_overview(), icon: House },
 		{ href: '/user/profile', label: m.user_nav_profile(), icon: UserCircle },
-		{ href: '/user/image-beds', label: m.user_nav_image_beds(), icon: LinkSimple },
 		{ href: '/user/security', label: m.user_nav_security(), icon: ShieldCheck },
+		{ href: '/user/image-beds', label: m.user_nav_image_beds(), icon: LinkSimple },
 		{ href: '/user/media', label: m.user_nav_media_library(), icon: ImagesSquare }
 	];
 

@@ -3,7 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
-	import EditorImageTargetMenu from '$lib/components/editor/EditorImageTargetMenu.svelte';
+	import EditorDocumentSettingsDialog from '$lib/components/editor/EditorDocumentSettingsDialog.svelte';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 
 	// Icons
@@ -16,6 +16,7 @@
 	let {
 		documentId,
 		initialTitle,
+		documentType = 'rich_text',
 		preferredImageTargetId,
 		availableImageTargets,
 		isUpdatingImageTarget = false,
@@ -27,6 +28,7 @@
 	}: {
 		documentId: string;
 		initialTitle: string;
+		documentType?: string;
 		preferredImageTargetId: string;
 		availableImageTargets: DocumentImageTargetOption[];
 		isUpdatingImageTarget?: boolean;
@@ -176,11 +178,18 @@
 
 	<!-- Right Controls -->
 	<div class="flex items-center gap-4 pr-4">
-		<EditorImageTargetMenu
+		<EditorDocumentSettingsDialog
+			{documentId}
+			documentTitle={title}
+			{documentType}
 			currentTargetId={preferredImageTargetId}
 			options={availableImageTargets}
 			isUpdating={isUpdatingImageTarget}
 			onSelect={(targetId) => onImageTargetChange?.(targetId)}
+			onTitleChange={(nextTitle) => {
+				title = nextTitle;
+				onTitleChange?.(nextTitle);
+			}}
 		/>
 		<button
 			class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
