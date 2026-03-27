@@ -15,7 +15,12 @@
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
 	import { getAssetReadURL, getDocumentContent, updateDocumentContent } from '$lib/api/editor';
-	import { getDocumentDetails } from '$lib/api/workspace';
+	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
+	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
+	import {
+		getDocumentImageTargetLabel,
+		getDocumentImageTargetOptions
+	} from '$lib/components/editor/documentImageTargets';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -27,6 +32,9 @@
 
 	let content = $state<JSONContent>(EMPTY_DOC);
 	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
+	let preferredImageTargetId = $state('managed-r2');
+	let imageBedConfigs = $state<ImageBedConfig[]>([]);
+	let isUpdatingImageTarget = $state(false);
 	let isSaving = $state(false);
 	let lastSaved = $state<Date | null>(null);
 	let hasUnsavedChanges = $state(false);
@@ -36,6 +44,10 @@
 	let bypassLeaveGuard = $state(false);
 	let autoSaveEnabled = $state(defaultAutoSaveEnabled);
 	let autoSaveIntervalSeconds = $state(defaultAutoSaveIntervalSeconds);
+	const availableImageTargets = $derived(getDocumentImageTargetOptions(imageBedConfigs));
+	const currentImageTargetLabel = $derived(
+		getDocumentImageTargetLabel(preferredImageTargetId, availableImageTargets)
+	);
 
 	const assetPathPattern =
 		/\/api\/v1\/media\/assets\/([0-9a-fA-F-]{36})\/content(?:\?.*)?$/;
@@ -178,6 +190,28 @@
 		await handleConfirmLeave();
 	}
 
+	async function handleImageTargetChange(nextTargetId: string) {
+		if (!documentId || isUpdatingImageTarget || nextTargetId === preferredImageTargetId) {
+			return;
+		}
+
+		isUpdatingImageTarget = true;
+		try {
+			const updated = await updateDocumentImageTarget(documentId, nextTargetId);
+			preferredImageTargetId = updated.preferredImageTargetId;
+			toast.success(m.editor_image_target_updated());
+		} catch (error) {
+			console.error('[Document] Failed to update image target:', error);
+			toast.error(
+				error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_image_target_update_failed()
+			);
+		} finally {
+			isUpdatingImageTarget = false;
+		}
+	}
+
 	// Load document content when ID becomes available
 	$effect(() => {
 		if (documentId) {
@@ -186,16 +220,22 @@
 				try {
 					console.log('[Load] Loading document for ID:', documentId);
 					// Load document details (for title) and content in parallel
-					const [details, data] = await Promise.all([
+					const [details, data, configs] = await Promise.all([
 						getDocumentDetails(documentId),
-						getDocumentContent(documentId)
+						getDocumentContent(documentId),
+						getImageBedConfigs().catch((error) => {
+							console.error('[Load] Failed to load image bed configs:', error);
+							return [] as ImageBedConfig[];
+						})
 					]);
 
 					const loadedContent = data.contentJson ?? EMPTY_DOC;
+					imageBedConfigs = configs;
 					content = await refreshSignedImageSources(loadedContent);
 					// Use the title from the API
 					title = details.title ?? '';
 					documentType = details.documentType ?? 'rich_text';
+					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
 					lastSaved = null;
 					console.log('[Load] Title loaded:', title);
@@ -272,14 +312,19 @@
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
 	{#if documentId}
-		<EditorTopBar
-			{documentId}
-			initialTitle={title}
-			{isSaving}
-			{lastSaved}
-			{hasUnsavedChanges}
-			onTitleChange={handleTitleChange}
-		/>
+			<EditorTopBar
+				{documentId}
+				initialTitle={title}
+				{documentType}
+				{preferredImageTargetId}
+				{availableImageTargets}
+				{isUpdatingImageTarget}
+				{isSaving}
+				{lastSaved}
+				{hasUnsavedChanges}
+				onTitleChange={handleTitleChange}
+				onImageTargetChange={handleImageTargetChange}
+			/>
 	{/if}
 
 	<!-- Editor -->
@@ -294,6 +339,7 @@
 					<Editor
 						documentId={documentId!}
 						{content}
+						currentImageTargetLabel={currentImageTargetLabel}
 						{isSaving}
 						{hasUnsavedChanges}
 						onSave={saveContent}

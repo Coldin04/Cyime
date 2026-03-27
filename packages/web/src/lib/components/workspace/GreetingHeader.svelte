@@ -55,7 +55,8 @@
 					content: [{ type: 'paragraph' }]
 				},
 				folderId: $workspaceContext.currentFolderId,
-				documentType: 'rich_text'
+				documentType: 'rich_text',
+				preferredImageTargetId: 'managed-r2'
 			});
 			goto(`/edit/documents/${newDoc.id}`);
 		} catch (error) {

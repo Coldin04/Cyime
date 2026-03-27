@@ -30,6 +30,34 @@ var ReservedFolderNames = []string{
 
 var ErrDocumentQuotaExceeded = errors.New("已达到文档数量上限")
 
+const (
+	DefaultPreferredImageTargetID = "managed-r2"
+	LegacyPreferredImageTargetID  = "managed-r2"
+)
+
+func normalizePreferredImageTargetID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "":
+		return DefaultPreferredImageTargetID
+	case "managed-r2":
+		return trimmed
+	default:
+		if _, err := uuid.Parse(trimmed); err == nil {
+			return trimmed
+		}
+		return ""
+	}
+}
+
+func resolveDocumentPreferredImageTargetID(value string) string {
+	normalized := normalizePreferredImageTargetID(value)
+	if normalized != "" {
+		return normalized
+	}
+	return LegacyPreferredImageTargetID
+}
+
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
 	// Default values
@@ -224,12 +252,19 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 }
 
 // CreateDocument creates a new document with unique title handling.
-func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
+func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string, preferredImageTargetID string) (*models.Document, error) {
 	if documentType == "" {
 		documentType = "rich_text"
 	}
 	if documentType != "rich_text" && documentType != "table" {
 		return nil, errors.New("不支持的文档类型")
+	}
+	if preferredImageTargetID == "" {
+		preferredImageTargetID = DefaultPreferredImageTargetID
+	}
+	preferredImageTargetID = normalizePreferredImageTargetID(preferredImageTargetID)
+	if preferredImageTargetID == "" {
+		return nil, errors.New("不支持的图片上传目标")
 	}
 
 	// Validate title length
@@ -309,15 +344,16 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 
 		// Create document metadata
 		document = &models.Document{
-			ID:           uuid.New(),
-			OwnerUserID:  userID,
-			FolderID:     folderID,
-			Title:        newTitle,
-			Excerpt:      excerpt,
-			DocumentType: documentType,
-			EditorType:   "tiptap",
-			CreatedBy:    userID,
-			UpdatedBy:    userID,
+			ID:                     uuid.New(),
+			OwnerUserID:            userID,
+			FolderID:               folderID,
+			Title:                  newTitle,
+			Excerpt:                excerpt,
+			DocumentType:           documentType,
+			PreferredImageTargetID: preferredImageTargetID,
+			EditorType:             "tiptap",
+			CreatedBy:              userID,
+			UpdatedBy:              userID,
 		}
 
 		if err := tx.Create(document).Error; err != nil {
@@ -512,16 +548,18 @@ func folderToFileItem(folder models.Folder) FileItem {
 
 // documentToFileItem converts a Document model to FileItem DTO
 func documentToFileItem(document models.Document) FileItem {
+	preferredImageTargetID := resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID)
 	return FileItem{
-		ID:           document.ID,
-		Type:         "document",
-		DocumentType: &document.DocumentType,
-		Name:         document.Title,
-		Title:        &document.Title,
-		Excerpt:      &document.Excerpt,
-		FolderID:     document.FolderID,
-		CreatedAt:    document.CreatedAt,
-		UpdatedAt:    document.UpdatedAt,
+		ID:                     document.ID,
+		Type:                   "document",
+		DocumentType:           &document.DocumentType,
+		PreferredImageTargetID: &preferredImageTargetID,
+		Name:                   document.Title,
+		Title:                  &document.Title,
+		Excerpt:                &document.Excerpt,
+		FolderID:               document.FolderID,
+		CreatedAt:              document.CreatedAt,
+		UpdatedAt:              document.UpdatedAt,
 		Creator: CreatorInfo{
 			ID:          document.CreatedBy,
 			DisplayName: nil,
@@ -634,6 +672,40 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 
 	// Update the title
 	return database.DB.Model(&document).Update("title", trimmedTitle).Error
+}
+
+func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {
+	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
+	if normalized == "" {
+		return errors.New("不支持的图片上传目标")
+	}
+	if normalized != DefaultPreferredImageTargetID {
+		var config models.UserImageBedConfig
+		result := database.DB.
+			Where("id = ? AND user_id = ? AND deleted_at IS NULL AND is_enabled = ?", normalized, userID, true).
+			First(&config)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("图片上传目标不存在")
+			}
+			return result.Error
+		}
+	}
+
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return errors.New("文档不存在")
+		}
+		return result.Error
+	}
+
+	if resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID) == normalized {
+		return nil
+	}
+
+	return database.DB.Model(&document).Update("preferred_image_target_id", normalized).Error
 }
 
 // UpdateFolderName updates the name of a folder

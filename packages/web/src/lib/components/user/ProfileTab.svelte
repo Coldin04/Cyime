@@ -91,6 +91,7 @@
 			switchingLocale = false;
 		}
 	}
+
 </script>
 
 <div class="flex flex-col gap-4">

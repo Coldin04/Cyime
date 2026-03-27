@@ -227,10 +227,17 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 	}
 
 	// Create document
-	document, err := CreateDocument(userID, req.Title, string(req.ContentJSON), req.FolderID, req.DocumentType)
+	document, err := CreateDocument(
+		userID,
+		req.Title,
+		string(req.ContentJSON),
+		req.FolderID,
+		req.DocumentType,
+		req.PreferredImageTargetID,
+	)
 	if err != nil {
 		// Handle known validation errors
-		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" {
+		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" || err.Error() == "不支持的图片上传目标" {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
@@ -266,15 +273,16 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 
 	// Build response
 	response := CreateDocumentResponse{
-		ID:           document.ID,
-		Type:         "document",
-		DocumentType: document.DocumentType,
-		Title:        document.Title,
-		Excerpt:      document.Excerpt,
-		FolderID:     document.FolderID,
-		CreatedAt:    document.CreatedAt,
-		UpdatedAt:    document.UpdatedAt,
-		Creator:      *creatorInfo,
+		ID:                     document.ID,
+		Type:                   "document",
+		DocumentType:           document.DocumentType,
+		PreferredImageTargetID: resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID),
+		Title:                  document.Title,
+		Excerpt:                document.Excerpt,
+		FolderID:               document.FolderID,
+		CreatedAt:              document.CreatedAt,
+		UpdatedAt:              document.UpdatedAt,
+		Creator:                *creatorInfo,
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response)
@@ -626,6 +634,72 @@ func UpdateDocumentTitleHandler(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"success": true,
+	})
+}
+
+// UpdateDocumentImageTargetHandler handles PUT /api/v1/workspace/documents/:id/image-target
+func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
+		})
+	}
+
+	var req UpdateDocumentImageTargetRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	err = UpdateDocumentImageTarget(userID, documentID, req.PreferredImageTargetID)
+	if err != nil {
+		switch err.Error() {
+		case "不支持的图片上传目标":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Validation Error",
+				Message: err.Error(),
+			})
+		case "文档不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case "图片上传目标不存在":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Validation Error",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Server Error",
+				Message: "更新图片上传目标失败，请稍后重试",
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":                true,
+		"preferredImageTargetId": normalizePreferredImageTargetID(req.PreferredImageTargetID),
 	})
 }
 

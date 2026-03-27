@@ -18,12 +18,13 @@ import (
 
 func setupMediaTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	t.Setenv("APP_ENCRYPTION_KEY", "test-app-encryption-key")
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.Document{}, &models.Asset{}, &models.DocumentAssetRef{}, &models.AssetGCJob{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.UserImageBedConfig{}, &models.Document{}, &models.Asset{}, &models.DocumentAssetRef{}, &models.AssetGCJob{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	database.DB = db
@@ -31,15 +32,20 @@ func setupMediaTestDB(t *testing.T) *gorm.DB {
 }
 
 func seedOwnedDocument(t *testing.T, db *gorm.DB, userID uuid.UUID) uuid.UUID {
+	return seedOwnedDocumentWithImageTarget(t, db, userID, "")
+}
+
+func seedOwnedDocumentWithImageTarget(t *testing.T, db *gorm.DB, userID uuid.UUID, preferredImageTargetID string) uuid.UUID {
 	t.Helper()
 	doc := models.Document{
-		ID:           uuid.New(),
-		OwnerUserID:  userID,
-		Title:        "doc",
-		DocumentType: "rich_text",
-		EditorType:   "tiptap",
-		CreatedBy:    userID,
-		UpdatedBy:    userID,
+		ID:                     uuid.New(),
+		OwnerUserID:            userID,
+		Title:                  "doc",
+		DocumentType:           "rich_text",
+		PreferredImageTargetID: preferredImageTargetID,
+		EditorType:             "tiptap",
+		CreatedBy:              userID,
+		UpdatedBy:              userID,
 	}
 	if err := db.Create(&doc).Error; err != nil {
 		t.Fatalf("create document: %v", err)

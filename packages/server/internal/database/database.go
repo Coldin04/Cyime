@@ -75,6 +75,7 @@ func Connect() {
 	// Auto-migrate the schema
 	err = DB.AutoMigrate(
 		&models.User{},
+		&models.UserImageBedConfig{},
 		&models.AuthProvider{},
 		&models.UserIdentityProvider{},
 		&models.UserSession{},

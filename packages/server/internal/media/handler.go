@@ -13,6 +13,7 @@ import (
 
 type ErrorResponse struct {
 	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
 }
 
@@ -35,6 +36,14 @@ type UploadAssetResponse struct {
 	URL             string    `json:"url"`
 	ExpiresAt       string    `json:"expiresAt,omitempty"`
 	Visibility      string    `json:"visibility"`
+}
+
+type UploadDocumentImageResponse struct {
+	TargetID  string     `json:"targetId"`
+	Mode      string     `json:"mode"`
+	URL       string     `json:"url"`
+	AssetID   *uuid.UUID `json:"assetId,omitempty"`
+	ExpiresAt string     `json:"expiresAt,omitempty"`
 }
 
 type AssetReferencesResponse struct {
@@ -341,6 +350,27 @@ func ValidateVisibility(visibility string) error {
 	}
 }
 
+func buildSignedAssetReadURL(baseURL string, assetID uuid.UUID, userID uuid.UUID, visibility string) (string, string, error) {
+	readURL := baseURL + "/api/v1/media/assets/" + assetID.String() + "/content"
+	expiresAt := ""
+	if visibility == "public" {
+		return readURL, expiresAt, nil
+	}
+
+	tokenService, err := NewTokenService()
+	if err != nil {
+		return "", "", err
+	}
+	token, exp, err := tokenService.IssueAssetReadToken(assetID, userID)
+	if err != nil {
+		return "", "", errors.New("Failed to issue media token")
+	}
+
+	readURL = readURL + "?token=" + url.QueryEscape(token)
+	expiresAt = exp.UTC().Format("2006-01-02T15:04:05Z")
+	return readURL, expiresAt, nil
+}
+
 // UploadDocumentAssetHandler handles POST /api/v1/edit/documents/:id/assets
 func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	defer func() {
@@ -417,25 +447,12 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 		docID = *asset.DocumentID
 	}
 
-	readURL := c.BaseURL() + "/api/v1/media/assets/" + asset.ID.String() + "/content"
-	expiresAt := ""
-	if asset.Visibility != "public" {
-		tokenService, err := NewTokenService()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: err.Error(),
-			})
-		}
-		token, exp, err := tokenService.IssueAssetReadToken(asset.ID, userID)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: "Failed to issue media token",
-			})
-		}
-		readURL = readURL + "?token=" + url.QueryEscape(token)
-		expiresAt = exp.UTC().Format("2006-01-02T15:04:05Z")
+	readURL, expiresAt, err := buildSignedAssetReadURL(c.BaseURL(), asset.ID, userID, asset.Visibility)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
 	}
 
 	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, asset.StorageProvider, asset.ObjectKey)
@@ -453,4 +470,108 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 		ExpiresAt:       expiresAt,
 		Visibility:      asset.Visibility,
 	})
+}
+
+// UploadDocumentImageHandler handles POST /api/v1/edit/documents/:id/paste-image
+func UploadDocumentImageHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Code:    "DOCUMENT_IMAGE_INVALID_USER_ID",
+			Message: "Invalid user id",
+		})
+	}
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Code:    "DOCUMENT_IMAGE_INVALID_DOCUMENT_ID",
+			Message: "Invalid document id",
+		})
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Code:    "DOCUMENT_IMAGE_FILE_REQUIRED",
+			Message: "file is required",
+		})
+	}
+
+	result, err := UploadDocumentImage(c.UserContext(), UploadDocumentImageRequest{
+		DocumentID: documentID,
+		UserID:     userID,
+		FileHeader: fileHeader,
+	})
+	if err != nil {
+		status := fiber.StatusInternalServerError
+		code := "DOCUMENT_IMAGE_UPLOAD_FAILED"
+		var docErr *DocumentImageError
+		switch {
+		case err.Error() == "文档不存在或无权访问":
+			status = fiber.StatusForbidden
+			code = "DOCUMENT_IMAGE_FORBIDDEN"
+		case err.Error() == "file is required":
+			status = fiber.StatusBadRequest
+			code = "DOCUMENT_IMAGE_FILE_REQUIRED"
+		case errors.As(err, &docErr):
+			switch docErr.Code {
+			case DocumentImageErrUnsupportedTarget, DocumentImageErrProviderNotFound:
+				status = fiber.StatusConflict
+				code = "DOCUMENT_IMAGE_TARGET_NOT_SUPPORTED"
+			case DocumentImageErrProviderNotReady, DocumentImageErrProviderConfig:
+				status = fiber.StatusBadRequest
+				code = "DOCUMENT_IMAGE_PROVIDER_NOT_CONFIGURED"
+			case DocumentImageErrProviderUploadFail:
+				status = fiber.StatusBadGateway
+				code = "DOCUMENT_IMAGE_PROVIDER_UPLOAD_FAILED"
+			}
+		case errors.Is(err, context.Canceled):
+			status = fiber.StatusRequestTimeout
+			code = "DOCUMENT_IMAGE_UPLOAD_TIMEOUT"
+		case len(err.Error()) >= len("unsupported file type:") && err.Error()[:len("unsupported file type:")] == "unsupported file type:":
+			status = fiber.StatusBadRequest
+			code = "DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE"
+		}
+		return c.Status(status).JSON(ErrorResponse{
+			Error:   "Upload Failed",
+			Code:    code,
+			Message: err.Error(),
+		})
+	}
+
+	response := UploadDocumentImageResponse{
+		TargetID: result.TargetID,
+		Mode:     result.Mode,
+		URL:      result.URL,
+		AssetID:  result.AssetID,
+	}
+
+	if result.Mode == documentImageModeManagedAsset && result.AssetID != nil {
+		asset, err := GetOwnedAsset(userID, *result.AssetID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+		response.URL, response.ExpiresAt, err = buildSignedAssetReadURL(c.BaseURL(), asset.ID, userID, asset.Visibility)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(response)
 }
