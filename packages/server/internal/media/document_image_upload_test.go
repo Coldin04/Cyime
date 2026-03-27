@@ -53,8 +53,6 @@ func TestUploadDocumentImage_UsesManagedR2ForLegacyDocuments(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
-	skipPrivateHostCheck = true
-	t.Cleanup(func() { skipPrivateHostCheck = false })
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	if err := db.Create(&models.User{ID: userID}).Error; err != nil {
@@ -127,8 +125,6 @@ func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
-	skipPrivateHostCheck = true
-	t.Cleanup(func() { skipPrivateHostCheck = false })
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -205,8 +201,6 @@ func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
-	skipPrivateHostCheck = true
-	t.Cleanup(func() { skipPrivateHostCheck = false })
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,8 +275,6 @@ func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesCheveretoForUserConfigTargets(t *testing.T) {
-	skipPrivateHostCheck = true
-	t.Cleanup(func() { skipPrivateHostCheck = false })
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -295,7 +295,7 @@
   "user_image_beds_strategy_placeholder": "可选，留空则走默认策略",
   "user_image_beds_strategy_help": "可选，留空则由图床使用默认策略",
   "user_image_beds_lsky_strategy_help": "可选，留空则由图床使用默认策略",
-  "user_image_beds_enabled_toggle": "保存后在文档设置里允许选择这个图床",
+  "user_image_beds_enabled_toggle": "保存后启用",
   "user_image_beds_create_title": "新增图床配置",
   "user_image_beds_edit_title": "编辑图床配置",
   "user_image_beds_form_description": "每条配置都可以有自己的名字、图床类型和上传参数。",
