@@ -58,6 +58,12 @@ type AssetListResponse struct {
 	Total   int64           `json:"total"`
 }
 
+type SharedAssetListResponse struct {
+	Items   []SharedAssetListItem `json:"items"`
+	HasMore bool                  `json:"hasMore"`
+	Total   int64                 `json:"total"`
+}
+
 func GetAssetURLHandler(c *fiber.Ctx) error {
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -83,7 +89,7 @@ func GetAssetURLHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := GetOwnedAsset(userID, assetID); err != nil {
+	if _, err := GetAccessibleAsset(userID, assetID); err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
@@ -161,6 +167,53 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 	})
 }
 
+func ListSharedAssetsHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	result, err := ListSharedEditableAssets(ListAssetsRequest{
+		UserID: userID,
+		Kind:   c.Query("kind"),
+		Status: c.Query("status"),
+		Query:  c.Query("q"),
+		Limit:  c.QueryInt("limit", 20),
+		Offset: c.QueryInt("offset", 0),
+	})
+	if err != nil {
+		switch err.Error() {
+		case "invalid asset status", "invalid asset kind":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(SharedAssetListResponse{
+		Items:   result.Items,
+		HasMore: result.HasMore,
+		Total:   result.Total,
+	})
+}
+
 func GetAssetContentHandler(c *fiber.Ctx) error {
 	assetID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -170,13 +223,15 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	asset, err := GetAssetByID(assetID)
+	record, err := getAssetBlobByID(assetID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
 		})
 	}
+	asset := record.Asset
+	blob := record.Blob
 
 	if asset.Visibility != "public" {
 		token := c.Query("token")
@@ -221,7 +276,7 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	obj, err := storageProvider.GetObject(context.Background(), asset.ObjectKey)
+	obj, err := storageProvider.GetObject(context.Background(), blob.ObjectKey)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{
 			Error:   "Media Upstream Error",
@@ -230,7 +285,7 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 	}
 	defer obj.Body.Close()
 
-	contentType := asset.MimeType
+	contentType := blob.MimeType
 	if contentType == "" {
 		contentType = obj.ContentType
 	}
@@ -442,6 +497,14 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	}
 
 	asset := result.Asset
+	record, err := getAssetBlobByID(asset.ID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+	blob := record.Blob
 	docID := documentID
 	if asset.DocumentID != nil {
 		docID = *asset.DocumentID
@@ -455,17 +518,17 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, asset.StorageProvider, asset.ObjectKey)
+	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, blob.StorageProvider, blob.ObjectKey)
 	return c.Status(fiber.StatusCreated).JSON(UploadAssetResponse{
 		ID:              asset.ID,
 		AssetID:         asset.ID,
 		DocumentID:      docID,
 		Kind:            asset.Kind,
 		Filename:        asset.Filename,
-		MimeType:        asset.MimeType,
-		FileSize:        asset.FileSize,
-		StorageProvider: asset.StorageProvider,
-		ObjectKey:       asset.ObjectKey,
+		MimeType:        blob.MimeType,
+		FileSize:        blob.Size,
+		StorageProvider: blob.StorageProvider,
+		ObjectKey:       blob.ObjectKey,
 		URL:             readURL,
 		ExpiresAt:       expiresAt,
 		Visibility:      asset.Visibility,

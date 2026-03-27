@@ -21,6 +21,7 @@ const (
 	defaultAssetGCMaxRetry = 5
 	defaultAssetGCRetryGap = 5 * time.Minute
 	defaultAssetReconcile  = 200
+	defaultBlobDeleteDelay = 24 * time.Hour
 )
 
 func StartAssetGCWorker(ctx context.Context) {
@@ -56,6 +57,9 @@ func StartAssetGCWorker(ctx context.Context) {
 
 			if _, err := RunDueAssetGCJobs(ctx, time.Now(), batchSize); err != nil {
 				log.Printf("[media.gc] run failed: %v", err)
+			}
+			if _, err := RunDueBlobGCJobs(ctx, time.Now(), batchSize); err != nil {
+				log.Printf("[media.gc] blob run failed: %v", err)
 			}
 
 			select {
@@ -96,7 +100,7 @@ func RunDueAssetGCJobs(ctx context.Context, now time.Time, limit int) (int, erro
 func runAssetDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) error {
 	var job models.AssetGCJob
 	var asset models.Asset
-	var shouldDelete bool
+	var blobID uuid.UUID
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("id = ? AND job_type = ? AND status = ?", jobID, "delete", "pending").First(&job).Error; err != nil {
@@ -149,24 +153,7 @@ func runAssetDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) erro
 				}).Error
 		}
 
-		shouldDelete = true
-		return nil
-	})
-	if err != nil {
-		return markAssetGCJobFailed(jobID, now, err)
-	}
-	if asset.ID == uuid.Nil || !shouldDelete {
-		return nil
-	}
-
-	if err := initStorageProvider(); err != nil {
-		return markAssetGCJobFailed(jobID, now, err)
-	}
-	if err := storageProvider.DeleteObject(ctx, asset.ObjectKey); err != nil {
-		return markAssetGCJobFailed(jobID, now, err)
-	}
-
-	return database.DB.Transaction(func(tx *gorm.DB) error {
+		blobID = asset.BlobID
 		if err := tx.Model(&models.Asset{}).
 			Where("id = ? AND deleted_at IS NULL", asset.ID).
 			Updates(map[string]any{
@@ -178,13 +165,24 @@ func runAssetDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) erro
 			return err
 		}
 
-		return tx.Model(&models.AssetGCJob{}).
+		if err := tx.Model(&models.AssetGCJob{}).
 			Where("id = ?", jobID).
 			Updates(map[string]any{
 				"status":     "done",
 				"updated_at": now,
-			}).Error
+			}).Error; err != nil {
+			return err
+		}
+
+		return ensurePendingBlobDeleteJob(tx, blobID, now)
 	})
+	if err != nil {
+		return markAssetGCJobFailed(jobID, now, err)
+	}
+	_ = ctx
+	_ = asset
+	_ = blobID
+	return nil
 }
 
 func markAssetGCJobFailed(jobID uuid.UUID, now time.Time, cause error) error {
@@ -240,6 +238,149 @@ func RunAssetReferenceReconcilePass(now time.Time, batchSize int) (int, error) {
 		reconciled++
 	}
 	return reconciled, nil
+}
+
+func RunDueBlobGCJobs(ctx context.Context, now time.Time, limit int) (int, error) {
+	if limit <= 0 {
+		limit = defaultAssetGCBatch
+	}
+
+	var jobs []models.BlobGCJob
+	if err := database.DB.
+		Where("job_type = ? AND status = ? AND run_after <= ?", "delete", "pending", now).
+		Order("run_after asc").
+		Limit(limit).
+		Find(&jobs).Error; err != nil {
+		return 0, err
+	}
+
+	processed := 0
+	for _, job := range jobs {
+		processed++
+		if err := runBlobDeleteJob(ctx, job.ID, now); err != nil {
+			log.Printf("[media.gc] blob job=%s failed: %v", job.ID, err)
+		}
+	}
+	return processed, nil
+}
+
+func runBlobDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) error {
+	var job models.BlobGCJob
+	var blob models.BlobObject
+	var shouldDelete bool
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ? AND job_type = ? AND status = ?", jobID, "delete", "pending").First(&job).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.BlobGCJob{}).
+			Where("id = ?", job.ID).
+			Updates(map[string]any{
+				"status":        "running",
+				"attempt_count": gorm.Expr("attempt_count + 1"),
+				"updated_at":    now,
+				"last_error":    nil,
+			}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("id = ?", job.BlobID).First(&blob).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return tx.Model(&models.BlobGCJob{}).
+					Where("id = ?", job.ID).
+					Updates(map[string]any{
+						"status":     "done",
+						"updated_at": now,
+					}).Error
+			}
+			return err
+		}
+
+		var activeAssetCount int64
+		if err := tx.Model(&models.Asset{}).
+			Where("blob_id = ? AND deleted_at IS NULL", job.BlobID).
+			Count(&activeAssetCount).Error; err != nil {
+			return err
+		}
+		if activeAssetCount > 0 {
+			return tx.Model(&models.BlobGCJob{}).
+				Where("id = ?", job.ID).
+				Updates(map[string]any{
+					"status":     "cancelled",
+					"updated_at": now,
+				}).Error
+		}
+
+		shouldDelete = true
+		return nil
+	})
+	if err != nil {
+		return markBlobGCJobFailed(jobID, now, err)
+	}
+	if blob.ID == uuid.Nil || !shouldDelete {
+		return nil
+	}
+
+	if err := initStorageProvider(); err != nil {
+		return markBlobGCJobFailed(jobID, now, err)
+	}
+	if err := storageProvider.DeleteObject(ctx, blob.ObjectKey); err != nil {
+		return markBlobGCJobFailed(jobID, now, err)
+	}
+
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.BlobObject{}).
+			Where("id = ? AND deleted_at IS NULL", blob.ID).
+			Updates(map[string]any{
+				"status":     "deleted",
+				"updated_at": now,
+				"deleted_at": now,
+			}).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.BlobGCJob{}).
+			Where("id = ?", jobID).
+			Updates(map[string]any{
+				"status":     "done",
+				"updated_at": now,
+			}).Error
+	})
+}
+
+func markBlobGCJobFailed(jobID uuid.UUID, now time.Time, cause error) error {
+	message := cause.Error()
+	maxAttempts := assetGCMaxAttemptsFromEnv()
+	retryGap := assetGCRetryGapFromEnv()
+
+	var job models.BlobGCJob
+	if err := database.DB.First(&job, "id = ?", jobID).Error; err != nil {
+		return cause
+	}
+
+	status := "failed"
+	runAfter := job.RunAfter
+	if job.AttemptCount < maxAttempts {
+		attemptCount := job.AttemptCount
+		if attemptCount < 1 {
+			attemptCount = 1
+		}
+		status = "pending"
+		runAfter = now.Add(retryGap * time.Duration(1<<(attemptCount-1)))
+	}
+
+	updateErr := database.DB.Model(&models.BlobGCJob{}).
+		Where("id = ?", jobID).
+		Updates(map[string]any{
+			"status":     status,
+			"run_after":  runAfter,
+			"last_error": message,
+			"updated_at": now,
+		}).Error
+	if updateErr != nil {
+		return errors.Join(cause, updateErr)
+	}
+	return cause
 }
 
 func reconcileOneAsset(now time.Time, assetID uuid.UUID) error {
@@ -379,4 +520,16 @@ func assetReconcileBatchSizeFromEnv() int {
 		return defaultAssetReconcile
 	}
 	return n
+}
+
+func blobDeleteDelayFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_BLOB_DELETE_DELAY"))
+	if raw == "" {
+		return defaultBlobDeleteDelay
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultBlobDeleteDelay
+	}
+	return d
 }

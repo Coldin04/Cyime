@@ -26,6 +26,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.Folder{},
 		&models.Document{},
 		&models.DocumentBody{},
+		&models.DocumentPermission{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -64,6 +65,20 @@ func seedDocumentForWorkspace(t *testing.T, db *gorm.DB, ownerID uuid.UUID, titl
 	}
 
 	return doc.ID
+}
+
+func seedWorkspacePermission(t *testing.T, db *gorm.DB, documentID, userID, createdBy uuid.UUID, role string) {
+	t.Helper()
+	permission := models.DocumentPermission{
+		ID:         uuid.New(),
+		DocumentID: documentID,
+		UserID:     userID,
+		Role:       role,
+		CreatedBy:  createdBy,
+	}
+	if err := db.Create(&permission).Error; err != nil {
+		t.Fatalf("create document permission: %v", err)
+	}
 }
 
 func TestGetFile_Document_DeniesCrossUserAccess(t *testing.T) {
@@ -126,6 +141,71 @@ func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
 
 	if err := UpdateDocumentImageTarget(attackerID, docID, config.ID.String()); err == nil {
 		t.Fatal("expected cross-user image target update to fail")
+	}
+}
+
+func TestShareDocument_AllowsOwnerToGrantEditor(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	targetUserID := uuid.New()
+	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	result, err := ShareDocument(ownerID, docID, targetUserID, "editor")
+	if err != nil {
+		t.Fatalf("share document: %v", err)
+	}
+	if len(result.Members) != 2 {
+		t.Fatalf("expected owner + one member, got %+v", result.Members)
+	}
+}
+
+func TestListSharedDocuments_ReturnsPermissionedDocs(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "viewer")
+
+	result, err := ListSharedDocuments(sharedUserID, 20, 0)
+	if err != nil {
+		t.Fatalf("list shared documents: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].DocumentID != docID {
+		t.Fatalf("unexpected shared documents: %+v", result.Items)
+	}
+	if result.Items[0].MyRole != "viewer" {
+		t.Fatalf("expected viewer role, got %+v", result.Items[0])
+	}
+}
+
+func TestLeaveSharedDocument_RemovesPermissionOnly(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "editor")
+
+	if err := LeaveSharedDocument(sharedUserID, docID); err != nil {
+		t.Fatalf("leave shared document: %v", err)
+	}
+
+	var permissionCount int64
+	if err := db.Model(&models.DocumentPermission{}).Where("document_id = ? AND user_id = ?", docID, sharedUserID).Count(&permissionCount).Error; err != nil {
+		t.Fatalf("count permissions: %v", err)
+	}
+	if permissionCount != 0 {
+		t.Fatalf("expected permission removed, got %d", permissionCount)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load document: %v", err)
+	}
+	if doc.DeletedAt.Valid {
+		t.Fatalf("expected document untouched")
 	}
 }
 
