@@ -315,6 +315,9 @@ func normalizeImageBedConfigInput(input UpsertImageBedConfigInput) (*UpsertImage
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 				return nil, newImageBedConfigError(ImageBedConfigErrFieldInvalid, field.Key, fmt.Sprintf("invalid url for %s", field.Key))
 			}
+			if media.IsPrivateHost(parsed.Hostname()) {
+				return nil, newImageBedConfigError(ImageBedConfigErrFieldInvalid, field.Key, fmt.Sprintf("url for %s points to a disallowed address", field.Key))
+			}
 			fieldValues[field.Key] = strings.TrimRight(parsed.String(), "/")
 		case "number":
 			num, err := strconv.Atoi(value)

@@ -98,11 +98,13 @@ func main() {
 		return
 	}
 
-	encryptedSecret, err := securevalue.EncryptString(provider.ClientSecretEncrypted)
-	if err != nil {
-		log.Fatalf("加密提供商密钥失败：%v", err)
+	if !strings.HasPrefix(provider.ClientSecretEncrypted, securevalue.EncryptedValuePrefix) && provider.ClientSecretEncrypted != "" {
+		encryptedSecret, err := securevalue.EncryptString(provider.ClientSecretEncrypted)
+		if err != nil {
+			log.Fatalf("加密提供商密钥失败：%v", err)
+		}
+		provider.ClientSecretEncrypted = encryptedSecret
 	}
-	provider.ClientSecretEncrypted = encryptedSecret
 
 	// Save to database
 	if err := database.DB.Create(&provider).Error; err != nil {

@@ -14,6 +14,13 @@ import (
 
 const encryptedValuePrefix = "enc:v1:"
 
+// EncryptedValuePrefix is the prefix used for encrypted values stored in the database.
+const EncryptedValuePrefix = encryptedValuePrefix
+
+// ErrInvalidFormat is returned by DecryptString when the input is not a valid
+// encrypted value (e.g. plaintext stored before encryption was introduced).
+var ErrInvalidFormat = errors.New("invalid encrypted value format")
+
 func EncryptString(plaintext string) (string, error) {
 	key, err := loadKey()
 	if err != nil {
@@ -47,7 +54,7 @@ func DecryptString(encrypted string) (string, error) {
 	}
 
 	if !strings.HasPrefix(encrypted, encryptedValuePrefix) {
-		return "", errors.New("invalid encrypted value format")
+		return "", ErrInvalidFormat
 	}
 
 	encoded := strings.TrimPrefix(encrypted, encryptedValuePrefix)

@@ -39,7 +39,7 @@ export type AssetReadURLResponse = {
 };
 
 export type UploadDocumentImageResponse = {
-	targetId: 'managed-r2' | 'see-public' | 'lsky-public' | string;
+	targetId: 'managed-r2' | string;
 	mode: 'managed_asset' | 'external_url' | string;
 	url: string;
 	assetId?: string;

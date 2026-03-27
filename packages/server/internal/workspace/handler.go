@@ -684,6 +684,11 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
+		case "图片上传目标不存在":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Validation Error",
+				Message: err.Error(),
+			})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 				Error:   "Server Error",

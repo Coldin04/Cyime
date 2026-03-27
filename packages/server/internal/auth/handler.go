@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,7 +127,7 @@ func AuthLogin(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	clientSecret, err := securevalue.DecryptString(dbProvider.ClientSecretEncrypted)
+	clientSecret, err := decryptClientSecret(dbProvider.ClientSecretEncrypted)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
 	}
@@ -167,7 +168,7 @@ func AuthCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	clientSecret, err := securevalue.DecryptString(dbProvider.ClientSecretEncrypted)
+	clientSecret, err := decryptClientSecret(dbProvider.ClientSecretEncrypted)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
 	}
@@ -581,4 +582,17 @@ func optionalStringPtr(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+// decryptClientSecret decrypts an OAuth provider's client secret, falling back to
+// treating the stored value as plaintext for historical data that was not encrypted.
+func decryptClientSecret(encrypted string) (string, error) {
+	secret, err := securevalue.DecryptString(encrypted)
+	if err != nil {
+		if errors.Is(err, securevalue.ErrInvalidFormat) {
+			return encrypted, nil
+		}
+		return "", err
+	}
+	return secret, nil
 }

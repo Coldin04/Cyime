@@ -23,9 +23,6 @@ type User struct {
 	AvatarURL       *string
 	AvatarObjectKey *string
 	DocumentQuota   *int
-	SeeAPIToken     *string `gorm:"type:text"`
-	LskyAPIURL      *string `gorm:"type:varchar(255)"`
-	LskyAPIToken    *string `gorm:"type:text"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

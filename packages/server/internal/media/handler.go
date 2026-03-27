@@ -507,7 +507,7 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	result, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
+	result, err := UploadDocumentImage(c.UserContext(), UploadDocumentImageRequest{
 		DocumentID: documentID,
 		UserID:     userID,
 		FileHeader: fileHeader,
@@ -518,7 +518,7 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		var docErr *DocumentImageError
 		switch {
 		case err.Error() == "文档不存在或无权访问":
-			status = fiber.StatusBadRequest
+			status = fiber.StatusForbidden
 			code = "DOCUMENT_IMAGE_FORBIDDEN"
 		case err.Error() == "file is required":
 			status = fiber.StatusBadRequest

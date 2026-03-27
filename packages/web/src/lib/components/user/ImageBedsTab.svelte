@@ -37,9 +37,9 @@
 
 	let loading = $state(false);
 	let saving = $state(false);
-	let deletingId = $state<string | null>(null);
+	let deletingIds = $state(new Set<string>());
 	let deleteCandidateId = $state<string | null>(null);
-	let togglingId = $state<string | null>(null);
+	let togglingIds = $state(new Set<string>());
 	let editingId = $state<string | null>(null);
 	let formDialogOpen = $state(false);
 	let items = $state<ImageBedConfig[]>([]);
@@ -161,7 +161,7 @@
 	}
 
 	async function handleDelete(id: string) {
-		deletingId = id;
+		deletingIds = new Set([...deletingIds, id]);
 		try {
 			await deleteImageBedConfig(id);
 			items = items.filter((item) => item.id !== id);
@@ -172,7 +172,7 @@
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : m.user_image_beds_delete_failed());
 		} finally {
-			deletingId = null;
+			deletingIds = new Set([...deletingIds].filter((x) => x !== id));
 		}
 	}
 
@@ -181,7 +181,7 @@
 	}
 
 	function closeDeleteConfirm() {
-		if (deletingId) return;
+		if (deletingIds.size > 0) return;
 		deleteCandidateId = null;
 	}
 
@@ -219,7 +219,7 @@
 	}
 
 	async function handleToggleEnabled(item: ImageBedConfig) {
-		togglingId = item.id;
+		togglingIds = new Set([...togglingIds, item.id]);
 		try {
 			const updated = await updateImageBedConfig(item.id, toUpdateRequestFromItem(item, !item.isEnabled));
 			items = items.map((row) => (row.id === updated.id ? updated : row));
@@ -227,7 +227,7 @@
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : m.user_image_beds_update_failed());
 		} finally {
-			togglingId = null;
+			togglingIds = new Set([...togglingIds].filter((x) => x !== item.id));
 		}
 	}
 
@@ -379,11 +379,11 @@
 										type="button"
 										class="grid h-7 w-7 place-content-center rounded text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:text-red-300 dark:hover:bg-red-950/30 dark:hover:text-red-200"
 										onclick={() => openDeleteConfirm(item.id)}
-										disabled={deletingId === item.id}
+										disabled={deletingIds.has(item.id)}
 										aria-label={m.common_delete()}
 										title={m.common_delete()}
 									>
-										{#if deletingId === item.id}
+										{#if deletingIds.has(item.id)}
 											<span class="h-4 w-4 text-[10px] leading-4">...</span>
 										{:else}
 											<Trash class="h-4 w-4" />
@@ -398,7 +398,7 @@
 											: 'bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-700 dark:hover:bg-zinc-600'
 								}`}
 								onclick={() => handleToggleEnabled(item)}
-								disabled={togglingId === item.id}
+								disabled={togglingIds.has(item.id)}
 								aria-label={item.isEnabled ? m.user_image_beds_disable_action() : m.user_image_beds_enable_action()}
 								title={item.isEnabled ? m.user_image_beds_disable_action() : m.user_image_beds_enable_action()}
 							>

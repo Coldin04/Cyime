@@ -4,7 +4,7 @@ export type FileItem = {
 	id: string;
 	type: 'folder' | 'document';
 	documentType?: 'rich_text' | 'table' | string;
-	preferredImageTargetId?: 'managed-r2' | 'see-public' | 'lsky-public' | string;
+	preferredImageTargetId?: 'managed-r2' | string;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
@@ -38,7 +38,7 @@ export type CreateDocumentRequest = {
 	contentJson: { [key: string]: unknown };
 	folderId?: string | null;
 	documentType?: 'rich_text' | 'table';
-	preferredImageTargetId?: 'managed-r2' | 'see-public' | 'lsky-public' | string;
+	preferredImageTargetId?: 'managed-r2' | string;
 };
 
 export type CreateDocumentResponse = FileItem;

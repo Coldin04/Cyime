@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
@@ -55,7 +57,19 @@ func newDocumentImageError(code DocumentImageErrorCode, message string) error {
 	}
 }
 
-var imageBedHTTPClient = &http.Client{}
+var imageBedHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
+// skipPrivateHostCheck disables the SSRF guard for test environments.
+// Must only be set to true in tests.
+var skipPrivateHostCheck = false
 
 type UploadDocumentImageRequest struct {
 	DocumentID uuid.UUID
@@ -90,7 +104,7 @@ func (u *managedDocumentImageUploader) Upload(ctx context.Context, req UploadDoc
 	return &UploadDocumentImageResult{
 		TargetID: documentImageTargetManagedR2,
 		Mode:     documentImageModeManagedAsset,
-		URL:      result.Asset.URL,
+		URL:      "",
 		AssetID:  &result.Asset.ID,
 	}, nil
 }
@@ -231,6 +245,9 @@ func validateProviderVariables(provider imagebeds.Provider, variables map[string
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 				return newDocumentImageError(DocumentImageErrProviderConfig, fmt.Sprintf("Invalid URL for %s", field.Key))
 			}
+			if isPrivateHost(parsed.Hostname()) {
+				return newDocumentImageError(DocumentImageErrProviderConfig, fmt.Sprintf("URL for %s points to a disallowed address", field.Key))
+			}
 		}
 		if field.Type == "number" {
 			num, err := strconv.Atoi(value)
@@ -240,6 +257,62 @@ func validateProviderVariables(provider imagebeds.Provider, variables map[string
 		}
 	}
 	return nil
+}
+
+// IsPrivateHost returns true if the hostname resolves to or literally represents a
+// private/loopback/link-local address, preventing SSRF attacks.
+func IsPrivateHost(hostname string) bool {
+	if skipPrivateHostCheck {
+		return false
+	}
+	if strings.EqualFold(hostname, "localhost") || strings.HasSuffix(strings.ToLower(hostname), ".local") {
+		return true
+	}
+	ips, err := net.LookupHost(hostname)
+	if err != nil {
+		// If we cannot resolve, treat as safe (let the HTTP request fail naturally).
+		return false
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if isPrivateIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPrivateHost is an unexported alias for internal use.
+func isPrivateHost(hostname string) bool {
+	return IsPrivateHost(hostname)
+}
+
+// isPrivateIP returns true for loopback, link-local, and RFC-1918 private ranges.
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []string{
+		"127.0.0.0/8",
+		"::1/128",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"fe80::/10",
+		"fc00::/7",
+		"100.64.0.0/10",
+	}
+	for _, cidr := range privateRanges {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildRequestURL(urlTemplate string, variables map[string]string, queryParams []imagebeds.QueryParam) (string, error) {
