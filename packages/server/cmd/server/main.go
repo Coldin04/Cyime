@@ -67,6 +67,11 @@ func main() {
 	userRoutes := api.Group("/user", middleware.Protected())
 	userRoutes.Get("/me", user.GetMe)
 	userRoutes.Get("/overview", user.GetOverview)
+	userRoutes.Get("/image-beds/providers", user.ListImageBedProvidersHandler)
+	userRoutes.Get("/image-beds", user.ListImageBedConfigsHandler)
+	userRoutes.Post("/image-beds", user.CreateImageBedConfigHandler)
+	userRoutes.Put("/image-beds/:id", user.UpdateImageBedConfigHandler)
+	userRoutes.Delete("/image-beds/:id", user.DeleteImageBedConfigHandler)
 	userRoutes.Put("/profile", user.UpdateProfileHandler)
 	userRoutes.Post("/avatar", user.UploadAvatarHandler)
 	userRoutes.Put("/avatar/github", user.UpdateGitHubAvatarHandler)
@@ -75,6 +80,7 @@ func main() {
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 	workspaceRoutes.Post("/documents", workspace.CreateDocumentHandler)
@@ -86,6 +92,11 @@ func main() {
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
 	// Update document title
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
+	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
+	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
+	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
+	workspaceRoutes.Delete("/documents/:id/shares/me", workspace.LeaveSharedDocumentHandler)
+	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document
@@ -100,14 +111,18 @@ func main() {
 	editRoutes.Get("/:id/content", content.GetContentHandler)
 	editRoutes.Put("/:id/content", content.UpdateContentHandler)
 	editRoutes.Post("/:id/assets", media.UploadDocumentAssetHandler)
+	editRoutes.Post("/:id/paste-image", media.UploadDocumentImageHandler)
 
 	// Media read routes:
 	// - URL exchange is protected by JWT.
 	// - Content endpoint is public but protected by short-lived media token.
 	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
+	api.Get("/media/shared-assets", middleware.Protected(), media.ListSharedAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
+	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
+	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
 
 	// Simple root route to check if server is up

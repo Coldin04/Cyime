@@ -38,6 +38,30 @@ export type AssetReadURLResponse = {
 	expiresAt: string;
 };
 
+export type ResolveAssetURLsItem = {
+	assetId: string;
+	url?: string;
+	expiresAt?: string;
+	error?: string;
+	code?: string;
+};
+
+export type ResolveAssetURLsResponse = {
+	items: ResolveAssetURLsItem[];
+};
+
+export type UploadDocumentImageResponse = {
+	targetId: 'managed-r2' | string;
+	mode: 'managed_asset' | 'external_url' | string;
+	url: string;
+	assetId?: string;
+	expiresAt?: string;
+};
+
+export type EditorAPIError = Error & {
+	code?: string;
+};
+
 async function parseJSONResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
 	const raw = await response.text();
 	if (!raw) {
@@ -115,6 +139,36 @@ export async function uploadDocumentAsset(
 	return parseJSONResponse<UploadAssetResponse>(response, 'Failed to parse upload response');
 }
 
+export async function pasteDocumentImage(
+	documentId: string,
+	file: File
+): Promise<UploadDocumentImageResponse> {
+	const formData = new FormData();
+	formData.append('file', file);
+
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/paste-image`, {
+		method: 'POST',
+		body: formData
+	});
+
+	if (!response.ok) {
+		const error = await parseJSONResponse<{ message?: string; code?: string }>(
+			response,
+			'Failed to upload pasted image'
+		);
+		const apiError = new Error(
+			error.message || 'Failed to upload pasted image'
+		) as EditorAPIError;
+		apiError.code = error.code;
+		throw apiError;
+	}
+
+	return parseJSONResponse<UploadDocumentImageResponse>(
+		response,
+		'Failed to parse pasted image upload response'
+	);
+}
+
 export async function getAssetReadURL(assetId: string): Promise<AssetReadURLResponse> {
 	const response = await apiFetch(`/api/v1/media/assets/${assetId}/url`);
 	if (!response.ok) {
@@ -125,4 +179,25 @@ export async function getAssetReadURL(assetId: string): Promise<AssetReadURLResp
 		throw new Error(error.message || 'Failed to get asset read URL');
 	}
 	return parseJSONResponse<AssetReadURLResponse>(response, 'Failed to parse asset read URL response');
+}
+
+export async function resolveAssetReadURLs(assetIds: string[]): Promise<ResolveAssetURLsResponse> {
+	const response = await apiFetch('/api/v1/media/assets/resolve', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ assetIds })
+	});
+	if (!response.ok) {
+		const error = await parseJSONResponse<{ message?: string }>(
+			response,
+			'Failed to resolve asset read URLs'
+		);
+		throw new Error(error.message || 'Failed to resolve asset read URLs');
+	}
+	return parseJSONResponse<ResolveAssetURLsResponse>(
+		response,
+		'Failed to parse asset read URL resolve response'
+	);
 }

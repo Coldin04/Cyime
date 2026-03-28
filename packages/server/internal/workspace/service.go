@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -29,6 +30,289 @@ var ReservedFolderNames = []string{
 }
 
 var ErrDocumentQuotaExceeded = errors.New("已达到文档数量上限")
+
+const (
+	DefaultPreferredImageTargetID = "managed-r2"
+	LegacyPreferredImageTargetID  = "managed-r2"
+)
+
+func normalizePreferredImageTargetID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "":
+		return DefaultPreferredImageTargetID
+	case "managed-r2":
+		return trimmed
+	default:
+		if _, err := uuid.Parse(trimmed); err == nil {
+			return trimmed
+		}
+		return ""
+	}
+}
+
+func resolveDocumentPreferredImageTargetID(value string) string {
+	normalized := normalizePreferredImageTargetID(value)
+	if normalized != "" {
+		return normalized
+	}
+	return LegacyPreferredImageTargetID
+}
+
+func normalizePermissionRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case acl.RoleViewer, acl.RoleEditor:
+		return strings.TrimSpace(role)
+	default:
+		return ""
+	}
+}
+
+func ShareDocument(ownerUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
+	normalizedRole := normalizePermissionRole(role)
+	if normalizedRole == "" {
+		return nil, errors.New("无效的共享角色")
+	}
+	if ownerUserID == targetUserID {
+		return nil, errors.New("不能给自己共享文档")
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+
+		var userCount int64
+		if err := tx.Model(&models.User{}).Where("id = ?", targetUserID).Count(&userCount).Error; err != nil {
+			return err
+		}
+		if userCount == 0 {
+			return errors.New("目标用户不存在")
+		}
+
+		var permission models.DocumentPermission
+		// Include soft-deleted permissions so re-sharing can "revive" an existing row
+		// instead of failing unique(document_id, user_id).
+		err := tx.Unscoped().Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
+		switch {
+		case err == nil:
+			now := time.Now()
+			if err := tx.Unscoped().Model(&models.DocumentPermission{}).
+				Where("id = ?", permission.ID).
+				Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
+			return tx.Unscoped().Model(&models.DocumentPermission{}).
+				Where("id = ?", permission.ID).
+				Updates(map[string]any{
+					"role":       normalizedRole,
+					"updated_at": now,
+				}).Error
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			return tx.Create(&models.DocumentPermission{
+				ID:         uuid.New(),
+				DocumentID: documentID,
+				UserID:     targetUserID,
+				Role:       normalizedRole,
+				CreatedBy:  ownerUserID,
+			}).Error
+		default:
+			return err
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ListDocumentMembers(ownerUserID, documentID)
+}
+
+func RemoveDocumentMember(ownerUserID, documentID, targetUserID uuid.UUID) (*ShareDocumentResponse, error) {
+	if ownerUserID == targetUserID {
+		return nil, errors.New("所有者不能移除自己")
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+
+		return tx.Where("document_id = ? AND user_id = ?", documentID, targetUserID).Delete(&models.DocumentPermission{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ListDocumentMembers(ownerUserID, documentID)
+}
+
+func LeaveSharedDocument(userID, documentID uuid.UUID) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND deleted_at IS NULL", documentID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+		if document.OwnerUserID == userID {
+			return errors.New("所有者不能退出自己的文档共享")
+		}
+
+		result := tx.Where("document_id = ? AND user_id = ?", documentID, userID).Delete(&models.DocumentPermission{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("文档不存在或无权访问")
+		}
+		return nil
+	})
+}
+
+func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentResponse, error) {
+	var document models.Document
+	if err := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档不存在或无权访问")
+		}
+		return nil, err
+	}
+
+	var permissions []models.DocumentPermission
+	if err := database.DB.Where("document_id = ? AND deleted_at IS NULL", documentID).Order("created_at asc").Find(&permissions).Error; err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]uuid.UUID, 0, len(permissions)+1)
+	userIDs = append(userIDs, ownerUserID)
+	for _, permission := range permissions {
+		userIDs = append(userIDs, permission.UserID)
+	}
+
+	var users []models.User
+	if err := database.DB.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	userMap := make(map[uuid.UUID]models.User, len(users))
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	members := make([]ShareDocumentMember, 0, len(permissions)+1)
+	ownerUser := userMap[ownerUserID]
+	members = append(members, ShareDocumentMember{
+		UserID:      ownerUserID,
+		Role:        acl.RoleOwner,
+		DisplayName: ownerUser.DisplayName,
+	})
+	for _, permission := range permissions {
+		memberUser := userMap[permission.UserID]
+		members = append(members, ShareDocumentMember{
+			UserID:      permission.UserID,
+			Role:        permission.Role,
+			DisplayName: memberUser.DisplayName,
+		})
+	}
+
+	return &ShareDocumentResponse{
+		DocumentID: documentID,
+		Members:    members,
+	}, nil
+}
+
+func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentListResponse, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := database.DB.
+		Table("document_permissions AS perms").
+		Joins("JOIN documents AS d ON d.id = perms.document_id AND d.deleted_at IS NULL").
+		Where("perms.user_id = ? AND perms.deleted_at IS NULL", userID)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	type row struct {
+		DocumentID             uuid.UUID
+		Title                  string
+		Excerpt                string
+		DocumentType           string
+		PreferredImageTargetID string
+		FolderID               *uuid.UUID
+		OwnerUserID            uuid.UUID
+		MyRole                 string
+		CreatedAt              time.Time
+		UpdatedAt              time.Time
+	}
+
+	var rows []row
+	if err := query.
+		Select("d.id AS document_id", "d.title", "d.excerpt", "d.document_type", "d.preferred_image_target_id", "d.folder_id", "d.owner_user_id", "perms.role AS my_role", "d.created_at", "d.updated_at").
+		Order("d.updated_at desc").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	ownerIDs := make([]uuid.UUID, 0, len(rows))
+	for _, item := range rows {
+		ownerIDs = append(ownerIDs, item.OwnerUserID)
+	}
+
+	var owners []models.User
+	if len(ownerIDs) > 0 {
+		if err := database.DB.Where("id IN ?", ownerIDs).Find(&owners).Error; err != nil {
+			return nil, err
+		}
+	}
+	ownerMap := make(map[uuid.UUID]models.User, len(owners))
+	for _, owner := range owners {
+		ownerMap[owner.ID] = owner
+	}
+
+	items := make([]SharedDocumentItem, 0, len(rows))
+	for _, item := range rows {
+		owner := ownerMap[item.OwnerUserID]
+		items = append(items, SharedDocumentItem{
+			DocumentID:             item.DocumentID,
+			Title:                  item.Title,
+			Excerpt:                item.Excerpt,
+			DocumentType:           item.DocumentType,
+			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(item.PreferredImageTargetID),
+			FolderID:               item.FolderID,
+			OwnerUserID:            item.OwnerUserID,
+			OwnerDisplayName:       owner.DisplayName,
+			MyRole:                 item.MyRole,
+			CreatedAt:              item.CreatedAt,
+			UpdatedAt:              item.UpdatedAt,
+		})
+	}
+
+	return &SharedDocumentListResponse{
+		Items:   items,
+		HasMore: int64(offset+len(items)) < total,
+		Total:   total,
+	}, nil
+}
 
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
@@ -224,12 +508,19 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 }
 
 // CreateDocument creates a new document with unique title handling.
-func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string) (*models.Document, error) {
+func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID *uuid.UUID, documentType string, preferredImageTargetID string) (*models.Document, error) {
 	if documentType == "" {
 		documentType = "rich_text"
 	}
 	if documentType != "rich_text" && documentType != "table" {
 		return nil, errors.New("不支持的文档类型")
+	}
+	if preferredImageTargetID == "" {
+		preferredImageTargetID = DefaultPreferredImageTargetID
+	}
+	preferredImageTargetID = normalizePreferredImageTargetID(preferredImageTargetID)
+	if preferredImageTargetID == "" {
+		return nil, errors.New("不支持的图片上传目标")
 	}
 
 	// Validate title length
@@ -309,15 +600,16 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 
 		// Create document metadata
 		document = &models.Document{
-			ID:           uuid.New(),
-			OwnerUserID:  userID,
-			FolderID:     folderID,
-			Title:        newTitle,
-			Excerpt:      excerpt,
-			DocumentType: documentType,
-			EditorType:   "tiptap",
-			CreatedBy:    userID,
-			UpdatedBy:    userID,
+			ID:                     uuid.New(),
+			OwnerUserID:            userID,
+			FolderID:               folderID,
+			Title:                  newTitle,
+			Excerpt:                excerpt,
+			DocumentType:           documentType,
+			PreferredImageTargetID: preferredImageTargetID,
+			EditorType:             "tiptap",
+			CreatedBy:              userID,
+			UpdatedBy:              userID,
 		}
 
 		if err := tx.Create(document).Error; err != nil {
@@ -512,16 +804,18 @@ func folderToFileItem(folder models.Folder) FileItem {
 
 // documentToFileItem converts a Document model to FileItem DTO
 func documentToFileItem(document models.Document) FileItem {
+	preferredImageTargetID := resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID)
 	return FileItem{
-		ID:           document.ID,
-		Type:         "document",
-		DocumentType: &document.DocumentType,
-		Name:         document.Title,
-		Title:        &document.Title,
-		Excerpt:      &document.Excerpt,
-		FolderID:     document.FolderID,
-		CreatedAt:    document.CreatedAt,
-		UpdatedAt:    document.UpdatedAt,
+		ID:                     document.ID,
+		Type:                   "document",
+		DocumentType:           &document.DocumentType,
+		PreferredImageTargetID: &preferredImageTargetID,
+		Name:                   document.Title,
+		Title:                  &document.Title,
+		Excerpt:                &document.Excerpt,
+		FolderID:               document.FolderID,
+		CreatedAt:              document.CreatedAt,
+		UpdatedAt:              document.UpdatedAt,
 		Creator: CreatorInfo{
 			ID:          document.CreatedBy,
 			DisplayName: nil,
@@ -634,6 +928,40 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 
 	// Update the title
 	return database.DB.Model(&document).Update("title", trimmedTitle).Error
+}
+
+func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {
+	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
+	if normalized == "" {
+		return errors.New("不支持的图片上传目标")
+	}
+	if normalized != DefaultPreferredImageTargetID {
+		var config models.UserImageBedConfig
+		result := database.DB.
+			Where("id = ? AND user_id = ? AND deleted_at IS NULL AND is_enabled = ?", normalized, userID, true).
+			First(&config)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("图片上传目标不存在")
+			}
+			return result.Error
+		}
+	}
+
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return errors.New("文档不存在")
+		}
+		return result.Error
+	}
+
+	if resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID) == normalized {
+		return nil
+	}
+
+	return database.DB.Model(&document).Update("preferred_image_target_id", normalized).Error
 }
 
 // UpdateFolderName updates the name of a folder

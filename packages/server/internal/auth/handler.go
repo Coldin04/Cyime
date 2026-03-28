@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -125,9 +127,14 @@ func AuthLogin(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	clientSecret, err := decryptClientSecret(dbProvider.ClientSecretEncrypted)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
+	}
+
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
-		ClientSecret: dbProvider.ClientSecretEncrypted,
+		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
@@ -161,9 +168,14 @@ func AuthCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	clientSecret, err := decryptClientSecret(dbProvider.ClientSecretEncrypted)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to decrypt auth provider secret"})
+	}
+
 	oauth2Config := oauth2.Config{
 		ClientID:     dbProvider.ClientID,
-		ClientSecret: dbProvider.ClientSecretEncrypted,
+		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("%s/api/v1/auth/callback/%s", getAPIBaseURL(), providerName),
 		Endpoint:     endpoint,
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
@@ -570,4 +582,17 @@ func optionalStringPtr(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+// decryptClientSecret decrypts an OAuth provider's client secret, falling back to
+// treating the stored value as plaintext for historical data that was not encrypted.
+func decryptClientSecret(encrypted string) (string, error) {
+	secret, err := securevalue.DecryptString(encrypted)
+	if err != nil {
+		if errors.Is(err, securevalue.ErrInvalidFormat) {
+			return encrypted, nil
+		}
+		return "", err
+	}
+	return secret, nil
 }

@@ -42,21 +42,19 @@ func TestRunDueAssetGCJobs_DeletesUnusedAssets(t *testing.T) {
 	storageProvider = mock
 	t.Cleanup(func() { storageProvider = nil })
 
+	blob := seedBlob(t, db, "owner/unused.png", "image/png", 3, "hash-unused")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     userID,
-		DocumentID:      &docID,
-		Filename:        "unused.png",
-		FileHash:        "hash-unused",
-		FileSize:        3,
-		MimeType:        "image/png",
-		StorageProvider: "mock",
-		ObjectKey:       "owner/unused.png",
-		URL:             "http://example.test/unused.png",
-		Visibility:      "private",
-		Status:          "pending_delete",
-		ReferenceCount:  0,
-		CreatedBy:       userID,
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "unused.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)
@@ -79,8 +77,8 @@ func TestRunDueAssetGCJobs_DeletesUnusedAssets(t *testing.T) {
 	if processed != 1 {
 		t.Fatalf("expected processed=1, got %d", processed)
 	}
-	if len(mock.deleteCalls) != 1 || mock.deleteCalls[0] != asset.ObjectKey {
-		t.Fatalf("unexpected delete calls: %+v", mock.deleteCalls)
+	if len(mock.deleteCalls) != 0 {
+		t.Fatalf("asset gc should not delete storage directly, got %+v", mock.deleteCalls)
 	}
 
 	var gotAsset models.Asset
@@ -98,6 +96,14 @@ func TestRunDueAssetGCJobs_DeletesUnusedAssets(t *testing.T) {
 	if gotJob.Status != "done" || gotJob.AttemptCount != 1 {
 		t.Fatalf("expected done job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
 	}
+
+	var blobJob models.BlobGCJob
+	if err := db.First(&blobJob, "blob_id = ?", blob.ID).Error; err != nil {
+		t.Fatalf("load blob job: %v", err)
+	}
+	if blobJob.Status != "pending" {
+		t.Fatalf("expected pending blob job, got %s", blobJob.Status)
+	}
 }
 
 func TestRunDueAssetGCJobs_CancelsWhenAssetIsReferencedAgain(t *testing.T) {
@@ -110,21 +116,19 @@ func TestRunDueAssetGCJobs_CancelsWhenAssetIsReferencedAgain(t *testing.T) {
 	storageProvider = mock
 	t.Cleanup(func() { storageProvider = nil })
 
+	blob := seedBlob(t, db, "owner/used.png", "image/png", 3, "hash-used-worker")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     userID,
-		DocumentID:      &docID,
-		Filename:        "used.png",
-		FileHash:        "hash-used-worker",
-		FileSize:        3,
-		MimeType:        "image/png",
-		StorageProvider: "mock",
-		ObjectKey:       "owner/used.png",
-		URL:             "http://example.test/used.png",
-		Visibility:      "private",
-		Status:          "pending_delete",
-		ReferenceCount:  0,
-		CreatedBy:       userID,
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "used.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)
@@ -177,6 +181,59 @@ func TestRunDueAssetGCJobs_CancelsWhenAssetIsReferencedAgain(t *testing.T) {
 	}
 }
 
+func TestRunAssetReferenceReconcilePass_ReschedulesExistingPendingDeleteJob(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+	now := time.Now()
+
+	t.Setenv("MEDIA_ASSET_DELETE_DELAY", "0s")
+
+	blob := seedBlob(t, db, "owner/reschedule.png", "image/png", 3, "hash-reschedule")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "reschedule.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	job := models.AssetGCJob{
+		ID:       uuid.New(),
+		AssetID:  asset.ID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: now.Add(24 * time.Hour),
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create pending job: %v", err)
+	}
+
+	reconciled, err := RunAssetReferenceReconcilePass(now, 10)
+	if err != nil {
+		t.Fatalf("reconcile pass: %v", err)
+	}
+	if reconciled != 1 {
+		t.Fatalf("expected reconciled=1, got %d", reconciled)
+	}
+
+	var gotJob models.AssetGCJob
+	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if gotJob.RunAfter.After(now.Add(2 * time.Second)) {
+		t.Fatalf("expected run_after rescheduled near now, got %s", gotJob.RunAfter)
+	}
+}
+
 func TestRunDueAssetGCJobs_MarksFailedOnDeleteError(t *testing.T) {
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
@@ -187,21 +244,19 @@ func TestRunDueAssetGCJobs_MarksFailedOnDeleteError(t *testing.T) {
 	storageProvider = mock
 	t.Cleanup(func() { storageProvider = nil })
 
+	blob := seedBlob(t, db, "owner/broken.png", "image/png", 3, "hash-broken")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     userID,
-		DocumentID:      &docID,
-		Filename:        "broken.png",
-		FileHash:        "hash-broken",
-		FileSize:        3,
-		MimeType:        "image/png",
-		StorageProvider: "mock",
-		ObjectKey:       "owner/broken.png",
-		URL:             "http://example.test/broken.png",
-		Visibility:      "private",
-		Status:          "pending_delete",
-		ReferenceCount:  0,
-		CreatedBy:       userID,
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "broken.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)
@@ -226,25 +281,27 @@ func TestRunDueAssetGCJobs_MarksFailedOnDeleteError(t *testing.T) {
 	}
 
 	var gotAsset models.Asset
-	if err := db.First(&gotAsset, "id = ?", asset.ID).Error; err != nil {
+	if err := db.Unscoped().First(&gotAsset, "id = ?", asset.ID).Error; err != nil {
 		t.Fatalf("load asset: %v", err)
 	}
-	if gotAsset.Status != "pending_delete" || gotAsset.DeletedAt.Valid {
-		t.Fatalf("expected asset to stay pending_delete, got status=%s deleted=%v", gotAsset.Status, gotAsset.DeletedAt.Valid)
+	if gotAsset.Status != "deleted" || !gotAsset.DeletedAt.Valid {
+		t.Fatalf("expected asset to be deleted before blob gc, got status=%s deleted=%v", gotAsset.Status, gotAsset.DeletedAt.Valid)
 	}
 
 	var gotJob models.AssetGCJob
 	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if gotJob.Status != "pending" || gotJob.AttemptCount != 1 {
-		t.Fatalf("expected pending retry job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
+	if gotJob.Status != "done" || gotJob.AttemptCount != 1 {
+		t.Fatalf("expected done asset job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
 	}
-	if gotJob.LastError == nil || *gotJob.LastError != "boom" {
-		t.Fatalf("expected last_error=boom, got %+v", gotJob.LastError)
+
+	var gotBlobJob models.BlobGCJob
+	if err := db.First(&gotBlobJob, "blob_id = ?", blob.ID).Error; err != nil {
+		t.Fatalf("load blob job: %v", err)
 	}
-	if !gotJob.RunAfter.After(now) {
-		t.Fatalf("expected retry run_after to be pushed forward, got %s", gotJob.RunAfter)
+	if gotBlobJob.Status != "pending" || gotBlobJob.AttemptCount != 0 {
+		t.Fatalf("expected pending blob job before physical delete, got status=%s attempts=%d", gotBlobJob.Status, gotBlobJob.AttemptCount)
 	}
 }
 
@@ -259,21 +316,19 @@ func TestRunDueAssetGCJobs_MarksFailedWhenMaxAttemptsReached(t *testing.T) {
 	storageProvider = mock
 	t.Cleanup(func() { storageProvider = nil })
 
+	blob := seedBlob(t, db, "owner/broken-final.png", "image/png", 3, "hash-broken-final")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     userID,
-		DocumentID:      &docID,
-		Filename:        "broken-final.png",
-		FileHash:        "hash-broken-final",
-		FileSize:        3,
-		MimeType:        "image/png",
-		StorageProvider: "mock",
-		ObjectKey:       "owner/broken-final.png",
-		URL:             "http://example.test/broken-final.png",
-		Visibility:      "private",
-		Status:          "pending_delete",
-		ReferenceCount:  0,
-		CreatedBy:       userID,
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "broken-final.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)
@@ -301,11 +356,16 @@ func TestRunDueAssetGCJobs_MarksFailedWhenMaxAttemptsReached(t *testing.T) {
 	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if gotJob.Status != "failed" || gotJob.AttemptCount != 1 {
-		t.Fatalf("expected final failed job with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
+	if gotJob.Status != "done" || gotJob.AttemptCount != 1 {
+		t.Fatalf("expected asset gc done with attempt_count=1, got status=%s attempts=%d", gotJob.Status, gotJob.AttemptCount)
 	}
-	if gotJob.LastError == nil || *gotJob.LastError != "boom-final" {
-		t.Fatalf("expected last_error=boom-final, got %+v", gotJob.LastError)
+
+	var gotBlobJob models.BlobGCJob
+	if err := db.First(&gotBlobJob, "blob_id = ?", blob.ID).Error; err != nil {
+		t.Fatalf("load blob job: %v", err)
+	}
+	if gotBlobJob.Status != "pending" {
+		t.Fatalf("expected pending blob job after asset gc, got %s", gotBlobJob.Status)
 	}
 }
 
@@ -315,21 +375,19 @@ func TestRunAssetReferenceReconcilePass_RepairsDriftedAssetState(t *testing.T) {
 	docID := seedOwnedDocument(t, db, userID)
 	now := time.Now()
 
+	blob := seedBlob(t, db, "owner/drifted.png", "image/png", 3, "hash-drifted")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     userID,
-		DocumentID:      &docID,
-		Filename:        "drifted.png",
-		FileHash:        "hash-drifted",
-		FileSize:        3,
-		MimeType:        "image/png",
-		StorageProvider: "local",
-		ObjectKey:       "owner/drifted.png",
-		URL:             "http://example.test/drifted.png",
-		Visibility:      "private",
-		Status:          "ready",
-		ReferenceCount:  99,
-		CreatedBy:       userID,
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "drifted.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 99,
+		CreatedBy:      userID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)

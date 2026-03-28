@@ -86,6 +86,10 @@
 	async function loadPreviewURL(item: MediaAssetItem) {
 		if (!isImageAsset(item)) return;
 		if (previewURLByAssetID[item.id] || previewLoadingByAssetID[item.id]) return;
+		if (item.thumbnailUrl) {
+			previewURLByAssetID = { ...previewURLByAssetID, [item.id]: item.thumbnailUrl };
+			return;
+		}
 
 		previewLoadingByAssetID = { ...previewLoadingByAssetID, [item.id]: true };
 		try {
@@ -139,8 +143,17 @@
 			items = result.items;
 			total = result.total;
 			hasMore = result.hasMore;
+			const nextPreviewURLs = { ...previewURLByAssetID };
+			for (const item of result.items) {
+				if (isImageAsset(item) && item.thumbnailUrl) {
+					nextPreviewURLs[item.id] = item.thumbnailUrl;
+				}
+			}
+			previewURLByAssetID = nextPreviewURLs;
 			for (const item of result.items.slice(0, 6)) {
-				void loadPreviewURL(item);
+				if (!item.thumbnailUrl) {
+					void loadPreviewURL(item);
+				}
 			}
 		} catch (error) {
 			if (requestId !== listRequestId) return;

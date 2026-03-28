@@ -1,0 +1,47 @@
+{
+  "providerType": "imgbb",
+  "displayName": "ImgBB",
+  "description": "ImgBB image hosting",
+  "fields": [
+    {
+      "key": "apiToken",
+      "type": "password",
+      "label": "API Key",
+      "labelKey": "user_image_beds_api_token_label",
+      "placeholder": "Enter ImgBB API key",
+      "placeholderKey": "user_image_beds_api_token_placeholder",
+      "helpText": "在 ImgBB 后台生成 API Key 后填入",
+      "helpTextKey": "user_image_beds_api_token_help",
+      "inputMode": "text",
+      "required": true
+    }
+  ],
+  "runtime": {
+    "defaultBaseUrl": "https://api.imgbb.com/1",
+    "baseUrlEnv": "IMGBB_API_BASE_URL",
+    "apiTokenEnv": "IMGBB_API_KEY"
+  },
+  "upload": {
+    "method": "POST",
+    "urlTemplate": "{{baseUrl}}/upload",
+    "fileField": "image",
+    "headers": [
+      {
+        "key": "Accept",
+        "valueTemplate": "application/json"
+      }
+    ],
+    "query": [
+      {
+        "key": "key",
+        "valueTemplate": "{{apiToken}}",
+        "required": true
+      }
+    ],
+    "formFields": [],
+    "successJsonPath": "success",
+    "successEquals": "true",
+    "resultUrlPaths": ["data.url"],
+    "errorMessagePaths": ["error.message", "message"]
+  }
+}

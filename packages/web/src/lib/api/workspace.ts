@@ -4,6 +4,7 @@ export type FileItem = {
 	id: string;
 	type: 'folder' | 'document';
 	documentType?: 'rich_text' | 'table' | string;
+	preferredImageTargetId?: 'managed-r2' | string;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
@@ -37,9 +38,15 @@ export type CreateDocumentRequest = {
 	contentJson: { [key: string]: unknown };
 	folderId?: string | null;
 	documentType?: 'rich_text' | 'table';
+	preferredImageTargetId?: 'managed-r2' | string;
 };
 
 export type CreateDocumentResponse = FileItem;
+
+export type UpdateDocumentImageTargetResponse = {
+	success: boolean;
+	preferredImageTargetId: string;
+};
 
 export type DeleteResponse = {
 	success: boolean;
@@ -297,6 +304,26 @@ export async function updateDocumentTitle(id: string, title: string): Promise<{ 
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to update title');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentImageTarget(
+	id: string,
+	preferredImageTargetId: string
+): Promise<UpdateDocumentImageTargetResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/image-target`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ preferredImageTargetId })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update image target');
 	}
 
 	return response.json();

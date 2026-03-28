@@ -1,0 +1,64 @@
+{
+  "providerType": "chevereto",
+  "displayName": "Chevereto",
+  "description": "Chevereto API v1 uploader",
+  "fields": [
+    {
+      "key": "baseUrl",
+      "type": "url",
+      "label": "Base URL",
+      "labelKey": "user_image_beds_base_url_label",
+      "placeholder": "https://img.example.com",
+      "placeholderKey": "user_image_beds_base_url_placeholder",
+      "helpText": "填写 Chevereto 站点根地址，不要包含 /api/1/upload",
+      "helpTextKey": "user_image_beds_chevereto_base_url_help",
+      "inputMode": "url",
+      "required": true
+    },
+    {
+      "key": "apiToken",
+      "type": "password",
+      "label": "API Token",
+      "labelKey": "user_image_beds_api_token_label",
+      "placeholder": "Enter API token",
+      "placeholderKey": "user_image_beds_api_token_placeholder",
+      "helpText": "在 Chevereto 后台创建 API Key 后填入",
+      "helpTextKey": "user_image_beds_api_token_help",
+      "inputMode": "text",
+      "required": true
+    }
+  ],
+  "runtime": {
+    "defaultBaseUrl": "",
+    "baseUrlEnv": "CHEVERETO_API_URL",
+    "apiTokenEnv": "CHEVERETO_API_TOKEN"
+  },
+  "upload": {
+    "method": "POST",
+    "urlTemplate": "{{baseUrl}}/api/1/upload",
+    "fileField": "source",
+    "headers": [
+      {
+        "key": "Accept",
+        "valueTemplate": "application/json"
+      }
+    ],
+    "query": [
+      {
+        "key": "key",
+        "valueTemplate": "{{apiToken}}",
+        "required": true
+      },
+      {
+        "key": "format",
+        "valueTemplate": "json",
+        "required": false
+      }
+    ],
+    "formFields": [],
+    "successJsonPath": "status_code",
+    "successEquals": "200",
+    "resultUrlPaths": ["image.url", "image.display_url", "image.url_viewer"],
+    "errorMessagePaths": ["error.message", "status_txt", "status_txt.message"]
+  }
+}
