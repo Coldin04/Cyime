@@ -21,8 +21,8 @@ func main() {
 		reconcileBatch = flag.Int("reconcile-batch", 500, "每轮对账处理的 assets 数量")
 		reconcileLoops = flag.Int("reconcile-loops", 50, "最多跑多少轮对账（防止无限循环）")
 		gcBatch        = flag.Int("gc-batch", 200, "每轮处理的 GC job 数量")
-		immediate      = flag.Bool("immediate", true, "是否创建并重排“立即可执行”的删除任务（asset/blob gc run_after=now）")
-		runDueGC       = flag.Bool("run-due-gc", true, "是否在本次命令中直接处理已到期的 GC job（asset + blob）")
+		immediate      = flag.Bool("immediate", false, "是否创建并重排“立即可执行”的删除任务（asset/blob gc run_after=now）")
+		runDueGC       = flag.Bool("run-due-gc", false, "是否在本次命令中直接处理已到期的 GC job（asset + blob）")
 	)
 	flag.Parse()
 
@@ -38,12 +38,16 @@ func main() {
 
 	if *immediate {
 		// Let reconcile/GC schedule both asset and blob deletions immediately.
-		_ = os.Setenv("MEDIA_ASSET_DELETE_DELAY", "0s")
-		_ = os.Setenv("MEDIA_BLOB_DELETE_DELAY", "0s")
+		if err := os.Setenv("MEDIA_ASSET_DELETE_DELAY", "0s"); err != nil {
+			log.Fatalf("[media-gc] set MEDIA_ASSET_DELETE_DELAY failed: %v", err)
+		}
+		if err := os.Setenv("MEDIA_BLOB_DELETE_DELAY", "0s"); err != nil {
+			log.Fatalf("[media-gc] set MEDIA_BLOB_DELETE_DELAY failed: %v", err)
+		}
 
 		now := time.Now()
 		assetRes := database.DB.Model(&models.AssetGCJob{}).
-			Where("job_type = ? AND status = ?", "delete", "pending").
+			Where("job_type = ? AND status = ? AND run_after > ?", "delete", "pending", now).
 			Updates(map[string]any{
 				"run_after":  now,
 				"updated_at": now,
@@ -53,7 +57,7 @@ func main() {
 		}
 
 		blobRes := database.DB.Model(&models.BlobGCJob{}).
-			Where("job_type = ? AND status = ?", "delete", "pending").
+			Where("job_type = ? AND status = ? AND run_after > ?", "delete", "pending", now).
 			Updates(map[string]any{
 				"run_after":  now,
 				"updated_at": now,

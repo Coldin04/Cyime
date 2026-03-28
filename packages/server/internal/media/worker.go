@@ -543,12 +543,17 @@ func reconcileOneAsset(now time.Time, assetID uuid.UUID) error {
 		err := tx.Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").First(&pending).Error
 		if err == nil {
 			delay := assetDeleteDelayFromEnv()
-			return tx.Model(&models.AssetGCJob{}).
-				Where("id = ?", pending.ID).
-				Updates(map[string]any{
-					"run_after":  now.Add(delay),
-					"updated_at": now,
-				}).Error
+			targetRunAfter := now.Add(delay)
+			// Only pull the schedule earlier; never push an already-earlier job later.
+			if pending.RunAfter.After(targetRunAfter) {
+				return tx.Model(&models.AssetGCJob{}).
+					Where("id = ?", pending.ID).
+					Updates(map[string]any{
+						"run_after":  targetRunAfter,
+						"updated_at": now,
+					}).Error
+			}
+			return nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err

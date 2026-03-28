@@ -632,16 +632,81 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 			if !isUniqueConstraintError(err, "blob_objects.sha256", "blob_objects.size") {
 				return nil, err
 			}
-			log.Printf("[media.upload.service] blob create raced for hash=%s size=%d, reusing existing row", fileHash, req.FileHeader.Size)
-			if deleteErr := storageProvider.DeleteObject(ctx, objectKey); deleteErr != nil {
-				log.Printf("[media.upload.service] cleanup duplicate object failed key=%q err=%v", objectKey, deleteErr)
-			}
+			log.Printf("[media.upload.service] blob create raced for hash=%s size=%d, checking existing rows", fileHash, req.FileHeader.Size)
 			blob, err = findBlobByHash(fileHash, req.FileHeader.Size)
 			if err != nil {
 				return nil, err
 			}
-			if blob == nil {
-				return nil, errors.New("blob create conflicted but no existing blob found")
+			if blob != nil {
+				// Active blob already exists; cleanup the duplicate object we just uploaded.
+				if deleteErr := storageProvider.DeleteObject(ctx, objectKey); deleteErr != nil {
+					log.Printf("[media.upload.service] cleanup duplicate object failed key=%q err=%v", objectKey, deleteErr)
+				}
+			} else {
+				// Unique conflict without an active row usually means a soft-deleted blob exists.
+				// Revive that row and repoint it to the newly uploaded object.
+				var restored *models.BlobObject
+				restoreErr := database.DB.Transaction(func(tx *gorm.DB) error {
+					var softDeleted models.BlobObject
+					unscopedErr := tx.
+						Unscoped().
+						Where("sha256 = ? AND size = ?", fileHash, req.FileHeader.Size).
+						First(&softDeleted).Error
+					if unscopedErr != nil {
+						return unscopedErr
+					}
+
+					now := time.Now()
+					if err := tx.Unscoped().Model(&models.BlobObject{}).
+						Where("id = ? AND sha256 = ? AND size = ?", softDeleted.ID, fileHash, req.FileHeader.Size).
+						Updates(map[string]any{
+							"deleted_at":           nil,
+							"status":               "ready",
+							"mime_type":            contentType,
+							"storage_provider":     uploadResult.Provider,
+							"bucket":               uploadResult.Bucket,
+							"object_key":           objectKey,
+							"thumbnail_object_key": "",
+							"thumbnail_mime_type":  "",
+							"thumbnail_size":       0,
+							"thumbnail_width":      nil,
+							"thumbnail_height":     nil,
+							"thumbnail_status":     blobThumbnailStatusPending,
+							"url":                  uploadResult.URL,
+							"updated_at":           now,
+						}).Error; err != nil {
+						return err
+					}
+
+					if err := tx.Model(&models.BlobGCJob{}).
+						Where("blob_id = ? AND status = ?", softDeleted.ID, "pending").
+						Updates(map[string]any{
+							"status":     "cancelled",
+							"updated_at": now,
+						}).Error; err != nil {
+						return err
+					}
+
+					var active models.BlobObject
+					if err := tx.Where("id = ? AND deleted_at IS NULL", softDeleted.ID).First(&active).Error; err != nil {
+						return err
+					}
+					restored = &active
+					return nil
+				})
+				if restoreErr != nil {
+					if errors.Is(restoreErr, gorm.ErrRecordNotFound) {
+						if deleteErr := storageProvider.DeleteObject(ctx, objectKey); deleteErr != nil {
+							log.Printf("[media.upload.service] cleanup duplicate object after missing blob row failed key=%q err=%v", objectKey, deleteErr)
+						}
+						return nil, errors.New("blob create conflicted but no existing blob found")
+					}
+					return nil, restoreErr
+				}
+				if restored == nil {
+					return nil, errors.New("blob create conflicted but restore result missing")
+				}
+				blob = restored
 			}
 		}
 	}
