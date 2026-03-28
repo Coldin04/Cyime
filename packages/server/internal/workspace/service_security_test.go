@@ -162,6 +162,37 @@ func TestShareDocument_AllowsOwnerToGrantEditor(t *testing.T) {
 	}
 }
 
+func TestShareDocument_RevivesSoftDeletedPermission(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	targetUserID := uuid.New()
+	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	if _, err := ShareDocument(ownerID, docID, targetUserID, "viewer"); err != nil {
+		t.Fatalf("share document: %v", err)
+	}
+	if _, err := RemoveDocumentMember(ownerID, docID, targetUserID); err != nil {
+		t.Fatalf("remove member: %v", err)
+	}
+	if _, err := ShareDocument(ownerID, docID, targetUserID, "editor"); err != nil {
+		t.Fatalf("re-share document: %v", err)
+	}
+
+	var permission models.DocumentPermission
+	if err := db.Unscoped().First(&permission, "document_id = ? AND user_id = ?", docID, targetUserID).Error; err != nil {
+		t.Fatalf("load permission: %v", err)
+	}
+	if permission.DeletedAt.Valid {
+		t.Fatalf("expected permission revived")
+	}
+	if permission.Role != "editor" {
+		t.Fatalf("expected role updated, got %s", permission.Role)
+	}
+}
+
 func TestListSharedDocuments_ReturnsPermissionedDocs(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
