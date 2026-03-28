@@ -5,8 +5,9 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net/url"
+	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -58,6 +59,28 @@ type AssetListResponse struct {
 	Total   int64           `json:"total"`
 }
 
+type SharedAssetListResponse struct {
+	Items   []SharedAssetListItem `json:"items"`
+	HasMore bool                  `json:"hasMore"`
+	Total   int64                 `json:"total"`
+}
+
+type ResolveAssetURLsRequest struct {
+	AssetIDs []string `json:"assetIds"`
+}
+
+type ResolveAssetURLItem struct {
+	AssetID   uuid.UUID `json:"assetId"`
+	URL       string    `json:"url,omitempty"`
+	ExpiresAt string    `json:"expiresAt,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	Code      string    `json:"code,omitempty"`
+}
+
+type ResolveAssetURLsResponse struct {
+	Items []ResolveAssetURLItem `json:"items"`
+}
+
 func GetAssetURLHandler(c *fiber.Ctx) error {
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -83,35 +106,96 @@ func GetAssetURLHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := GetOwnedAsset(userID, assetID); err != nil {
+	resolvedURL, expiresAt, err := ResolveAccessibleAssetReadURL(c.UserContext(), c.BaseURL(), userID, assetID)
+	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
 		})
 	}
-
-	tokenService, err := NewTokenService()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: err.Error(),
-		})
+	formattedExpiresAt := ""
+	if !expiresAt.IsZero() {
+		formattedExpiresAt = expiresAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
-
-	token, expiresAt, err := tokenService.IssueAssetReadToken(assetID, userID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to issue media token",
-		})
-	}
-
-	readURL := c.BaseURL() + "/api/v1/media/assets/" + assetID.String() + "/content?token=" + url.QueryEscape(token)
 	return c.JSON(AssetURLResponse{
 		AssetID:   assetID,
-		URL:       readURL,
-		ExpiresAt: expiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+		URL:       resolvedURL,
+		ExpiresAt: formattedExpiresAt,
 	})
+}
+
+func ResolveAssetURLsHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	var req ResolveAssetURLsRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if len(req.AssetIDs) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "assetIds is required",
+		})
+	}
+
+	if len(req.AssetIDs) > 200 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "assetIds exceeds max size 200",
+		})
+	}
+
+	items := make([]ResolveAssetURLItem, 0, len(req.AssetIDs))
+	for _, rawID := range req.AssetIDs {
+		assetID, parseErr := uuid.Parse(rawID)
+		if parseErr != nil {
+			items = append(items, ResolveAssetURLItem{
+				Error:   "Invalid asset id",
+				Code:    "INVALID_ASSET_ID",
+				AssetID: uuid.Nil,
+			})
+			continue
+		}
+
+		resolvedURL, expiresAt, resolveErr := ResolveAccessibleAssetReadURL(c.UserContext(), c.BaseURL(), userID, assetID)
+		if resolveErr != nil {
+			items = append(items, ResolveAssetURLItem{
+				AssetID: assetID,
+				Error:   "Asset not found or access denied",
+				Code:    "ASSET_NOT_FOUND_OR_FORBIDDEN",
+			})
+			continue
+		}
+
+		item := ResolveAssetURLItem{
+			AssetID: assetID,
+			URL:     resolvedURL,
+		}
+		if !expiresAt.IsZero() {
+			item.ExpiresAt = expiresAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		items = append(items, item)
+	}
+
+	return c.JSON(ResolveAssetURLsResponse{Items: items})
 }
 
 func ListAssetsHandler(c *fiber.Ctx) error {
@@ -154,11 +238,83 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 		}
 	}
 
+	for i := range result.Items {
+		thumbnailURL, _, thumbErr := resolveListThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID, result.Items[i].Visibility, result.Items[i].ObjectKey, result.Items[i].MimeType, result.Items[i].ThumbnailObjectKey, result.Items[i].ThumbnailMimeType, result.Items[i].ThumbnailStatus)
+		if thumbErr == nil {
+			result.Items[i].ThumbnailURL = thumbnailURL
+		}
+	}
+
 	return c.JSON(AssetListResponse{
 		Items:   result.Items,
 		HasMore: result.HasMore,
 		Total:   result.Total,
 	})
+}
+
+func ListSharedAssetsHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	result, err := ListSharedEditableAssets(ListAssetsRequest{
+		UserID: userID,
+		Kind:   c.Query("kind"),
+		Status: c.Query("status"),
+		Query:  c.Query("q"),
+		Limit:  c.QueryInt("limit", 20),
+		Offset: c.QueryInt("offset", 0),
+	})
+	if err != nil {
+		switch err.Error() {
+		case "invalid asset status", "invalid asset kind":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	for i := range result.Items {
+		thumbnailURL, _, thumbErr := resolveListThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID, result.Items[i].Visibility, result.Items[i].ObjectKey, result.Items[i].MimeType, result.Items[i].ThumbnailObjectKey, result.Items[i].ThumbnailMimeType, result.Items[i].ThumbnailStatus)
+		if thumbErr == nil {
+			result.Items[i].ThumbnailURL = thumbnailURL
+		}
+	}
+
+	return c.JSON(SharedAssetListResponse{
+		Items:   result.Items,
+		HasMore: result.HasMore,
+		Total:   result.Total,
+	})
+}
+
+func resolveListThumbnailURL(ctx context.Context, baseURL string, userID uuid.UUID, assetID uuid.UUID, visibility, objectKey, mimeType, thumbnailObjectKey, thumbnailMimeType, thumbnailStatus string) (string, time.Time, error) {
+	asset := models.Asset{
+		ID:         assetID,
+		Visibility: visibility,
+	}
+	if thumbnailStatus == blobThumbnailStatusReady && thumbnailObjectKey != "" {
+		return resolveAssetObjectURL(ctx, baseURL, userID, asset, thumbnailObjectKey, thumbnailMimeType, "/thumbnail")
+	}
+	return resolveAssetObjectURL(ctx, baseURL, userID, asset, objectKey, mimeType, "/content")
 }
 
 func GetAssetContentHandler(c *fiber.Ctx) error {
@@ -170,13 +326,15 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	asset, err := GetAssetByID(assetID)
+	record, err := getAssetBlobByID(assetID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
 		})
 	}
+	asset := record.Asset
+	blob := record.Blob
 
 	if asset.Visibility != "public" {
 		token := c.Query("token")
@@ -221,7 +379,7 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	obj, err := storageProvider.GetObject(context.Background(), asset.ObjectKey)
+	obj, err := storageProvider.GetObject(context.Background(), blob.ObjectKey)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{
 			Error:   "Media Upstream Error",
@@ -230,7 +388,7 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 	}
 	defer obj.Body.Close()
 
-	contentType := asset.MimeType
+	contentType := blob.MimeType
 	if contentType == "" {
 		contentType = obj.ContentType
 	}
@@ -242,6 +400,99 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Internal Server Error",
 			Message: "Failed to read asset content",
+		})
+	}
+	return c.Send(data)
+}
+
+func GetAssetThumbnailHandler(c *fiber.Ctx) error {
+	assetID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid asset id",
+		})
+	}
+
+	record, err := getAssetBlobByID(assetID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+			Error:   "Not Found",
+			Message: err.Error(),
+		})
+	}
+	asset := record.Asset
+	blob := record.Blob
+
+	if asset.Visibility != "public" {
+		token := c.Query("token")
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Missing media token",
+			})
+		}
+
+		tokenService, err := NewTokenService()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+
+		claims, err := tokenService.VerifyAssetReadToken(token)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Invalid media token: " + err.Error(),
+			})
+		}
+
+		if claims.AssetID != asset.ID {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Media token does not match asset",
+			})
+		}
+	}
+
+	if err := initStorageProvider(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	objectKey := blob.ObjectKey
+	contentType := blob.MimeType
+	if blob.ThumbnailStatus == blobThumbnailStatusReady && blob.ThumbnailObjectKey != "" {
+		objectKey = blob.ThumbnailObjectKey
+		if blob.ThumbnailMimeType != "" {
+			contentType = blob.ThumbnailMimeType
+		}
+	}
+
+	obj, err := storageProvider.GetObject(context.Background(), objectKey)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{
+			Error:   "Media Upstream Error",
+			Message: err.Error(),
+		})
+	}
+	defer obj.Body.Close()
+
+	if contentType == "" {
+		contentType = obj.ContentType
+	}
+	c.Set("Content-Type", contentType)
+	c.Set("Cache-Control", "private, max-age=60")
+
+	data, err := io.ReadAll(obj.Body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Failed to read asset thumbnail",
 		})
 	}
 	return c.Send(data)
@@ -350,27 +601,6 @@ func ValidateVisibility(visibility string) error {
 	}
 }
 
-func buildSignedAssetReadURL(baseURL string, assetID uuid.UUID, userID uuid.UUID, visibility string) (string, string, error) {
-	readURL := baseURL + "/api/v1/media/assets/" + assetID.String() + "/content"
-	expiresAt := ""
-	if visibility == "public" {
-		return readURL, expiresAt, nil
-	}
-
-	tokenService, err := NewTokenService()
-	if err != nil {
-		return "", "", err
-	}
-	token, exp, err := tokenService.IssueAssetReadToken(assetID, userID)
-	if err != nil {
-		return "", "", errors.New("Failed to issue media token")
-	}
-
-	readURL = readURL + "?token=" + url.QueryEscape(token)
-	expiresAt = exp.UTC().Format("2006-01-02T15:04:05Z")
-	return readURL, expiresAt, nil
-}
-
 // UploadDocumentAssetHandler handles POST /api/v1/edit/documents/:id/assets
 func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	defer func() {
@@ -442,30 +672,42 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	}
 
 	asset := result.Asset
-	docID := documentID
-	if asset.DocumentID != nil {
-		docID = *asset.DocumentID
-	}
-
-	readURL, expiresAt, err := buildSignedAssetReadURL(c.BaseURL(), asset.ID, userID, asset.Visibility)
+	record, err := getAssetBlobByID(asset.ID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Internal Server Error",
 			Message: err.Error(),
 		})
 	}
+	blob := record.Blob
+	docID := documentID
+	if asset.DocumentID != nil {
+		docID = *asset.DocumentID
+	}
 
-	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, asset.StorageProvider, asset.ObjectKey)
+	readURL, expiresAtAtTime, err := ResolveAccessibleAssetReadURL(c.UserContext(), c.BaseURL(), userID, asset.ID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+	expiresAt := ""
+	if !expiresAtAtTime.IsZero() {
+		expiresAt = expiresAtAtTime.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
+	log.Printf("[media.upload] success asset=%s provider=%s objectKey=%q", asset.ID, blob.StorageProvider, blob.ObjectKey)
 	return c.Status(fiber.StatusCreated).JSON(UploadAssetResponse{
 		ID:              asset.ID,
 		AssetID:         asset.ID,
 		DocumentID:      docID,
 		Kind:            asset.Kind,
 		Filename:        asset.Filename,
-		MimeType:        asset.MimeType,
-		FileSize:        asset.FileSize,
-		StorageProvider: asset.StorageProvider,
-		ObjectKey:       asset.ObjectKey,
+		MimeType:        blob.MimeType,
+		FileSize:        blob.Size,
+		StorageProvider: blob.StorageProvider,
+		ObjectKey:       blob.ObjectKey,
 		URL:             readURL,
 		ExpiresAt:       expiresAt,
 		Visibility:      asset.Visibility,
@@ -557,19 +799,16 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 	}
 
 	if result.Mode == documentImageModeManagedAsset && result.AssetID != nil {
-		asset, err := GetOwnedAsset(userID, *result.AssetID)
+		resolvedURL, expiresAt, err := ResolveAccessibleAssetReadURL(c.UserContext(), c.BaseURL(), userID, *result.AssetID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 				Error:   "Internal Server Error",
 				Message: err.Error(),
 			})
 		}
-		response.URL, response.ExpiresAt, err = buildSignedAssetReadURL(c.BaseURL(), asset.ID, userID, asset.Visibility)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
-				Message: err.Error(),
-			})
+		response.URL = resolvedURL
+		if !expiresAt.IsZero() {
+			response.ExpiresAt = expiresAt.UTC().Format("2006-01-02T15:04:05Z")
 		}
 	}
 

@@ -212,6 +212,26 @@ type DocumentBody struct {
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (p *DocumentPermission) BeforeCreate(tx *gorm.DB) (err error) {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentPermission stores per-user access to a document.
+type DocumentPermission struct {
+	ID         uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_user_permission"`
+	UserID     uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:idx_document_user_permission"`
+	Role       string         `gorm:"type:varchar(20);not null;default:'viewer';index"`
+	CreatedBy  uuid.UUID      `gorm:"type:uuid;not null"`
+	CreatedAt  time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt  time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
 func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
@@ -221,28 +241,53 @@ func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
 
 // Asset represents a stored binary resource such as an image, video, or file.
 type Asset struct {
-	ID              uuid.UUID  `gorm:"type:uuid;primary_key"`
-	OwnerUserID     uuid.UUID  `gorm:"not null;index:idx_owner_document"`
-	DocumentID      *uuid.UUID `gorm:"type:uuid;index:idx_owner_document"`
-	Kind            string     `gorm:"type:varchar(20);not null;default:'image'"`
-	Filename        string     `gorm:"type:varchar(255);not null"`
-	FileHash        string     `gorm:"type:varchar(64);not null;index"`
-	FileSize        int64      `gorm:"not null"`
-	MimeType        string     `gorm:"type:varchar(100);not null"`
-	StorageProvider string     `gorm:"type:varchar(50);not null;default:'r2'"`
-	Bucket          string     `gorm:"type:varchar(255)"`
-	ObjectKey       string     `gorm:"type:varchar(255);not null;unique"`
-	URL             string     `gorm:"type:text;not null"`
-	Visibility      string     `gorm:"type:varchar(20);not null;default:'private'"`
-	AltText         *string    `gorm:"type:text"`
-	Width           *int       `gorm:"type:int"`
-	Height          *int       `gorm:"type:int"`
-	Status          string     `gorm:"type:varchar(20);not null;default:'ready'"`
-	ReferenceCount  int        `gorm:"not null;default:0;index"`
-	CreatedBy       uuid.UUID  `gorm:"not null"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ID             uuid.UUID  `gorm:"type:uuid;primary_key"`
+	OwnerUserID    uuid.UUID  `gorm:"not null;index:idx_owner_document;uniqueIndex:idx_owner_blob_asset"`
+	DocumentID     *uuid.UUID `gorm:"type:uuid;index:idx_owner_document"`
+	BlobID         uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_owner_blob_asset"`
+	Kind           string     `gorm:"type:varchar(20);not null;default:'image'"`
+	Filename       string     `gorm:"type:varchar(255);not null"`
+	URL            string     `gorm:"type:text;not null"`
+	Visibility     string     `gorm:"type:varchar(20);not null;default:'private'"`
+	AltText        *string    `gorm:"type:text"`
+	Width          *int       `gorm:"type:int"`
+	Height         *int       `gorm:"type:int"`
+	Status         string     `gorm:"type:varchar(20);not null;default:'ready'"`
+	ReferenceCount int        `gorm:"not null;default:0;index"`
+	CreatedBy      uuid.UUID  `gorm:"not null"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (b *BlobObject) BeforeCreate(tx *gorm.DB) (err error) {
+	if b.ID == uuid.Nil {
+		b.ID = uuid.New()
+	}
+	return
+}
+
+// BlobObject represents one deduplicated physical object in object storage.
+type BlobObject struct {
+	ID                 uuid.UUID `gorm:"type:uuid;primary_key"`
+	SHA256             string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_blob_hash_size"`
+	Size               int64     `gorm:"not null;uniqueIndex:idx_blob_hash_size"`
+	MimeType           string    `gorm:"type:varchar(100);not null"`
+	StorageProvider    string    `gorm:"type:varchar(50);not null;default:'r2'"`
+	Bucket             string    `gorm:"type:varchar(255)"`
+	ObjectKey          string    `gorm:"type:varchar(255);not null;unique"`
+	ThumbnailObjectKey string    `gorm:"type:varchar(255)"`
+	ThumbnailMimeType  string    `gorm:"type:varchar(100)"`
+	ThumbnailSize      int64
+	ThumbnailWidth     *int
+	ThumbnailHeight    *int
+	ThumbnailStatus    string `gorm:"type:varchar(20);not null;default:'pending'"`
+	URL                string `gorm:"type:text;not null"`
+	Status             string `gorm:"type:varchar(20);not null;default:'ready'"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -287,6 +332,28 @@ type AssetGCJob struct {
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
 
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (j *BlobGCJob) BeforeCreate(tx *gorm.DB) (err error) {
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	return
+}
+
+// BlobGCJob stores delayed cleanup work for unused physical objects.
+type BlobGCJob struct {
+	ID           uuid.UUID      `gorm:"type:uuid;primary_key"`
+	BlobID       uuid.UUID      `gorm:"type:uuid;not null;index"`
+	JobType      string         `gorm:"type:varchar(20);not null;index"`
+	Status       string         `gorm:"type:varchar(20);not null;default:'pending';index"`
+	RunAfter     time.Time      `gorm:"not null;index"`
+	AttemptCount int            `gorm:"not null;default:0"`
+	LastError    *string        `gorm:"type:text"`
+	CreatedAt    time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
+}
+
 // Set GORM table names to use snake_case
 func (User) TableName() string {
 	return "users"
@@ -320,6 +387,14 @@ func (DocumentBody) TableName() string {
 	return "document_bodies"
 }
 
+func (DocumentPermission) TableName() string {
+	return "document_permissions"
+}
+
+func (BlobObject) TableName() string {
+	return "blob_objects"
+}
+
 func (Asset) TableName() string {
 	return "assets"
 }
@@ -330,4 +405,8 @@ func (DocumentAssetRef) TableName() string {
 
 func (AssetGCJob) TableName() string {
 	return "asset_gc_jobs"
+}
+
+func (BlobGCJob) TableName() string {
+	return "blob_gc_jobs"
 }

@@ -24,15 +24,50 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 		&models.User{},
 		&models.Document{},
 		&models.DocumentBody{},
+		&models.DocumentPermission{},
+		&models.BlobObject{},
 		&models.Asset{},
 		&models.DocumentAssetRef{},
 		&models.AssetGCJob{},
+		&models.BlobGCJob{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 
 	database.DB = db
 	return db
+}
+
+func seedContentPermission(t *testing.T, db *gorm.DB, documentID, userID, createdBy uuid.UUID, role string) {
+	t.Helper()
+	permission := models.DocumentPermission{
+		ID:         uuid.New(),
+		DocumentID: documentID,
+		UserID:     userID,
+		Role:       role,
+		CreatedBy:  createdBy,
+	}
+	if err := db.Create(&permission).Error; err != nil {
+		t.Fatalf("create document permission: %v", err)
+	}
+}
+
+func seedContentBlob(t *testing.T, db *gorm.DB, objectKey string, mimeType string, size int64, hash string) models.BlobObject {
+	t.Helper()
+	blob := models.BlobObject{
+		ID:              uuid.New(),
+		SHA256:          hash,
+		Size:            size,
+		MimeType:        mimeType,
+		StorageProvider: "local",
+		ObjectKey:       objectKey,
+		URL:             "http://example.test/" + objectKey,
+		Status:          "ready",
+	}
+	if err := db.Create(&blob).Error; err != nil {
+		t.Fatalf("create blob: %v", err)
+	}
+	return blob
 }
 
 func seedDocumentForContent(t *testing.T, db *gorm.DB, ownerID uuid.UUID, title, contentJSON string) (uuid.UUID, uuid.UUID) {
@@ -78,6 +113,22 @@ func TestGetContent_DeniesCrossUserAccess(t *testing.T) {
 	}
 }
 
+func TestGetContent_AllowsViewerPermission(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"shared"}]}]}`)
+	seedContentPermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	result, err := GetContent(viewerID, docID)
+	if err != nil {
+		t.Fatalf("expected shared viewer access, got %v", err)
+	}
+	if result.DocumentID != docID {
+		t.Fatalf("unexpected document result: %+v", result)
+	}
+}
+
 func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
@@ -101,40 +152,74 @@ func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	}
 }
 
+func TestUpdateContent_AllowsEditorPermission(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+	seedContentPermission(t, db, docID, editorID, ownerID, "editor")
+
+	blob := seedContentBlob(t, db, "owner/shared.png", "image/png", 12, "hash-shared")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "shared.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 0,
+		CreatedBy:      ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, asset.ID))
+	if _, err := UpdateContent(editorID, docID, payload); err != nil {
+		t.Fatalf("expected shared editor update to succeed, got %v", err)
+	}
+
+	var ref models.DocumentAssetRef
+	if err := db.First(&ref, "document_id = ? AND asset_id = ?", docID, asset.ID).Error; err != nil {
+		t.Fatalf("load ref: %v", err)
+	}
+	if ref.OwnerUserID != ownerID {
+		t.Fatalf("expected ref owner to stay document owner, got %s", ref.OwnerUserID)
+	}
+}
+
 func TestUpdateContent_SyncsDocumentAssetRefsAndAssetState(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 
+	blobA := seedContentBlob(t, db, "owner/a.png", "image/png", 10, "hash-a")
 	assetA := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     ownerID,
-		Filename:        "a.png",
-		FileHash:        "hash-a",
-		FileSize:        10,
-		MimeType:        "image/png",
-		StorageProvider: "local",
-		ObjectKey:       "owner/a.png",
-		URL:             "http://example.test/a.png",
-		Visibility:      "private",
-		Status:          "ready",
-		ReferenceCount:  0,
-		CreatedBy:       ownerID,
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		BlobID:         blobA.ID,
+		Kind:           "image",
+		Filename:       "a.png",
+		URL:            blobA.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 0,
+		CreatedBy:      ownerID,
 	}
+	blobB := seedContentBlob(t, db, "owner/b.png", "image/png", 11, "hash-b")
 	assetB := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     ownerID,
-		Filename:        "b.png",
-		FileHash:        "hash-b",
-		FileSize:        11,
-		MimeType:        "image/png",
-		StorageProvider: "local",
-		ObjectKey:       "owner/b.png",
-		URL:             "http://example.test/b.png",
-		Visibility:      "private",
-		Status:          "ready",
-		ReferenceCount:  0,
-		CreatedBy:       ownerID,
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		BlobID:         blobB.ID,
+		Kind:           "image",
+		Filename:       "b.png",
+		URL:            blobB.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 0,
+		CreatedBy:      ownerID,
 	}
 	if err := db.Create(&assetA).Error; err != nil {
 		t.Fatalf("create assetA: %v", err)
@@ -199,19 +284,17 @@ func TestUpdateContent_RejectsForeignAssetReference(t *testing.T) {
 	otherUserID := uuid.New()
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 
+	foreignBlob := seedContentBlob(t, db, "other/foreign.png", "image/png", 99, "hash-foreign")
 	foreignAsset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     otherUserID,
-		Filename:        "foreign.png",
-		FileHash:        "hash-foreign",
-		FileSize:        99,
-		MimeType:        "image/png",
-		StorageProvider: "local",
-		ObjectKey:       "other/foreign.png",
-		URL:             "http://example.test/foreign.png",
-		Visibility:      "private",
-		Status:          "ready",
-		CreatedBy:       otherUserID,
+		ID:          uuid.New(),
+		OwnerUserID: otherUserID,
+		BlobID:      foreignBlob.ID,
+		Kind:        "image",
+		Filename:    "foreign.png",
+		URL:         foreignBlob.URL,
+		Visibility:  "private",
+		Status:      "ready",
+		CreatedBy:   otherUserID,
 	}
 	if err := db.Create(&foreignAsset).Error; err != nil {
 		t.Fatalf("create foreign asset: %v", err)
@@ -228,20 +311,18 @@ func TestDeleteAndRestoreContent_ReconcilesDocumentAssetRefs(t *testing.T) {
 	ownerID := uuid.New()
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 
+	blob := seedContentBlob(t, db, "owner/asset.png", "image/png", 42, "hash-asset")
 	asset := models.Asset{
-		ID:              uuid.New(),
-		OwnerUserID:     ownerID,
-		Filename:        "asset.png",
-		FileHash:        "hash-asset",
-		FileSize:        42,
-		MimeType:        "image/png",
-		StorageProvider: "local",
-		ObjectKey:       "owner/asset.png",
-		URL:             "http://example.test/asset.png",
-		Visibility:      "private",
-		Status:          "ready",
-		ReferenceCount:  0,
-		CreatedBy:       ownerID,
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "asset.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 0,
+		CreatedBy:      ownerID,
 	}
 	if err := db.Create(&asset).Error; err != nil {
 		t.Fatalf("create asset: %v", err)

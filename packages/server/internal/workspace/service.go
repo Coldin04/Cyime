@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -56,6 +57,261 @@ func resolveDocumentPreferredImageTargetID(value string) string {
 		return normalized
 	}
 	return LegacyPreferredImageTargetID
+}
+
+func normalizePermissionRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case acl.RoleViewer, acl.RoleEditor:
+		return strings.TrimSpace(role)
+	default:
+		return ""
+	}
+}
+
+func ShareDocument(ownerUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
+	normalizedRole := normalizePermissionRole(role)
+	if normalizedRole == "" {
+		return nil, errors.New("无效的共享角色")
+	}
+	if ownerUserID == targetUserID {
+		return nil, errors.New("不能给自己共享文档")
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+
+		var userCount int64
+		if err := tx.Model(&models.User{}).Where("id = ?", targetUserID).Count(&userCount).Error; err != nil {
+			return err
+		}
+		if userCount == 0 {
+			return errors.New("目标用户不存在")
+		}
+
+		var permission models.DocumentPermission
+		// Include soft-deleted permissions so re-sharing can "revive" an existing row
+		// instead of failing unique(document_id, user_id).
+		err := tx.Unscoped().Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
+		switch {
+		case err == nil:
+			now := time.Now()
+			if err := tx.Unscoped().Model(&models.DocumentPermission{}).
+				Where("id = ?", permission.ID).
+				Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
+			return tx.Unscoped().Model(&models.DocumentPermission{}).
+				Where("id = ?", permission.ID).
+				Updates(map[string]any{
+					"role":       normalizedRole,
+					"updated_at": now,
+				}).Error
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			return tx.Create(&models.DocumentPermission{
+				ID:         uuid.New(),
+				DocumentID: documentID,
+				UserID:     targetUserID,
+				Role:       normalizedRole,
+				CreatedBy:  ownerUserID,
+			}).Error
+		default:
+			return err
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ListDocumentMembers(ownerUserID, documentID)
+}
+
+func RemoveDocumentMember(ownerUserID, documentID, targetUserID uuid.UUID) (*ShareDocumentResponse, error) {
+	if ownerUserID == targetUserID {
+		return nil, errors.New("所有者不能移除自己")
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+
+		return tx.Where("document_id = ? AND user_id = ?", documentID, targetUserID).Delete(&models.DocumentPermission{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ListDocumentMembers(ownerUserID, documentID)
+}
+
+func LeaveSharedDocument(userID, documentID uuid.UUID) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var document models.Document
+		if err := tx.Where("id = ? AND deleted_at IS NULL", documentID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return err
+		}
+		if document.OwnerUserID == userID {
+			return errors.New("所有者不能退出自己的文档共享")
+		}
+
+		result := tx.Where("document_id = ? AND user_id = ?", documentID, userID).Delete(&models.DocumentPermission{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("文档不存在或无权访问")
+		}
+		return nil
+	})
+}
+
+func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentResponse, error) {
+	var document models.Document
+	if err := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档不存在或无权访问")
+		}
+		return nil, err
+	}
+
+	var permissions []models.DocumentPermission
+	if err := database.DB.Where("document_id = ? AND deleted_at IS NULL", documentID).Order("created_at asc").Find(&permissions).Error; err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]uuid.UUID, 0, len(permissions)+1)
+	userIDs = append(userIDs, ownerUserID)
+	for _, permission := range permissions {
+		userIDs = append(userIDs, permission.UserID)
+	}
+
+	var users []models.User
+	if err := database.DB.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	userMap := make(map[uuid.UUID]models.User, len(users))
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	members := make([]ShareDocumentMember, 0, len(permissions)+1)
+	ownerUser := userMap[ownerUserID]
+	members = append(members, ShareDocumentMember{
+		UserID:      ownerUserID,
+		Role:        acl.RoleOwner,
+		DisplayName: ownerUser.DisplayName,
+	})
+	for _, permission := range permissions {
+		memberUser := userMap[permission.UserID]
+		members = append(members, ShareDocumentMember{
+			UserID:      permission.UserID,
+			Role:        permission.Role,
+			DisplayName: memberUser.DisplayName,
+		})
+	}
+
+	return &ShareDocumentResponse{
+		DocumentID: documentID,
+		Members:    members,
+	}, nil
+}
+
+func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentListResponse, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := database.DB.
+		Table("document_permissions AS perms").
+		Joins("JOIN documents AS d ON d.id = perms.document_id AND d.deleted_at IS NULL").
+		Where("perms.user_id = ? AND perms.deleted_at IS NULL", userID)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	type row struct {
+		DocumentID             uuid.UUID
+		Title                  string
+		Excerpt                string
+		DocumentType           string
+		PreferredImageTargetID string
+		FolderID               *uuid.UUID
+		OwnerUserID            uuid.UUID
+		MyRole                 string
+		CreatedAt              time.Time
+		UpdatedAt              time.Time
+	}
+
+	var rows []row
+	if err := query.
+		Select("d.id AS document_id", "d.title", "d.excerpt", "d.document_type", "d.preferred_image_target_id", "d.folder_id", "d.owner_user_id", "perms.role AS my_role", "d.created_at", "d.updated_at").
+		Order("d.updated_at desc").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	ownerIDs := make([]uuid.UUID, 0, len(rows))
+	for _, item := range rows {
+		ownerIDs = append(ownerIDs, item.OwnerUserID)
+	}
+
+	var owners []models.User
+	if len(ownerIDs) > 0 {
+		if err := database.DB.Where("id IN ?", ownerIDs).Find(&owners).Error; err != nil {
+			return nil, err
+		}
+	}
+	ownerMap := make(map[uuid.UUID]models.User, len(owners))
+	for _, owner := range owners {
+		ownerMap[owner.ID] = owner
+	}
+
+	items := make([]SharedDocumentItem, 0, len(rows))
+	for _, item := range rows {
+		owner := ownerMap[item.OwnerUserID]
+		items = append(items, SharedDocumentItem{
+			DocumentID:             item.DocumentID,
+			Title:                  item.Title,
+			Excerpt:                item.Excerpt,
+			DocumentType:           item.DocumentType,
+			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(item.PreferredImageTargetID),
+			FolderID:               item.FolderID,
+			OwnerUserID:            item.OwnerUserID,
+			OwnerDisplayName:       owner.DisplayName,
+			MyRole:                 item.MyRole,
+			CreatedAt:              item.CreatedAt,
+			UpdatedAt:              item.UpdatedAt,
+		})
+	}
+
+	return &SharedDocumentListResponse{
+		Items:   items,
+		HasMore: int64(offset+len(items)) < total,
+		Total:   total,
+	}, nil
 }
 
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
