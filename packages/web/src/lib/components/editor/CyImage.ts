@@ -5,26 +5,8 @@ export const cyImageAlignments = ['content', 'full'] as const;
 
 export const CyImage = Image.extend({
 	addAttributes() {
-	return {
+		return {
 			...this.parent?.(),
-			assetId: {
-				default: null,
-				parseHTML: (element) => element.getAttribute('data-asset-id'),
-				renderHTML: (attributes) => {
-					const assetId =
-						typeof attributes.assetId === 'string' && attributes.assetId.trim() !== ''
-							? attributes.assetId.trim()
-							: null;
-
-					if (!assetId) {
-						return {};
-					}
-
-					return {
-						'data-asset-id': assetId
-					};
-				}
-			},
 			alt: {
 				default: null,
 				parseHTML: (element) => element.getAttribute('alt'),

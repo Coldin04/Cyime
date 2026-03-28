@@ -144,39 +144,3 @@ type BatchMoveResponse struct {
 	MovedCount  int          `json:"movedCount"`
 	FailedItems []FailedItem `json:"failedItems,omitempty"`
 }
-
-type ShareDocumentRequest struct {
-	UserID uuid.UUID `json:"userId"`
-	Role   string    `json:"role"`
-}
-
-type ShareDocumentMember struct {
-	UserID      uuid.UUID `json:"userId"`
-	Role        string    `json:"role"`
-	DisplayName *string   `json:"displayName,omitempty"`
-}
-
-type ShareDocumentResponse struct {
-	DocumentID uuid.UUID             `json:"documentId"`
-	Members    []ShareDocumentMember `json:"members"`
-}
-
-type SharedDocumentItem struct {
-	DocumentID             uuid.UUID  `json:"documentId"`
-	Title                  string     `json:"title"`
-	Excerpt                string     `json:"excerpt"`
-	DocumentType           string     `json:"documentType"`
-	PreferredImageTargetID string     `json:"preferredImageTargetId"`
-	FolderID               *uuid.UUID `json:"folderId,omitempty"`
-	OwnerUserID            uuid.UUID  `json:"ownerUserId"`
-	OwnerDisplayName       *string    `json:"ownerDisplayName,omitempty"`
-	MyRole                 string     `json:"myRole"`
-	CreatedAt              time.Time  `json:"createdAt"`
-	UpdatedAt              time.Time  `json:"updatedAt"`
-}
-
-type SharedDocumentListResponse struct {
-	Items   []SharedDocumentItem `json:"items"`
-	HasMore bool                 `json:"hasMore"`
-	Total   int64                `json:"total"`
-}

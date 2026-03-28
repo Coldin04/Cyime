@@ -54,8 +54,6 @@ func Connect() {
 	// Set RESET_WORKSPACE_TABLES_ON_BOOT=true to drop workspace/content/media tables.
 	if config.IsTrue(os.Getenv("RESET_WORKSPACE_TABLES_ON_BOOT")) {
 		resetTables := []string{
-			"blob_gc_jobs",
-			"blob_objects",
 			"asset_gc_jobs",
 			"assets",
 			"document_asset_refs",
@@ -85,12 +83,9 @@ func Connect() {
 		&models.Folder{},
 		&models.Document{},
 		&models.DocumentBody{},
-		&models.DocumentPermission{},
-		&models.BlobObject{},
 		&models.Asset{},
 		&models.DocumentAssetRef{},
 		&models.AssetGCJob{},
-		&models.BlobGCJob{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)

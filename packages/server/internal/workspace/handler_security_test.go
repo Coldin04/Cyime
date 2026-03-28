@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,11 +19,6 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 		return c.Next()
 	})
 	app.Get("/files/:id", GetFileHandler)
-	app.Get("/shared/documents", ListSharedDocumentsHandler)
-	app.Get("/documents/:id/shares", ListDocumentMembersHandler)
-	app.Post("/documents/:id/shares", ShareDocumentHandler)
-	app.Delete("/documents/:id/shares/me", LeaveSharedDocumentHandler)
-	app.Delete("/documents/:id/shares/:userId", RemoveDocumentMemberHandler)
 	app.Delete("/files/:id", DeleteFileHandler)
 	app.Post("/files/batch-delete", BatchDeleteHandler)
 	app.Post("/files/batch-move", BatchMoveHandler)
@@ -149,71 +143,5 @@ func TestBatchMoveHandler_Document_CrossUserDeniedAndNotMoved(t *testing.T) {
 	}
 	if got.FolderID == nil || *got.FolderID != folderID {
 		t.Fatal("expected document folder unchanged")
-	}
-}
-
-func TestListSharedDocumentsHandler_ReturnsSharedDocs(t *testing.T) {
-	db := setupWorkspaceTestDB(t)
-	ownerID := uuid.New()
-	sharedUserID := uuid.New()
-	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
-	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "viewer")
-
-	app := newWorkspaceTestApp(sharedUserID)
-	req := httptest.NewRequest(http.MethodGet, "/shared/documents", nil)
-	resp, err := app.Test(req, -1)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var payload SharedDocumentListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Items) != 1 || payload.Items[0].DocumentID != docID {
-		t.Fatalf("unexpected shared payload: %+v", payload)
-	}
-}
-
-func TestShareDocumentHandler_CreatesPermission(t *testing.T) {
-	db := setupWorkspaceTestDB(t)
-	ownerID := uuid.New()
-	targetUserID := uuid.New()
-	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
-	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
-
-	app := newWorkspaceTestApp(ownerID)
-	body := bytes.NewBufferString(`{"userId":"` + targetUserID.String() + `","role":"editor"}`)
-	req := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/shares", body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req, -1)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestLeaveSharedDocumentHandler_RemovesOnlySelfPermission(t *testing.T) {
-	db := setupWorkspaceTestDB(t)
-	ownerID := uuid.New()
-	sharedUserID := uuid.New()
-	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
-	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "editor")
-
-	app := newWorkspaceTestApp(sharedUserID)
-	req := httptest.NewRequest(http.MethodDelete, "/documents/"+docID.String()+"/shares/me", nil)
-	resp, err := app.Test(req, -1)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 }

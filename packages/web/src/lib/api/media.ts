@@ -6,7 +6,6 @@ export type MediaAssetItem = {
 	filename: string;
 	mimeType: string;
 	fileSize: number;
-	thumbnailUrl?: string;
 	visibility: 'private' | 'public' | string;
 	status: 'ready' | 'pending_delete' | 'deleted' | 'failed' | string;
 	referenceCount: number;

@@ -80,7 +80,6 @@ func main() {
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
-	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 	workspaceRoutes.Post("/documents", workspace.CreateDocumentHandler)
@@ -93,10 +92,6 @@ func main() {
 	// Update document title
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
 	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
-	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
-	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
-	workspaceRoutes.Delete("/documents/:id/shares/me", workspace.LeaveSharedDocumentHandler)
-	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document
@@ -117,12 +112,9 @@ func main() {
 	// - URL exchange is protected by JWT.
 	// - Content endpoint is public but protected by short-lived media token.
 	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
-	api.Get("/media/shared-assets", middleware.Protected(), media.ListSharedAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
-	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
-	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
 
 	// Simple root route to check if server is up

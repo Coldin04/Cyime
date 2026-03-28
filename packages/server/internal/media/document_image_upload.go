@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -490,9 +489,16 @@ func parseProviderConfigJSON(raw *string) map[string]string {
 }
 
 func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error) {
-	document, err := acl.CanEditDocument(database.DB, userID, documentID)
-	if err != nil {
-		return "", err
+	var document models.Document
+	result := database.DB.
+		Select("id", "preferred_image_target_id").
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, userID).
+		First(&document)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return "", errors.New("文档不存在或无权访问")
+		}
+		return "", result.Error
 	}
 
 	switch strings.TrimSpace(document.PreferredImageTargetID) {

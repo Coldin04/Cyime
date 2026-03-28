@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
@@ -45,12 +44,17 @@ type UpdateContentResult struct {
 
 // GetContent retrieves the current content of a document.
 func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
-	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
-		return nil, err
+	var document models.Document
+	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, errors.New("文档不存在或无权访问")
+		}
+		return nil, result.Error
 	}
 
 	var content models.DocumentBody
-	result := database.DB.Where("document_id = ?", documentID).First(&content)
+	result = database.DB.Where("document_id = ?", documentID).First(&content)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("文档内容不存在")
@@ -88,13 +92,17 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 	excerpt := buildExcerpt(plainText)
 
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		document, err := acl.CanEditDocument(tx, userID, documentID)
-		if err != nil {
-			return err
+		var document models.Document
+		result := tx.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
+		if result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("文档不存在或无权访问")
+			}
+			return result.Error
 		}
 
 		now := time.Now()
-		result := tx.Model(&models.DocumentBody{}).
+		result = tx.Model(&models.DocumentBody{}).
 			Where("document_id = ?", documentID).
 			Updates(map[string]any{
 				"content_json":    contentJSON,
@@ -129,7 +137,7 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 			contentVersion = body.ContentVersion
 		}
 
-		if err := syncDocumentAssetRefs(tx, document.OwnerUserID, documentID, assetIDs, now); err != nil {
+		if err := syncDocumentAssetRefs(tx, userID, documentID, assetIDs, now); err != nil {
 			return err
 		}
 
@@ -381,8 +389,8 @@ func extractAssetIDFromAttrs(attrs map[string]any) (uuid.UUID, bool) {
 	return uuid.Nil, false
 }
 
-func syncDocumentAssetRefs(tx *gorm.DB, ownerUserID, documentID uuid.UUID, assetIDs []uuid.UUID, now time.Time) error {
-	validAssetIDs, err := filterOwnedAssetIDs(tx, ownerUserID, assetIDs)
+func syncDocumentAssetRefs(tx *gorm.DB, userID, documentID uuid.UUID, assetIDs []uuid.UUID, now time.Time) error {
+	validAssetIDs, err := filterOwnedAssetIDs(tx, userID, assetIDs)
 	if err != nil {
 		return err
 	}
@@ -392,7 +400,7 @@ func syncDocumentAssetRefs(tx *gorm.DB, ownerUserID, documentID uuid.UUID, asset
 
 	var existingRefs []models.DocumentAssetRef
 	if err := tx.
-		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, ownerUserID, editorContentRefType).
+		Where("document_id = ? AND owner_user_id = ? AND ref_type = ?", documentID, userID, editorContentRefType).
 		Find(&existingRefs).Error; err != nil {
 		return err
 	}
@@ -421,7 +429,7 @@ func syncDocumentAssetRefs(tx *gorm.DB, ownerUserID, documentID uuid.UUID, asset
 			ID:          uuid.New(),
 			DocumentID:  documentID,
 			AssetID:     assetID,
-			OwnerUserID: ownerUserID,
+			OwnerUserID: userID,
 			RefType:     editorContentRefType,
 			CreatedAt:   now,
 			UpdatedAt:   now,

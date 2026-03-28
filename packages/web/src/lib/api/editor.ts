@@ -38,18 +38,6 @@ export type AssetReadURLResponse = {
 	expiresAt: string;
 };
 
-export type ResolveAssetURLsItem = {
-	assetId: string;
-	url?: string;
-	expiresAt?: string;
-	error?: string;
-	code?: string;
-};
-
-export type ResolveAssetURLsResponse = {
-	items: ResolveAssetURLsItem[];
-};
-
 export type UploadDocumentImageResponse = {
 	targetId: 'managed-r2' | string;
 	mode: 'managed_asset' | 'external_url' | string;
@@ -179,25 +167,4 @@ export async function getAssetReadURL(assetId: string): Promise<AssetReadURLResp
 		throw new Error(error.message || 'Failed to get asset read URL');
 	}
 	return parseJSONResponse<AssetReadURLResponse>(response, 'Failed to parse asset read URL response');
-}
-
-export async function resolveAssetReadURLs(assetIds: string[]): Promise<ResolveAssetURLsResponse> {
-	const response = await apiFetch('/api/v1/media/assets/resolve', {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({ assetIds })
-	});
-	if (!response.ok) {
-		const error = await parseJSONResponse<{ message?: string }>(
-			response,
-			'Failed to resolve asset read URLs'
-		);
-		throw new Error(error.message || 'Failed to resolve asset read URLs');
-	}
-	return parseJSONResponse<ResolveAssetURLsResponse>(
-		response,
-		'Failed to parse asset read URL resolve response'
-	);
 }
