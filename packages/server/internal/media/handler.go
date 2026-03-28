@@ -236,6 +236,13 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 		}
 	}
 
+	for i := range result.Items {
+		thumbnailURL, _, thumbErr := ResolveAccessibleAssetThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID)
+		if thumbErr == nil {
+			result.Items[i].ThumbnailURL = thumbnailURL
+		}
+	}
+
 	return c.JSON(AssetListResponse{
 		Items:   result.Items,
 		HasMore: result.HasMore,
@@ -280,6 +287,13 @@ func ListSharedAssetsHandler(c *fiber.Ctx) error {
 				Error:   "Internal Server Error",
 				Message: err.Error(),
 			})
+		}
+	}
+
+	for i := range result.Items {
+		thumbnailURL, _, thumbErr := ResolveAccessibleAssetThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID)
+		if thumbErr == nil {
+			result.Items[i].ThumbnailURL = thumbnailURL
 		}
 	}
 
@@ -373,6 +387,99 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Internal Server Error",
 			Message: "Failed to read asset content",
+		})
+	}
+	return c.Send(data)
+}
+
+func GetAssetThumbnailHandler(c *fiber.Ctx) error {
+	assetID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid asset id",
+		})
+	}
+
+	record, err := getAssetBlobByID(assetID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+			Error:   "Not Found",
+			Message: err.Error(),
+		})
+	}
+	asset := record.Asset
+	blob := record.Blob
+
+	if asset.Visibility != "public" {
+		token := c.Query("token")
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Missing media token",
+			})
+		}
+
+		tokenService, err := NewTokenService()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+
+		claims, err := tokenService.VerifyAssetReadToken(token)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Invalid media token: " + err.Error(),
+			})
+		}
+
+		if claims.AssetID != asset.ID {
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: "Media token does not match asset",
+			})
+		}
+	}
+
+	if err := initStorageProvider(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	objectKey := blob.ObjectKey
+	contentType := blob.MimeType
+	if blob.ThumbnailStatus == blobThumbnailStatusReady && blob.ThumbnailObjectKey != "" {
+		objectKey = blob.ThumbnailObjectKey
+		if blob.ThumbnailMimeType != "" {
+			contentType = blob.ThumbnailMimeType
+		}
+	}
+
+	obj, err := storageProvider.GetObject(context.Background(), objectKey)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{
+			Error:   "Media Upstream Error",
+			Message: err.Error(),
+		})
+	}
+	defer obj.Body.Close()
+
+	if contentType == "" {
+		contentType = obj.ContentType
+	}
+	c.Set("Content-Type", contentType)
+	c.Set("Cache-Control", "private, max-age=60")
+
+	data, err := io.ReadAll(obj.Body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Failed to read asset thumbnail",
 		})
 	}
 	return c.Send(data)

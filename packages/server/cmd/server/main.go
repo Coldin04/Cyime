@@ -122,6 +122,7 @@ func main() {
 	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
+	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
 
 	// Simple root route to check if server is up

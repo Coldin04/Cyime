@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -16,12 +17,14 @@ import (
 )
 
 const (
-	defaultAssetGCInterval = time.Minute
-	defaultAssetGCBatch    = 20
-	defaultAssetGCMaxRetry = 5
-	defaultAssetGCRetryGap = 5 * time.Minute
-	defaultAssetReconcile  = 200
-	defaultBlobDeleteDelay = 24 * time.Hour
+	defaultAssetGCInterval            = time.Minute
+	defaultAssetReconcileInterval     = 24 * time.Hour
+	defaultThumbnailReconcileInterval = time.Hour
+	defaultAssetGCBatch               = 20
+	defaultAssetGCMaxRetry            = 5
+	defaultAssetGCRetryGap            = 5 * time.Minute
+	defaultAssetReconcile             = 200
+	defaultBlobDeleteDelay            = 24 * time.Hour
 )
 
 func StartAssetGCWorker(ctx context.Context) {
@@ -31,6 +34,8 @@ func StartAssetGCWorker(ctx context.Context) {
 	}
 
 	interval := assetGCIntervalFromEnv()
+	reconcileInterval := assetReconcileIntervalFromEnv()
+	thumbnailInterval := thumbnailReconcileIntervalFromEnv()
 	batchSize := assetGCBatchSizeFromEnv()
 	reconcileBatch := assetReconcileBatchSizeFromEnv()
 	reconcileEnabled := assetReconcileEnabledFromEnv()
@@ -40,33 +45,53 @@ func StartAssetGCWorker(ctx context.Context) {
 	}
 
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		gcTicker := time.NewTicker(interval)
+		defer gcTicker.Stop()
 
-		log.Printf("[media.gc] started interval=%s batch=%d reconcile=%v reconcile_batch=%d", interval, batchSize, reconcileEnabled, reconcileBatch)
+		var reconcileTicker *time.Ticker
+		var reconcileCh <-chan time.Time
+		if reconcileEnabled && reconcileInterval > 0 {
+			reconcileTicker = time.NewTicker(reconcileInterval)
+			reconcileCh = reconcileTicker.C
+			defer reconcileTicker.Stop()
+		}
+
+		var thumbnailTicker *time.Ticker
+		var thumbnailCh <-chan time.Time
+		if reconcileEnabled && thumbnailInterval > 0 {
+			thumbnailTicker = time.NewTicker(thumbnailInterval)
+			thumbnailCh = thumbnailTicker.C
+			defer thumbnailTicker.Stop()
+		}
+
+		log.Printf("[media.gc] started gc_interval=%s batch=%d reconcile=%v reconcile_interval=%s thumbnail_interval=%s reconcile_batch=%d", interval, batchSize, reconcileEnabled, reconcileInterval, thumbnailInterval, reconcileBatch)
 		for {
-			now := time.Now()
-			if reconcileEnabled {
+			select {
+			case <-ctx.Done():
+				log.Println("[media.gc] stopped")
+				return
+			case <-gcTicker.C:
+				if _, err := RunDueAssetGCJobs(ctx, time.Now(), batchSize); err != nil {
+					log.Printf("[media.gc] run failed: %v", err)
+				}
+				if _, err := RunDueBlobGCJobs(ctx, time.Now(), batchSize); err != nil {
+					log.Printf("[media.gc] blob run failed: %v", err)
+				}
+			case <-reconcileCh:
+				now := time.Now()
 				reconciled, err := RunAssetReferenceReconcilePass(now, reconcileBatch)
 				if err != nil {
 					log.Printf("[media.gc] reconcile failed: %v", err)
 				} else if reconciled > 0 {
 					log.Printf("[media.gc] reconciled assets=%d", reconciled)
 				}
-			}
-
-			if _, err := RunDueAssetGCJobs(ctx, time.Now(), batchSize); err != nil {
-				log.Printf("[media.gc] run failed: %v", err)
-			}
-			if _, err := RunDueBlobGCJobs(ctx, time.Now(), batchSize); err != nil {
-				log.Printf("[media.gc] blob run failed: %v", err)
-			}
-
-			select {
-			case <-ctx.Done():
-				log.Println("[media.gc] stopped")
-				return
-			case <-ticker.C:
+			case <-thumbnailCh:
+				backfilled, err := RunBlobThumbnailReconcilePass(ctx, reconcileBatch)
+				if err != nil {
+					log.Printf("[media.gc] thumbnail reconcile failed: %v", err)
+				} else if backfilled > 0 {
+					log.Printf("[media.gc] reconciled thumbnails=%d", backfilled)
+				}
 			}
 		}
 	}()
@@ -240,6 +265,55 @@ func RunAssetReferenceReconcilePass(now time.Time, batchSize int) (int, error) {
 	return reconciled, nil
 }
 
+func RunBlobThumbnailReconcilePass(ctx context.Context, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		batchSize = defaultAssetReconcile
+	}
+	if err := initStorageProvider(); err != nil {
+		return 0, err
+	}
+
+	subQuery := database.DB.Model(&models.Asset{}).
+		Select("DISTINCT blob_id").
+		Where("deleted_at IS NULL")
+
+	var blobs []models.BlobObject
+	if err := database.DB.
+		Where("id IN (?)", subQuery).
+		Where("deleted_at IS NULL").
+		Where("mime_type LIKE ?", "image/%").
+		Where("thumbnail_status <> ? OR thumbnail_object_key = '' OR thumbnail_object_key IS NULL", blobThumbnailStatusReady).
+		Order("updated_at asc").
+		Limit(batchSize).
+		Find(&blobs).Error; err != nil {
+		return 0, err
+	}
+
+	backfilled := 0
+	for _, blob := range blobs {
+		obj, err := storageProvider.GetObject(ctx, blob.ObjectKey)
+		if err != nil {
+			log.Printf("[media.gc] thumbnail source fetch failed blob=%s err=%v", blob.ID, err)
+			continue
+		}
+
+		sourceBytes, readErr := io.ReadAll(obj.Body)
+		_ = obj.Body.Close()
+		if readErr != nil {
+			log.Printf("[media.gc] thumbnail source read failed blob=%s err=%v", blob.ID, readErr)
+			continue
+		}
+
+		if err := generateAndStoreBlobThumbnail(ctx, blob, sourceBytes); err != nil {
+			log.Printf("[media.gc] thumbnail generate failed blob=%s err=%v", blob.ID, err)
+			continue
+		}
+		backfilled++
+	}
+
+	return backfilled, nil
+}
+
 func RunDueBlobGCJobs(ctx context.Context, now time.Time, limit int) (int, error) {
 	if limit <= 0 {
 		limit = defaultAssetGCBatch
@@ -323,6 +397,11 @@ func runBlobDeleteJob(ctx context.Context, jobID uuid.UUID, now time.Time) error
 
 	if err := initStorageProvider(); err != nil {
 		return markBlobGCJobFailed(jobID, now, err)
+	}
+	if blob.ThumbnailStatus == blobThumbnailStatusReady && strings.TrimSpace(blob.ThumbnailObjectKey) != "" {
+		if err := storageProvider.DeleteObject(ctx, blob.ThumbnailObjectKey); err != nil {
+			return markBlobGCJobFailed(jobID, now, err)
+		}
 	}
 	if err := storageProvider.DeleteObject(ctx, blob.ObjectKey); err != nil {
 		return markBlobGCJobFailed(jobID, now, err)
@@ -465,6 +544,30 @@ func assetGCIntervalFromEnv() time.Duration {
 	d, err := time.ParseDuration(raw)
 	if err != nil {
 		return defaultAssetGCInterval
+	}
+	return d
+}
+
+func assetReconcileIntervalFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_RECONCILE_INTERVAL"))
+	if raw == "" {
+		return defaultAssetReconcileInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultAssetReconcileInterval
+	}
+	return d
+}
+
+func thumbnailReconcileIntervalFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_THUMBNAIL_RECONCILE_INTERVAL"))
+	if raw == "" {
+		return defaultThumbnailReconcileInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultThumbnailReconcileInterval
 	}
 	return d
 }

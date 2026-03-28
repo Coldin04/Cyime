@@ -14,7 +14,7 @@
 		readAutoSaveEnabled,
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
-	import { getAssetReadURL, getDocumentContent, updateDocumentContent } from '$lib/api/editor';
+	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
@@ -49,29 +49,19 @@
 		getDocumentImageTargetLabel(preferredImageTargetId, availableImageTargets)
 	);
 
-	const assetPathPattern =
-		/\/api\/v1\/media\/assets\/([0-9a-fA-F-]{36})\/content(?:\?.*)?$/;
-
-	function extractAssetIdFromSrc(src: string): string | null {
-		try {
-			const parsed = new URL(src, browser ? window.location.origin : 'http://localhost');
-			const match = parsed.pathname.match(assetPathPattern);
-			return match?.[1] ?? null;
-		} catch {
-			const match = src.match(assetPathPattern);
-			return match?.[1] ?? null;
-		}
-	}
-
 	function cloneContentJson(value: JSONContent): JSONContent {
 		return JSON.parse(JSON.stringify(value)) as JSONContent;
 	}
 
-	function collectImageNodes(value: unknown, nodes: Array<Record<string, unknown>>) {
+	type ImageNodeRecord = Record<string, unknown> & {
+		attrs?: Record<string, unknown>;
+	};
+
+	function collectImageNodes(value: unknown, nodes: ImageNodeRecord[]) {
 		if (!value || typeof value !== 'object') {
 			return;
 		}
-		const node = value as Record<string, unknown>;
+		const node = value as ImageNodeRecord;
 		if (node.type === 'image') {
 			nodes.push(node);
 		}
@@ -83,28 +73,67 @@
 		}
 	}
 
+	function getManagedAssetId(attrs: Record<string, unknown>): string | null {
+		const raw = attrs.assetId;
+		return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null;
+	}
+
 	async function refreshSignedImageSources(input: JSONContent): Promise<JSONContent> {
 		const cloned = cloneContentJson(input);
-		const imageNodes: Array<Record<string, unknown>> = [];
+		const imageNodes: ImageNodeRecord[] = [];
 		collectImageNodes(cloned, imageNodes);
 		if (imageNodes.length === 0) {
 			return cloned;
 		}
 
+		const assetIds = Array.from(
+			new Set(
+				imageNodes
+					.map((node) => getManagedAssetId((node.attrs ?? {}) as Record<string, unknown>))
+					.filter((value): value is string => value !== null)
+			)
+		);
+		if (assetIds.length === 0) {
+			return cloned;
+		}
+
+		const resolved = await resolveAssetReadURLs(assetIds);
+		const resolvedMap = new Map(
+			resolved.items
+				.filter((item) => item.assetId && item.url)
+				.map((item) => [item.assetId, item.url as string])
+		);
+
 		for (const node of imageNodes) {
 			const attrs = (node.attrs ?? {}) as Record<string, unknown>;
-			const src = typeof attrs.src === 'string' ? attrs.src : '';
-			if (!src) continue;
-			const assetId = extractAssetIdFromSrc(src);
+			const assetId = getManagedAssetId(attrs);
 			if (!assetId) continue;
-
-			try {
-				const resolved = await getAssetReadURL(assetId);
-				attrs.src = resolved.url;
-				node.attrs = attrs;
-			} catch (error) {
-				console.error('[Load] Failed to refresh image URL for asset:', assetId, error);
+			const resolvedURL = resolvedMap.get(assetId);
+			if (!resolvedURL) {
+				console.error('[Load] Failed to resolve image URL for asset:', assetId);
+				continue;
 			}
+			attrs.src = resolvedURL;
+			node.attrs = attrs;
+		}
+
+		return cloned;
+	}
+
+	function normalizeManagedImagesForSave(input: JSONContent): JSONContent {
+		const cloned = cloneContentJson(input);
+		const imageNodes: ImageNodeRecord[] = [];
+		collectImageNodes(cloned, imageNodes);
+
+		for (const node of imageNodes) {
+			const attrs = (node.attrs ?? {}) as Record<string, unknown>;
+			const assetId = getManagedAssetId(attrs);
+			if (!assetId) {
+				continue;
+			}
+
+			delete attrs.src;
+			node.attrs = attrs;
 		}
 
 		return cloned;
@@ -167,7 +196,7 @@
 
 		isSaving = true;
 		try {
-			await updateDocumentContent(documentId, content);
+			await updateDocumentContent(documentId, normalizeManagedImagesForSave(content));
 			lastSaved = new Date();
 			hasUnsavedChanges = false;
 			return true;

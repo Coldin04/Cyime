@@ -7,6 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"mime/multipart"
@@ -23,6 +27,8 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	_ "image/gif"
 )
 
 type UploadAssetRequest struct {
@@ -63,6 +69,7 @@ type AssetListItem struct {
 	Filename       string     `json:"filename"`
 	MimeType       string     `json:"mimeType"`
 	FileSize       int64      `json:"fileSize"`
+	ThumbnailURL   string     `json:"thumbnailUrl,omitempty"`
 	Visibility     string     `json:"visibility"`
 	Status         string     `json:"status"`
 	ReferenceCount int        `json:"referenceCount"`
@@ -90,6 +97,7 @@ type SharedAssetListItem struct {
 	Filename       string                `json:"filename"`
 	MimeType       string                `json:"mimeType"`
 	FileSize       int64                 `json:"fileSize"`
+	ThumbnailURL   string                `json:"thumbnailUrl,omitempty"`
 	Visibility     string                `json:"visibility"`
 	OwnerUserID    uuid.UUID             `json:"ownerUserId"`
 	ReferenceCount int                   `json:"referenceCount"`
@@ -106,6 +114,11 @@ type ListSharedAssetsResult struct {
 }
 
 const mediaRefTypeEditorContent = "editor_content"
+const blobThumbnailStatusReady = "ready"
+const blobThumbnailStatusPending = "pending"
+const blobThumbnailStatusFailed = "failed"
+const blobThumbnailStatusSkipped = "skipped"
+const blobThumbnailMaxEdge = 320
 
 type assetBlobRecord struct {
 	Asset models.Asset
@@ -194,23 +207,44 @@ func ResolveAccessibleAssetReadURL(ctx context.Context, baseURL string, userID, 
 	}
 	blob := record.Blob
 
+	return resolveAssetObjectURL(ctx, baseURL, userID, *asset, blob.ObjectKey, blob.MimeType, "/content")
+}
+
+func ResolveAccessibleAssetThumbnailURL(ctx context.Context, baseURL string, userID, assetID uuid.UUID) (string, time.Time, error) {
+	asset, err := GetAccessibleAsset(userID, assetID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	record, err := getAssetBlobByID(assetID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	blob := record.Blob
+	if blob.ThumbnailStatus != blobThumbnailStatusReady || strings.TrimSpace(blob.ThumbnailObjectKey) == "" {
+		return resolveAssetObjectURL(ctx, baseURL, userID, *asset, blob.ObjectKey, blob.MimeType, "/content")
+	}
+	return resolveAssetObjectURL(ctx, baseURL, userID, *asset, blob.ThumbnailObjectKey, blob.ThumbnailMimeType, "/thumbnail")
+}
+
+func resolveAssetObjectURL(ctx context.Context, baseURL string, userID uuid.UUID, asset models.Asset, objectKey string, contentType string, pathSuffix string) (string, time.Time, error) {
 	if err := initStorageProvider(); err != nil {
 		return "", time.Time{}, err
 	}
 
-	if provider, ok := storageProvider.(PresignedURLProvider); ok {
+	if provider, ok := storageProvider.(PresignedURLProvider); ok && strings.TrimSpace(objectKey) != "" {
 		presigned, err := provider.PresignGetObject(ctx, PresignGetObjectInput{
-			ObjectKey:   blob.ObjectKey,
+			ObjectKey:   objectKey,
 			ExpiresIn:   assetResolveTTLFromEnv(),
-			ContentType: blob.MimeType,
+			ContentType: contentType,
 		})
 		if err == nil {
 			return presigned.URL, presigned.ExpiresAt, nil
 		}
-		log.Printf("[media.resolve] presign failed provider=%s asset=%s fallback=token err=%v", storageProvider.ProviderName(), asset.ID, err)
+		log.Printf("[media.resolve] presign failed provider=%s asset=%s path=%s fallback=token err=%v", storageProvider.ProviderName(), asset.ID, pathSuffix, err)
 	}
 
-	readURL := strings.TrimRight(baseURL, "/") + "/api/v1/media/assets/" + asset.ID.String() + "/content"
+	readURL := strings.TrimRight(baseURL, "/") + "/api/v1/media/assets/" + asset.ID.String() + pathSuffix
 	if asset.Visibility == "public" {
 		return readURL, time.Time{}, nil
 	}
@@ -593,6 +627,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 	if existing, err := findDeduplicatedAsset(document.OwnerUserID, blob.ID); err != nil {
 		return nil, err
 	} else if existing != nil {
+		maybeScheduleBlobThumbnail(*blob, fileBytes)
 		log.Printf("[media.upload.service] deduplicated existing asset=%s", existing.ID)
 		return &UploadAssetResult{Asset: existing}, nil
 	}
@@ -625,6 +660,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 		}
 		return &UploadAssetResult{Asset: existing}, nil
 	}
+	maybeScheduleBlobThumbnail(*blob, fileBytes)
 	log.Printf("[media.upload.service] asset row created asset=%s blob=%s", asset.ID, blob.ID)
 	return &UploadAssetResult{Asset: asset}, nil
 }
@@ -910,6 +946,11 @@ func buildObjectKey(userID uuid.UUID, filename string) string {
 	return fmt.Sprintf("%s/%s/%s%s", userID.String(), day, uuid.NewString(), ext)
 }
 
+func buildThumbnailObjectKey(objectKey string, ext string) string {
+	base := strings.TrimSuffix(objectKey, filepath.Ext(objectKey))
+	return base + "__thumb_sm" + ext
+}
+
 func detectKind(contentType string) string {
 	if strings.HasPrefix(contentType, "image/") {
 		return "image"
@@ -918,4 +959,173 @@ func detectKind(contentType string) string {
 		return "video"
 	}
 	return "file"
+}
+
+func maybeScheduleBlobThumbnail(blob models.BlobObject, sourceBytes []byte) {
+	if !shouldGenerateBlobThumbnail(blob) {
+		return
+	}
+	blobCopy := blob
+	fileCopy := append([]byte(nil), sourceBytes...)
+	go func() {
+		if err := generateAndStoreBlobThumbnail(context.Background(), blobCopy, fileCopy); err != nil {
+			log.Printf("[media.thumb] blob=%s failed: %v", blobCopy.ID, err)
+		}
+	}()
+}
+
+func shouldGenerateBlobThumbnail(blob models.BlobObject) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(blob.MimeType)), "image/") {
+		return false
+	}
+	if blob.ThumbnailStatus == blobThumbnailStatusReady && strings.TrimSpace(blob.ThumbnailObjectKey) != "" {
+		return false
+	}
+	return true
+}
+
+func generateAndStoreBlobThumbnail(ctx context.Context, blob models.BlobObject, sourceBytes []byte) error {
+	if err := initStorageProvider(); err != nil {
+		return err
+	}
+
+	thumbData, thumbMimeType, width, height, err := buildBlobThumbnail(sourceBytes, blob.MimeType)
+	if err != nil {
+		status := blobThumbnailStatusFailed
+		if strings.Contains(strings.ToLower(err.Error()), "unsupported image") {
+			status = blobThumbnailStatusSkipped
+		}
+		_ = markBlobThumbnailState(blob.ID, status, map[string]any{
+			"thumbnail_object_key": "",
+			"thumbnail_mime_type":  "",
+			"thumbnail_size":       0,
+			"thumbnail_width":      nil,
+			"thumbnail_height":     nil,
+		})
+		return err
+	}
+	if len(thumbData) == 0 {
+		return markBlobThumbnailState(blob.ID, blobThumbnailStatusSkipped, map[string]any{
+			"thumbnail_object_key": "",
+			"thumbnail_mime_type":  "",
+			"thumbnail_size":       0,
+			"thumbnail_width":      nil,
+			"thumbnail_height":     nil,
+		})
+	}
+
+	ext := ".jpg"
+	if thumbMimeType == "image/png" {
+		ext = ".png"
+	}
+	objectKey := buildThumbnailObjectKey(blob.ObjectKey, ext)
+	if _, err := storageProvider.PutObject(ctx, PutObjectInput{
+		ObjectKey:   objectKey,
+		ContentType: thumbMimeType,
+		Body:        bytes.NewReader(thumbData),
+	}); err != nil {
+		_ = markBlobThumbnailState(blob.ID, blobThumbnailStatusFailed, nil)
+		return err
+	}
+
+	return database.DB.Model(&models.BlobObject{}).
+		Where("id = ? AND deleted_at IS NULL", blob.ID).
+		Updates(map[string]any{
+			"thumbnail_object_key": objectKey,
+			"thumbnail_mime_type":  thumbMimeType,
+			"thumbnail_size":       int64(len(thumbData)),
+			"thumbnail_width":      width,
+			"thumbnail_height":     height,
+			"thumbnail_status":     blobThumbnailStatusReady,
+		}).Error
+}
+
+func markBlobThumbnailState(blobID uuid.UUID, status string, extra map[string]any) error {
+	updates := map[string]any{
+		"thumbnail_status": status,
+	}
+	for key, value := range extra {
+		updates[key] = value
+	}
+	return database.DB.Model(&models.BlobObject{}).
+		Where("id = ? AND deleted_at IS NULL", blobID).
+		Updates(updates).Error
+}
+
+func buildBlobThumbnail(sourceBytes []byte, mimeType string) ([]byte, string, *int, *int, error) {
+	img, _, err := image.Decode(bytes.NewReader(sourceBytes))
+	if err != nil {
+		return nil, "", nil, nil, fmt.Errorf("unsupported image for thumbnail: %w", err)
+	}
+
+	bounds := img.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return nil, "", nil, nil, errors.New("invalid image size")
+	}
+	if srcW <= blobThumbnailMaxEdge && srcH <= blobThumbnailMaxEdge {
+		return nil, "", nil, nil, nil
+	}
+
+	dstW, dstH := fitWithin(srcW, srcH, blobThumbnailMaxEdge)
+	thumb := resizeNearest(img, dstW, dstH)
+
+	var encoded bytes.Buffer
+	thumbMime := "image/jpeg"
+	if imageHasAlpha(thumb) || strings.EqualFold(mimeType, "image/png") {
+		thumbMime = "image/png"
+		if err := png.Encode(&encoded, thumb); err != nil {
+			return nil, "", nil, nil, err
+		}
+	} else {
+		if err := jpeg.Encode(&encoded, thumb, &jpeg.Options{Quality: 80}); err != nil {
+			return nil, "", nil, nil, err
+		}
+	}
+
+	width := dstW
+	height := dstH
+	return encoded.Bytes(), thumbMime, &width, &height, nil
+}
+
+func fitWithin(srcW, srcH, maxEdge int) (int, int) {
+	if srcW <= maxEdge && srcH <= maxEdge {
+		return srcW, srcH
+	}
+	if srcW >= srcH {
+		dstW := maxEdge
+		dstH := max(1, srcH*maxEdge/srcW)
+		return dstW, dstH
+	}
+	dstH := maxEdge
+	dstW := max(1, srcW*maxEdge/srcH)
+	return dstW, dstH
+}
+
+func resizeNearest(src image.Image, dstW, dstH int) *image.RGBA {
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+	srcBounds := src.Bounds()
+	srcW := srcBounds.Dx()
+	srcH := srcBounds.Dy()
+	for y := 0; y < dstH; y++ {
+		srcY := srcBounds.Min.Y + y*srcH/dstH
+		for x := 0; x < dstW; x++ {
+			srcX := srcBounds.Min.X + x*srcW/dstW
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+	return dst
+}
+
+func imageHasAlpha(img image.Image) bool {
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if alpha := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA).A; alpha < 255 {
+				return true
+			}
+		}
+	}
+	return false
 }

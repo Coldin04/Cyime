@@ -270,18 +270,24 @@ func (b *BlobObject) BeforeCreate(tx *gorm.DB) (err error) {
 
 // BlobObject represents one deduplicated physical object in object storage.
 type BlobObject struct {
-	ID              uuid.UUID `gorm:"type:uuid;primary_key"`
-	SHA256          string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_blob_hash_size"`
-	Size            int64     `gorm:"not null;uniqueIndex:idx_blob_hash_size"`
-	MimeType        string    `gorm:"type:varchar(100);not null"`
-	StorageProvider string    `gorm:"type:varchar(50);not null;default:'r2'"`
-	Bucket          string    `gorm:"type:varchar(255)"`
-	ObjectKey       string    `gorm:"type:varchar(255);not null;unique"`
-	URL             string    `gorm:"type:text;not null"`
-	Status          string    `gorm:"type:varchar(20);not null;default:'ready'"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ID                 uuid.UUID `gorm:"type:uuid;primary_key"`
+	SHA256             string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_blob_hash_size"`
+	Size               int64     `gorm:"not null;uniqueIndex:idx_blob_hash_size"`
+	MimeType           string    `gorm:"type:varchar(100);not null"`
+	StorageProvider    string    `gorm:"type:varchar(50);not null;default:'r2'"`
+	Bucket             string    `gorm:"type:varchar(255)"`
+	ObjectKey          string    `gorm:"type:varchar(255);not null;unique"`
+	ThumbnailObjectKey string    `gorm:"type:varchar(255)"`
+	ThumbnailMimeType  string    `gorm:"type:varchar(100)"`
+	ThumbnailSize      int64
+	ThumbnailWidth     *int
+	ThumbnailHeight    *int
+	ThumbnailStatus    string `gorm:"type:varchar(20);not null;default:'pending'"`
+	URL                string `gorm:"type:text;not null"`
+	Status             string `gorm:"type:varchar(20);not null;default:'ready'"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
