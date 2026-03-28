@@ -64,19 +64,23 @@ type ListAssetsRequest struct {
 }
 
 type AssetListItem struct {
-	ID             uuid.UUID  `json:"id"`
-	Kind           string     `json:"kind"`
-	Filename       string     `json:"filename"`
-	MimeType       string     `json:"mimeType"`
-	FileSize       int64      `json:"fileSize"`
-	ThumbnailURL   string     `json:"thumbnailUrl,omitempty"`
-	Visibility     string     `json:"visibility"`
-	Status         string     `json:"status"`
-	ReferenceCount int        `json:"referenceCount"`
-	Deletable      bool       `json:"deletable"`
-	DocumentID     *uuid.UUID `json:"documentId,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID                 uuid.UUID  `json:"id"`
+	Kind               string     `json:"kind"`
+	Filename           string     `json:"filename"`
+	MimeType           string     `json:"mimeType"`
+	FileSize           int64      `json:"fileSize"`
+	ThumbnailURL       string     `json:"thumbnailUrl,omitempty"`
+	ObjectKey          string     `json:"-"`
+	ThumbnailObjectKey string     `json:"-"`
+	ThumbnailMimeType  string     `json:"-"`
+	ThumbnailStatus    string     `json:"-"`
+	Visibility         string     `json:"visibility"`
+	Status             string     `json:"status"`
+	ReferenceCount     int        `json:"referenceCount"`
+	Deletable          bool       `json:"deletable"`
+	DocumentID         *uuid.UUID `json:"documentId,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 type ListAssetsResult struct {
@@ -92,19 +96,23 @@ type SharedAssetDocument struct {
 }
 
 type SharedAssetListItem struct {
-	ID             uuid.UUID             `json:"id"`
-	Kind           string                `json:"kind"`
-	Filename       string                `json:"filename"`
-	MimeType       string                `json:"mimeType"`
-	FileSize       int64                 `json:"fileSize"`
-	ThumbnailURL   string                `json:"thumbnailUrl,omitempty"`
-	Visibility     string                `json:"visibility"`
-	OwnerUserID    uuid.UUID             `json:"ownerUserId"`
-	ReferenceCount int                   `json:"referenceCount"`
-	DocumentCount  int                   `json:"documentCount"`
-	Documents      []SharedAssetDocument `json:"documents"`
-	CreatedAt      time.Time             `json:"createdAt"`
-	UpdatedAt      time.Time             `json:"updatedAt"`
+	ID                 uuid.UUID             `json:"id"`
+	Kind               string                `json:"kind"`
+	Filename           string                `json:"filename"`
+	MimeType           string                `json:"mimeType"`
+	FileSize           int64                 `json:"fileSize"`
+	ThumbnailURL       string                `json:"thumbnailUrl,omitempty"`
+	ObjectKey          string                `json:"-"`
+	ThumbnailObjectKey string                `json:"-"`
+	ThumbnailMimeType  string                `json:"-"`
+	ThumbnailStatus    string                `json:"-"`
+	Visibility         string                `json:"visibility"`
+	OwnerUserID        uuid.UUID             `json:"ownerUserId"`
+	ReferenceCount     int                   `json:"referenceCount"`
+	DocumentCount      int                   `json:"documentCount"`
+	Documents          []SharedAssetDocument `json:"documents"`
+	CreatedAt          time.Time             `json:"createdAt"`
+	UpdatedAt          time.Time             `json:"updatedAt"`
 }
 
 type ListSharedAssetsResult struct {
@@ -329,18 +337,22 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 			return nil, fmt.Errorf("blob not found for asset %s", asset.ID)
 		}
 		items = append(items, AssetListItem{
-			ID:             asset.ID,
-			Kind:           asset.Kind,
-			Filename:       asset.Filename,
-			MimeType:       blob.MimeType,
-			FileSize:       blob.Size,
-			Visibility:     asset.Visibility,
-			Status:         asset.Status,
-			ReferenceCount: asset.ReferenceCount,
-			Deletable:      asset.ReferenceCount == 0 && asset.Status != "deleted",
-			DocumentID:     asset.DocumentID,
-			CreatedAt:      asset.CreatedAt,
-			UpdatedAt:      asset.UpdatedAt,
+			ID:                 asset.ID,
+			Kind:               asset.Kind,
+			Filename:           asset.Filename,
+			MimeType:           blob.MimeType,
+			FileSize:           blob.Size,
+			ObjectKey:          blob.ObjectKey,
+			ThumbnailObjectKey: blob.ThumbnailObjectKey,
+			ThumbnailMimeType:  blob.ThumbnailMimeType,
+			ThumbnailStatus:    blob.ThumbnailStatus,
+			Visibility:         asset.Visibility,
+			Status:             asset.Status,
+			ReferenceCount:     asset.ReferenceCount,
+			Deletable:          asset.ReferenceCount == 0 && asset.Status != "deleted",
+			DocumentID:         asset.DocumentID,
+			CreatedAt:          asset.CreatedAt,
+			UpdatedAt:          asset.UpdatedAt,
 		})
 	}
 
@@ -481,18 +493,22 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 		}
 		documents := docMap[row.AssetID]
 		items = append(items, SharedAssetListItem{
-			ID:             row.AssetID,
-			Kind:           row.Kind,
-			Filename:       row.Filename,
-			MimeType:       blob.MimeType,
-			FileSize:       blob.Size,
-			Visibility:     row.Visibility,
-			OwnerUserID:    row.OwnerUserID,
-			ReferenceCount: row.ReferenceCount,
-			DocumentCount:  len(documents),
-			Documents:      documents,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
+			ID:                 row.AssetID,
+			Kind:               row.Kind,
+			Filename:           row.Filename,
+			MimeType:           blob.MimeType,
+			FileSize:           blob.Size,
+			ObjectKey:          blob.ObjectKey,
+			ThumbnailObjectKey: blob.ThumbnailObjectKey,
+			ThumbnailMimeType:  blob.ThumbnailMimeType,
+			ThumbnailStatus:    blob.ThumbnailStatus,
+			Visibility:         row.Visibility,
+			OwnerUserID:        row.OwnerUserID,
+			ReferenceCount:     row.ReferenceCount,
+			DocumentCount:      len(documents),
+			Documents:          documents,
+			CreatedAt:          row.CreatedAt,
+			UpdatedAt:          row.UpdatedAt,
 		})
 	}
 

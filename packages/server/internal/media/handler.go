@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"log"
+	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -237,7 +239,7 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 	}
 
 	for i := range result.Items {
-		thumbnailURL, _, thumbErr := ResolveAccessibleAssetThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID)
+		thumbnailURL, _, thumbErr := resolveListThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID, result.Items[i].Visibility, result.Items[i].ObjectKey, result.Items[i].MimeType, result.Items[i].ThumbnailObjectKey, result.Items[i].ThumbnailMimeType, result.Items[i].ThumbnailStatus)
 		if thumbErr == nil {
 			result.Items[i].ThumbnailURL = thumbnailURL
 		}
@@ -291,7 +293,7 @@ func ListSharedAssetsHandler(c *fiber.Ctx) error {
 	}
 
 	for i := range result.Items {
-		thumbnailURL, _, thumbErr := ResolveAccessibleAssetThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID)
+		thumbnailURL, _, thumbErr := resolveListThumbnailURL(c.UserContext(), c.BaseURL(), userID, result.Items[i].ID, result.Items[i].Visibility, result.Items[i].ObjectKey, result.Items[i].MimeType, result.Items[i].ThumbnailObjectKey, result.Items[i].ThumbnailMimeType, result.Items[i].ThumbnailStatus)
 		if thumbErr == nil {
 			result.Items[i].ThumbnailURL = thumbnailURL
 		}
@@ -302,6 +304,17 @@ func ListSharedAssetsHandler(c *fiber.Ctx) error {
 		HasMore: result.HasMore,
 		Total:   result.Total,
 	})
+}
+
+func resolveListThumbnailURL(ctx context.Context, baseURL string, userID uuid.UUID, assetID uuid.UUID, visibility, objectKey, mimeType, thumbnailObjectKey, thumbnailMimeType, thumbnailStatus string) (string, time.Time, error) {
+	asset := models.Asset{
+		ID:         assetID,
+		Visibility: visibility,
+	}
+	if thumbnailStatus == blobThumbnailStatusReady && thumbnailObjectKey != "" {
+		return resolveAssetObjectURL(ctx, baseURL, userID, asset, thumbnailObjectKey, thumbnailMimeType, "/thumbnail")
+	}
+	return resolveAssetObjectURL(ctx, baseURL, userID, asset, objectKey, mimeType, "/content")
 }
 
 func GetAssetContentHandler(c *fiber.Ctx) error {
