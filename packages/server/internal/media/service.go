@@ -671,10 +671,90 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 		if findErr != nil {
 			return nil, findErr
 		}
-		if existing == nil {
-			return nil, errors.New("asset create conflicted but no existing asset found")
+		if existing != nil {
+			maybeScheduleBlobThumbnail(*blob, fileBytes)
+			return &UploadAssetResult{Asset: existing}, nil
 		}
-		return &UploadAssetResult{Asset: existing}, nil
+
+		// The unique constraint was hit, but we did not find an active (non-deleted) asset.
+		// Look for a soft-deleted row and restore it instead of failing the upload.
+		var restored *models.Asset
+		restoreErr := database.DB.Transaction(func(tx *gorm.DB) error {
+			var softDeleted models.Asset
+			unscopedErr := tx.
+				Unscoped().
+				Where("owner_user_id = ? AND blob_id = ?", document.OwnerUserID, blob.ID).
+				First(&softDeleted).Error
+			if unscopedErr != nil {
+				return unscopedErr
+			}
+
+			now := time.Now()
+			if !softDeleted.DeletedAt.Valid {
+				// Row already active (likely a race); still cancel pending GC jobs defensively.
+				if err := tx.Model(&models.AssetGCJob{}).
+					Where("asset_id = ? AND status = ?", softDeleted.ID, "pending").
+					Updates(map[string]any{
+						"status":     "cancelled",
+						"updated_at": now,
+					}).Error; err != nil {
+					return err
+				}
+				if err := ensurePendingBlobDeleteJob(tx, blob.ID, now); err != nil {
+					return err
+				}
+				restored = &softDeleted
+				return nil
+			}
+
+			if err := tx.Unscoped().Model(&models.Asset{}).
+				Where("id = ? AND owner_user_id = ? AND blob_id = ?", softDeleted.ID, document.OwnerUserID, blob.ID).
+				Updates(map[string]any{
+					"deleted_at":  nil,
+					"status":      "ready",
+					"document_id": req.DocumentID,
+					"kind":        kind,
+					"filename":    req.FileHeader.Filename,
+					"url":         blob.URL,
+					"visibility":  visibility,
+					"updated_at":  now,
+				}).Error; err != nil {
+				return err
+			}
+
+			if err := tx.Model(&models.AssetGCJob{}).
+				Where("asset_id = ? AND status = ?", softDeleted.ID, "pending").
+				Updates(map[string]any{
+					"status":     "cancelled",
+					"updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+
+			// If there is a pending delete job for this blob, cancel it now that the blob is referenced again.
+			if err := ensurePendingBlobDeleteJob(tx, blob.ID, now); err != nil {
+				return err
+			}
+
+			var active models.Asset
+			if err := tx.Where("id = ? AND deleted_at IS NULL", softDeleted.ID).First(&active).Error; err != nil {
+				return err
+			}
+			restored = &active
+			return nil
+		})
+		if restoreErr != nil {
+			if errors.Is(restoreErr, gorm.ErrRecordNotFound) {
+				return nil, errors.New("asset create conflicted but no existing asset found")
+			}
+			return nil, restoreErr
+		}
+
+		if restored == nil {
+			return nil, errors.New("asset create conflicted but restore result missing")
+		}
+		maybeScheduleBlobThumbnail(*blob, fileBytes)
+		return &UploadAssetResult{Asset: restored}, nil
 	}
 	maybeScheduleBlobThumbnail(*blob, fileBytes)
 	log.Printf("[media.upload.service] asset row created asset=%s blob=%s", asset.ID, blob.ID)

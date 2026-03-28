@@ -159,6 +159,108 @@ func TestUploadDocumentAsset_DeduplicatesByHashAndSize(t *testing.T) {
 	}
 }
 
+func TestUploadDocumentAsset_RevivesSoftDeletedAssetOnUniqueConflict(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+
+	headerA := makeFileHeader(t, "file", "photo.png", []byte("same-content"))
+	first, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: docID,
+		UserID:     userID,
+		FileHeader: headerA,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+
+	assetID := first.Asset.ID
+	blobID := first.Asset.BlobID
+	createdBy := first.Asset.CreatedBy
+
+	// Soft-delete the asset row to simulate user "delete" from media library.
+	if err := db.Model(&models.Asset{}).
+		Where("id = ?", assetID).
+		Updates(map[string]any{
+			"status":          "deleted",
+			"reference_count": 0,
+		}).Error; err != nil {
+		t.Fatalf("mark asset deleted: %v", err)
+	}
+	if err := db.Delete(&models.Asset{ID: assetID}).Error; err != nil {
+		t.Fatalf("soft delete asset: %v", err)
+	}
+
+	// Create pending GC jobs; revive path should cancel them.
+	if err := db.Create(&models.AssetGCJob{
+		ID:       uuid.New(),
+		AssetID:  assetID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: time.Now().Add(time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("create asset gc job: %v", err)
+	}
+	if err := db.Create(&models.BlobGCJob{
+		ID:       uuid.New(),
+		BlobID:   blobID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: time.Now().Add(time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("create blob gc job: %v", err)
+	}
+
+	headerB := makeFileHeader(t, "file", "duplicate.png", []byte("same-content"))
+	second, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: docID,
+		UserID:     userID,
+		FileHeader: headerB,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("second upload: %v", err)
+	}
+	if second.Asset.ID != assetID {
+		t.Fatalf("expected revived asset id=%s, got %s", assetID, second.Asset.ID)
+	}
+
+	var got models.Asset
+	if err := db.First(&got, "id = ?", assetID).Error; err != nil {
+		t.Fatalf("load revived asset: %v", err)
+	}
+	if got.Status != "ready" {
+		t.Fatalf("expected revived asset status=ready, got %s", got.Status)
+	}
+	if got.CreatedBy != createdBy {
+		t.Fatalf("expected created_by unchanged, got %s want %s", got.CreatedBy, createdBy)
+	}
+	if got.DeletedAt.Valid {
+		t.Fatalf("expected deleted_at cleared after revive")
+	}
+
+	var assetJob models.AssetGCJob
+	if err := db.First(&assetJob, "asset_id = ?", assetID).Error; err != nil {
+		t.Fatalf("load asset gc job: %v", err)
+	}
+	if assetJob.Status != "cancelled" {
+		t.Fatalf("expected asset gc job cancelled, got %s", assetJob.Status)
+	}
+
+	var blobJob models.BlobGCJob
+	if err := db.First(&blobJob, "blob_id = ?", blobID).Error; err != nil {
+		t.Fatalf("load blob gc job: %v", err)
+	}
+	if blobJob.Status != "cancelled" {
+		t.Fatalf("expected blob gc job cancelled, got %s", blobJob.Status)
+	}
+}
+
 func TestUploadDocumentAsset_AllowsSharedEditorAndUsesOwnerLibrary(t *testing.T) {
 	db := setupMediaTestDB(t)
 	ownerID := uuid.New()
