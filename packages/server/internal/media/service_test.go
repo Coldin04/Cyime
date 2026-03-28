@@ -23,6 +23,8 @@ import (
 func setupMediaTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	t.Setenv("APP_ENCRYPTION_KEY", "test-app-encryption-key")
+	// Keep tests deterministic: avoid async thumbnail writes racing on SQLite locks.
+	t.Setenv("MEDIA_THUMBNAIL_SOURCE_MAX_BYTES", "1")
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -156,6 +158,82 @@ func TestUploadDocumentAsset_DeduplicatesByHashAndSize(t *testing.T) {
 	}
 	if asset.ReferenceCount != 0 {
 		t.Fatalf("expected reference_count=0 before save-time sync, got %d", asset.ReferenceCount)
+	}
+}
+
+func TestUploadDocumentAsset_RevivesSoftDeletedBlobOnUniqueConflict(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+	content := []byte("same-content")
+	hash := computeFileHash(content)
+
+	blob := seedBlob(t, db, "owner/old.png", "image/png", int64(len(content)), hash)
+	if err := db.Model(&models.BlobObject{}).
+		Where("id = ?", blob.ID).
+		Updates(map[string]any{
+			"status":               "deleted",
+			"thumbnail_object_key": "owner/old__thumb_sm.png",
+			"thumbnail_mime_type":  "image/png",
+			"thumbnail_size":       1234,
+			"thumbnail_status":     blobThumbnailStatusReady,
+		}).Error; err != nil {
+		t.Fatalf("mark blob deleted: %v", err)
+	}
+	if err := db.Delete(&models.BlobObject{ID: blob.ID}).Error; err != nil {
+		t.Fatalf("soft delete blob: %v", err)
+	}
+	if err := db.Create(&models.BlobGCJob{
+		ID:       uuid.New(),
+		BlobID:   blob.ID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: time.Now().Add(time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("create blob gc job: %v", err)
+	}
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+
+	header := makeFileHeader(t, "file", "photo.png", content)
+	result, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: docID,
+		UserID:     userID,
+		FileHeader: header,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if result.Asset.BlobID != blob.ID {
+		t.Fatalf("expected revived blob id=%s, got %s", blob.ID, result.Asset.BlobID)
+	}
+
+	var gotBlob models.BlobObject
+	if err := db.First(&gotBlob, "id = ?", blob.ID).Error; err != nil {
+		t.Fatalf("load revived blob: %v", err)
+	}
+	if gotBlob.DeletedAt.Valid {
+		t.Fatalf("expected deleted_at cleared after blob revive")
+	}
+	if gotBlob.Status != "ready" {
+		t.Fatalf("expected blob status ready, got %s", gotBlob.Status)
+	}
+	if gotBlob.ThumbnailStatus != blobThumbnailStatusPending {
+		t.Fatalf("expected thumbnail status reset to pending, got %s", gotBlob.ThumbnailStatus)
+	}
+	if gotBlob.ThumbnailObjectKey != "" {
+		t.Fatalf("expected thumbnail object key cleared on revive, got %q", gotBlob.ThumbnailObjectKey)
+	}
+
+	var gcJob models.BlobGCJob
+	if err := db.First(&gcJob, "blob_id = ?", blob.ID).Error; err != nil {
+		t.Fatalf("load blob gc job: %v", err)
+	}
+	if gcJob.Status != "cancelled" {
+		t.Fatalf("expected blob gc job cancelled, got %s", gcJob.Status)
 	}
 }
 

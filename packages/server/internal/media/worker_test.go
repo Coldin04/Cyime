@@ -181,6 +181,59 @@ func TestRunDueAssetGCJobs_CancelsWhenAssetIsReferencedAgain(t *testing.T) {
 	}
 }
 
+func TestRunAssetReferenceReconcilePass_ReschedulesExistingPendingDeleteJob(t *testing.T) {
+	db := setupMediaTestDB(t)
+	userID := uuid.New()
+	docID := seedOwnedDocument(t, db, userID)
+	now := time.Now()
+
+	t.Setenv("MEDIA_ASSET_DELETE_DELAY", "0s")
+
+	blob := seedBlob(t, db, "owner/reschedule.png", "image/png", 3, "hash-reschedule")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    userID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "reschedule.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "pending_delete",
+		ReferenceCount: 0,
+		CreatedBy:      userID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	job := models.AssetGCJob{
+		ID:       uuid.New(),
+		AssetID:  asset.ID,
+		JobType:  "delete",
+		Status:   "pending",
+		RunAfter: now.Add(24 * time.Hour),
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("create pending job: %v", err)
+	}
+
+	reconciled, err := RunAssetReferenceReconcilePass(now, 10)
+	if err != nil {
+		t.Fatalf("reconcile pass: %v", err)
+	}
+	if reconciled != 1 {
+		t.Fatalf("expected reconciled=1, got %d", reconciled)
+	}
+
+	var gotJob models.AssetGCJob
+	if err := db.First(&gotJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if gotJob.RunAfter.After(now.Add(2 * time.Second)) {
+		t.Fatalf("expected run_after rescheduled near now, got %s", gotJob.RunAfter)
+	}
+}
+
 func TestRunDueAssetGCJobs_MarksFailedOnDeleteError(t *testing.T) {
 	db := setupMediaTestDB(t)
 	userID := uuid.New()

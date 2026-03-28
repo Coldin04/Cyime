@@ -25,6 +25,7 @@ const (
 	defaultAssetGCRetryGap            = 5 * time.Minute
 	defaultAssetReconcile             = 200
 	defaultBlobDeleteDelay            = 24 * time.Hour
+	defaultAssetDeleteDelay           = 24 * time.Hour
 )
 
 func StartAssetGCWorker(ctx context.Context) {
@@ -541,18 +542,30 @@ func reconcileOneAsset(now time.Time, assetID uuid.UUID) error {
 		var pending models.AssetGCJob
 		err := tx.Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").First(&pending).Error
 		if err == nil {
+			delay := assetDeleteDelayFromEnv()
+			targetRunAfter := now.Add(delay)
+			// Only pull the schedule earlier; never push an already-earlier job later.
+			if pending.RunAfter.After(targetRunAfter) {
+				return tx.Model(&models.AssetGCJob{}).
+					Where("id = ?", pending.ID).
+					Updates(map[string]any{
+						"run_after":  targetRunAfter,
+						"updated_at": now,
+					}).Error
+			}
 			return nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 
+		delay := assetDeleteDelayFromEnv()
 		return tx.Create(&models.AssetGCJob{
 			ID:       uuid.New(),
 			AssetID:  assetID,
 			JobType:  "delete",
 			Status:   "pending",
-			RunAfter: now.Add(24 * time.Hour),
+			RunAfter: now.Add(delay),
 		}).Error
 	})
 }
@@ -649,6 +662,18 @@ func assetReconcileBatchSizeFromEnv() int {
 		return defaultAssetReconcile
 	}
 	return n
+}
+
+func assetDeleteDelayFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_ASSET_DELETE_DELAY"))
+	if raw == "" {
+		return defaultAssetDeleteDelay
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return defaultAssetDeleteDelay
+	}
+	return d
 }
 
 func blobDeleteDelayFromEnv() time.Duration {
