@@ -284,7 +284,7 @@ func (p *s3CompatibleProvider) PresignGetObject(_ context.Context, input Presign
 		objectPath = encodePath(path.Join(basePath, p.bucket, input.ObjectKey))
 	}
 	canonicalURI := "/" + strings.TrimPrefix(objectPath, "/")
-	requestURL := p.endpoint + canonicalURI
+	requestURL := endpointURL.Scheme + "://" + endpointURL.Host + canonicalURI
 
 	now := time.Now().UTC()
 	dateStamp := now.Format("20060102")
