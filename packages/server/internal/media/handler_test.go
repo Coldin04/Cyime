@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ func newMediaTestApp(userID uuid.UUID) *fiber.App {
 	app.Get("/media/assets", ListAssetsHandler)
 	app.Get("/media/shared-assets", ListSharedAssetsHandler)
 	app.Get("/media/assets/:id/url", GetAssetURLHandler)
+	app.Post("/media/assets/resolve", ResolveAssetURLsHandler)
 	app.Get("/media/assets/:id/references", GetAssetReferencesHandler)
 	app.Delete("/media/assets/:id", DeleteAssetHandler)
 	return app
@@ -254,6 +256,76 @@ func TestGetAssetURLHandler_AllowsSharedViewerAccess(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestResolveAssetURLsHandler_ReturnsPerAssetResults(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedOwnedDocument(t, db, ownerID)
+	seedDocumentPermission(t, db, docID, viewerID, ownerID, "viewer")
+	t.Setenv("MEDIA_TOKEN_SECRET", "test-media-secret")
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+	t.Cleanup(func() { storageProvider = nil })
+
+	blob := seedBlob(t, db, "owner/shared-resolve.png", "image/png", 16, "hash-shared-resolve")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "shared-resolve.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 1,
+		CreatedBy:      ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	if err := db.Create(&models.DocumentAssetRef{
+		ID:          uuid.New(),
+		DocumentID:  docID,
+		AssetID:     asset.ID,
+		OwnerUserID: ownerID,
+		RefType:     "editor_content",
+	}).Error; err != nil {
+		t.Fatalf("create ref: %v", err)
+	}
+
+	body := map[string]any{
+		"assetIds": []string{asset.ID.String(), "not-a-uuid"},
+	}
+	payloadBytes, _ := json.Marshal(body)
+
+	app := newMediaTestApp(viewerID)
+	req := httptest.NewRequest(http.MethodPost, "/media/assets/resolve", bytes.NewReader(payloadBytes))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload ResolveAssetURLsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(payload.Items))
+	}
+	if payload.Items[0].AssetID != asset.ID || payload.Items[0].URL == "" || payload.Items[0].Error != "" {
+		t.Fatalf("unexpected first item: %+v", payload.Items[0])
+	}
+	if payload.Items[1].Code != "INVALID_ASSET_ID" {
+		t.Fatalf("unexpected second item: %+v", payload.Items[1])
 	}
 }
 

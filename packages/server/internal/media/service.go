@@ -10,8 +10,11 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,6 +180,50 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 		return nil, errors.New("资源不存在或无权访问")
 	}
 	return asset, nil
+}
+
+func ResolveAccessibleAssetReadURL(ctx context.Context, baseURL string, userID, assetID uuid.UUID) (string, time.Time, error) {
+	asset, err := GetAccessibleAsset(userID, assetID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	record, err := getAssetBlobByID(assetID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	blob := record.Blob
+
+	if err := initStorageProvider(); err != nil {
+		return "", time.Time{}, err
+	}
+
+	if provider, ok := storageProvider.(PresignedURLProvider); ok {
+		presigned, err := provider.PresignGetObject(ctx, PresignGetObjectInput{
+			ObjectKey:   blob.ObjectKey,
+			ExpiresIn:   assetResolveTTLFromEnv(),
+			ContentType: blob.MimeType,
+		})
+		if err == nil {
+			return presigned.URL, presigned.ExpiresAt, nil
+		}
+		log.Printf("[media.resolve] presign failed provider=%s asset=%s fallback=token err=%v", storageProvider.ProviderName(), asset.ID, err)
+	}
+
+	readURL := strings.TrimRight(baseURL, "/") + "/api/v1/media/assets/" + asset.ID.String() + "/content"
+	if asset.Visibility == "public" {
+		return readURL, time.Time{}, nil
+	}
+
+	tokenService, err := NewTokenService()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	token, exp, err := tokenService.IssueAssetReadToken(asset.ID, userID)
+	if err != nil {
+		return "", time.Time{}, errors.New("failed to issue media token")
+	}
+	return readURL + "?token=" + url.QueryEscape(token), exp, nil
 }
 
 func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
@@ -651,6 +698,17 @@ func isUniqueConstraintError(err error, parts ...string) bool {
 		}
 	}
 	return true
+}
+
+func assetResolveTTLFromEnv() time.Duration {
+	ttlSeconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("MEDIA_ASSET_RESOLVE_TTL_SECONDS")))
+	if err != nil || ttlSeconds <= 0 {
+		ttlSeconds, err = strconv.Atoi(strings.TrimSpace(os.Getenv("MEDIA_SIGN_TTL_SECONDS")))
+	}
+	if err != nil || ttlSeconds <= 0 {
+		ttlSeconds = defaultSignTTLSeconds
+	}
+	return time.Duration(ttlSeconds) * time.Second
 }
 
 func GetOwnedAssetReferences(userID, assetID uuid.UUID) (*AssetReferencesResult, error) {

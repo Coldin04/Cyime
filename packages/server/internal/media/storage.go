@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,6 +36,21 @@ type PutObjectResult struct {
 type GetObjectResult struct {
 	ContentType string
 	Body        io.ReadCloser
+}
+
+type PresignGetObjectInput struct {
+	ObjectKey   string
+	ExpiresIn   time.Duration
+	ContentType string
+}
+
+type PresignGetObjectResult struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+type PresignedURLProvider interface {
+	PresignGetObject(ctx context.Context, input PresignGetObjectInput) (*PresignGetObjectResult, error)
 }
 
 type StorageProvider interface {
@@ -237,6 +253,70 @@ func (p *s3CompatibleProvider) DeleteObject(ctx context.Context, objectKey strin
 	}
 
 	return nil
+}
+
+func (p *s3CompatibleProvider) PresignGetObject(_ context.Context, input PresignGetObjectInput) (*PresignGetObjectResult, error) {
+	if input.ObjectKey == "" {
+		return nil, errors.New("object key is required")
+	}
+
+	expiresIn := input.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 5 * time.Minute
+	}
+	// AWS SigV4 presign supports up to 7 days.
+	if expiresIn > 7*24*time.Hour {
+		expiresIn = 7 * 24 * time.Hour
+	}
+	expiresSeconds := int(expiresIn / time.Second)
+	if expiresSeconds < 1 {
+		expiresSeconds = 1
+	}
+
+	endpointURL, err := url.Parse(p.endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	basePath := strings.Trim(endpointURL.Path, "/")
+	objectPath := encodePath(path.Join(p.bucket, input.ObjectKey))
+	if basePath != "" {
+		objectPath = encodePath(path.Join(basePath, p.bucket, input.ObjectKey))
+	}
+	canonicalURI := "/" + strings.TrimPrefix(objectPath, "/")
+	requestURL := p.endpoint + canonicalURI
+
+	now := time.Now().UTC()
+	dateStamp := now.Format("20060102")
+	amzDate := now.Format("20060102T150405Z")
+	scope := dateStamp + "/" + p.region + "/s3/aws4_request"
+
+	query := url.Values{}
+	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	query.Set("X-Amz-Credential", p.accessKeyID+"/"+scope)
+	query.Set("X-Amz-Date", amzDate)
+	query.Set("X-Amz-Expires", strconv.Itoa(expiresSeconds))
+	query.Set("X-Amz-SignedHeaders", "host")
+	if input.ContentType != "" {
+		query.Set("response-content-type", input.ContentType)
+	}
+
+	canonicalQuery := canonicalizeQuery(query)
+	canonicalHeaders := "host:" + endpointURL.Host + "\n"
+	canonicalRequest := "GET\n" +
+		canonicalURI + "\n" +
+		canonicalQuery + "\n" +
+		canonicalHeaders + "\n" +
+		"host\n" +
+		"UNSIGNED-PAYLOAD"
+	stringToSign := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + sha256Hex([]byte(canonicalRequest))
+	signature := hex.EncodeToString(hmacSHA256(signingKey(p.secretKey, dateStamp, p.region, "s3"), stringToSign))
+	query.Set("X-Amz-Signature", signature)
+
+	return &PresignGetObjectResult{
+		URL:       requestURL + "?" + canonicalizeQuery(query),
+		ExpiresAt: now.Add(time.Duration(expiresSeconds) * time.Second),
+	}, nil
 }
 
 func (p *s3CompatibleProvider) newSignedRequest(ctx context.Context, method string, objectKey string, body []byte, contentType string) (*http.Request, error) {

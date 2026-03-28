@@ -119,6 +119,7 @@ func main() {
 	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
 	api.Get("/media/shared-assets", middleware.Protected(), media.ListSharedAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
+	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
