@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
@@ -25,74 +24,9 @@ func newMediaTestApp(userID uuid.UUID) *fiber.App {
 	app.Get("/media/shared-assets", ListSharedAssetsHandler)
 	app.Get("/media/assets/:id/url", GetAssetURLHandler)
 	app.Post("/media/assets/resolve", ResolveAssetURLsHandler)
-	app.Post("/media/gc/reconcile", ManualReclaimMediaHandler)
 	app.Get("/media/assets/:id/references", GetAssetReferencesHandler)
 	app.Delete("/media/assets/:id", DeleteAssetHandler)
 	return app
-}
-
-func TestManualReclaimMediaHandler_ReconcilesOwnedAssets(t *testing.T) {
-	db := setupMediaTestDB(t)
-	userID := uuid.New()
-	docID := seedOwnedDocument(t, db, userID)
-
-	blob := seedBlob(t, db, "owner/reclaim.png", "image/png", 3, "hash-reclaim")
-	asset := models.Asset{
-		ID:             uuid.New(),
-		OwnerUserID:    userID,
-		DocumentID:     &docID,
-		BlobID:         blob.ID,
-		Kind:           "image",
-		Filename:       "reclaim.png",
-		URL:            blob.URL,
-		Visibility:     "private",
-		Status:         "ready",
-		ReferenceCount: 0,
-		CreatedBy:      userID,
-	}
-	if err := db.Create(&asset).Error; err != nil {
-		t.Fatalf("create asset: %v", err)
-	}
-
-	app := newMediaTestApp(userID)
-	req := httptest.NewRequest(http.MethodPost, "/media/gc/reconcile?limit=10", nil)
-	resp, err := app.Test(req, -1)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var parsed ManualReclaimResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if parsed.Reconciled != 1 {
-		t.Fatalf("expected reconciled=1, got %d", parsed.Reconciled)
-	}
-	if parsed.Now == "" {
-		t.Fatalf("expected now in response")
-	}
-
-	var got models.Asset
-	if err := db.First(&got, "id = ?", asset.ID).Error; err != nil {
-		t.Fatalf("load asset: %v", err)
-	}
-	if got.Status != "pending_delete" {
-		t.Fatalf("expected status pending_delete after reconcile, got %s", got.Status)
-	}
-
-	var job models.AssetGCJob
-	if err := db.First(&job, "asset_id = ? AND status = ?", asset.ID, "pending").Error; err != nil {
-		t.Fatalf("expected pending asset gc job: %v", err)
-	}
-	if job.JobType != "delete" {
-		t.Fatalf("expected job_type delete, got %s", job.JobType)
-	}
-	if !job.RunAfter.After(time.Now()) {
-		t.Fatalf("expected delayed run_after in future, got %s", job.RunAfter)
-	}
 }
 
 func TestListAssetsHandler_InvalidKindReturnsBadRequest(t *testing.T) {

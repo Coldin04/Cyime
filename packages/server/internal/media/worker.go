@@ -266,31 +266,6 @@ func RunAssetReferenceReconcilePass(now time.Time, batchSize int) (int, error) {
 	return reconciled, nil
 }
 
-func RunOwnedAssetReferenceReconcilePass(now time.Time, ownerUserID uuid.UUID, batchSize int) (int, error) {
-	if batchSize <= 0 {
-		batchSize = defaultAssetReconcile
-	}
-
-	var assetIDs []uuid.UUID
-	if err := database.DB.
-		Model(&models.Asset{}).
-		Where("owner_user_id = ? AND deleted_at IS NULL", ownerUserID).
-		Order("updated_at asc").
-		Limit(batchSize).
-		Pluck("id", &assetIDs).Error; err != nil {
-		return 0, err
-	}
-
-	reconciled := 0
-	for _, assetID := range assetIDs {
-		if err := reconcileOneAsset(now, assetID); err != nil {
-			return reconciled, err
-		}
-		reconciled++
-	}
-	return reconciled, nil
-}
-
 func RunBlobThumbnailReconcilePass(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = defaultAssetReconcile
@@ -684,7 +659,7 @@ func assetDeleteDelayFromEnv() time.Duration {
 		return defaultAssetDeleteDelay
 	}
 	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
+	if err != nil || d < 0 {
 		return defaultAssetDeleteDelay
 	}
 	return d
