@@ -95,15 +95,22 @@ func ShareDocument(ownerUserID, documentID, targetUserID uuid.UUID, role string)
 		}
 
 		var permission models.DocumentPermission
-		err := tx.Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
+		// Include soft-deleted permissions so re-sharing can "revive" an existing row
+		// instead of failing unique(document_id, user_id).
+		err := tx.Unscoped().Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
 		switch {
 		case err == nil:
-			return tx.Model(&models.DocumentPermission{}).
+			now := time.Now()
+			if err := tx.Unscoped().Model(&models.DocumentPermission{}).
+				Where("id = ?", permission.ID).
+				Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
+			return tx.Unscoped().Model(&models.DocumentPermission{}).
 				Where("id = ?", permission.ID).
 				Updates(map[string]any{
 					"role":       normalizedRole,
-					"updated_at": time.Now(),
-					"deleted_at": nil,
+					"updated_at": now,
 				}).Error
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			return tx.Create(&models.DocumentPermission{
