@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strconv"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -79,6 +80,11 @@ type ResolveAssetURLItem struct {
 
 type ResolveAssetURLsResponse struct {
 	Items []ResolveAssetURLItem `json:"items"`
+}
+
+type ManualReclaimResponse struct {
+	Reconciled int    `json:"reconciled"`
+	Now        string `json:"now"`
 }
 
 func GetAssetURLHandler(c *fiber.Ctx) error {
@@ -196,6 +202,48 @@ func ResolveAssetURLsHandler(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(ResolveAssetURLsResponse{Items: items})
+}
+
+func ManualReclaimMediaHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid user id",
+		})
+	}
+
+	limit := 500
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			if n > 5000 {
+				n = 5000
+			}
+			limit = n
+		}
+	}
+
+	now := time.Now()
+	reconciled, err := RunOwnedAssetReferenceReconcilePass(now, userID, limit)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(ManualReclaimResponse{
+		Reconciled: reconciled,
+		Now:        now.UTC().Format("2006-01-02T15:04:05Z"),
+	})
 }
 
 func ListAssetsHandler(c *fiber.Ctx) error {
