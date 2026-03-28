@@ -542,7 +542,13 @@ func reconcileOneAsset(now time.Time, assetID uuid.UUID) error {
 		var pending models.AssetGCJob
 		err := tx.Where("asset_id = ? AND job_type = ? AND status = ?", assetID, "delete", "pending").First(&pending).Error
 		if err == nil {
-			return nil
+			delay := assetDeleteDelayFromEnv()
+			return tx.Model(&models.AssetGCJob{}).
+				Where("id = ?", pending.ID).
+				Updates(map[string]any{
+					"run_after":  now.Add(delay),
+					"updated_at": now,
+				}).Error
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
