@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
@@ -29,6 +30,11 @@ import (
 	"gorm.io/gorm"
 
 	_ "image/gif"
+)
+
+var (
+	thumbnailInlineInit sync.Once
+	thumbnailInlineSem  chan struct{}
 )
 
 type UploadAssetRequest struct {
@@ -1061,13 +1067,36 @@ func maybeScheduleBlobThumbnail(blob models.BlobObject, sourceBytes []byte) {
 	if !shouldGenerateBlobThumbnail(blob) {
 		return
 	}
-	blobCopy := blob
-	fileCopy := append([]byte(nil), sourceBytes...)
-	go func() {
-		if err := generateAndStoreBlobThumbnail(context.Background(), blobCopy, fileCopy); err != nil {
-			log.Printf("[media.thumb] blob=%s failed: %v", blobCopy.ID, err)
-		}
-	}()
+
+	// Avoid unbounded goroutines and large extra allocations.
+	// If the inline queue is saturated, let the periodic reconcile pass backfill thumbnails later.
+	thumbnailInlineInit.Do(func() {
+		thumbnailInlineSem = make(chan struct{}, thumbnailInlineConcurrencyFromEnv())
+	})
+
+	// Defensive: never try to thumbnail absurdly large inputs.
+	maxBytes := thumbnailSourceMaxBytesFromEnv()
+	if blob.Size > maxBytes || int64(len(sourceBytes)) > maxBytes {
+		_ = markBlobThumbnailState(blob.ID, blobThumbnailStatusSkipped, map[string]any{
+			"thumbnail_object_key": "",
+			"thumbnail_mime_type":  "",
+			"thumbnail_size":       0,
+			"thumbnail_width":      nil,
+			"thumbnail_height":     nil,
+		})
+		return
+	}
+
+	select {
+	case thumbnailInlineSem <- struct{}{}:
+		go func() {
+			defer func() { <-thumbnailInlineSem }()
+			if err := generateAndStoreBlobThumbnail(context.Background(), blob, sourceBytes); err != nil {
+				log.Printf("[media.thumb] blob=%s failed: %v", blob.ID, err)
+			}
+		}()
+	default:
+	}
 }
 
 func shouldGenerateBlobThumbnail(blob models.BlobObject) bool {
@@ -1078,6 +1107,37 @@ func shouldGenerateBlobThumbnail(blob models.BlobObject) bool {
 		return false
 	}
 	return true
+}
+
+func thumbnailInlineConcurrencyFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_THUMBNAIL_INLINE_CONCURRENCY"))
+	if raw == "" {
+		return 2
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 2
+	}
+	if n > 16 {
+		return 16
+	}
+	return n
+}
+
+func thumbnailSourceMaxBytesFromEnv() int64 {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_THUMBNAIL_SOURCE_MAX_BYTES"))
+	if raw == "" {
+		return 25 << 20 // 25 MiB
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return 25 << 20
+	}
+	// Avoid ridiculous configs.
+	if n < (1 << 20) {
+		return 1 << 20
+	}
+	return n
 }
 
 func generateAndStoreBlobThumbnail(ctx context.Context, blob models.BlobObject, sourceBytes []byte) error {

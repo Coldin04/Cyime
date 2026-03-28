@@ -272,6 +272,7 @@ func RunBlobThumbnailReconcilePass(ctx context.Context, batchSize int) (int, err
 	if err := initStorageProvider(); err != nil {
 		return 0, err
 	}
+	maxBytes := thumbnailSourceMaxBytesFromEnv()
 
 	subQuery := database.DB.Model(&models.Asset{}).
 		Select("DISTINCT blob_id").
@@ -291,13 +292,24 @@ func RunBlobThumbnailReconcilePass(ctx context.Context, batchSize int) (int, err
 
 	backfilled := 0
 	for _, blob := range blobs {
+		if blob.Size > maxBytes {
+			_ = markBlobThumbnailState(blob.ID, blobThumbnailStatusSkipped, map[string]any{
+				"thumbnail_object_key": "",
+				"thumbnail_mime_type":  "",
+				"thumbnail_size":       0,
+				"thumbnail_width":      nil,
+				"thumbnail_height":     nil,
+			})
+			continue
+		}
+
 		obj, err := storageProvider.GetObject(ctx, blob.ObjectKey)
 		if err != nil {
 			log.Printf("[media.gc] thumbnail source fetch failed blob=%s err=%v", blob.ID, err)
 			continue
 		}
 
-		sourceBytes, readErr := io.ReadAll(obj.Body)
+		sourceBytes, readErr := readAllLimited(obj.Body, maxBytes)
 		_ = obj.Body.Close()
 		if readErr != nil {
 			log.Printf("[media.gc] thumbnail source read failed blob=%s err=%v", blob.ID, readErr)
@@ -312,6 +324,20 @@ func RunBlobThumbnailReconcilePass(ctx context.Context, batchSize int) (int, err
 	}
 
 	return backfilled, nil
+}
+
+func readAllLimited(r io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errors.New("invalid read limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("object too large to load into memory")
+	}
+	return data, nil
 }
 
 func RunDueBlobGCJobs(ctx context.Context, now time.Time, limit int) (int, error) {

@@ -97,7 +97,16 @@
 			return cloned;
 		}
 
-		const resolved = await resolveAssetReadURLs(assetIds);
+		let resolved: Awaited<ReturnType<typeof resolveAssetReadURLs>> | null = null;
+		try {
+			resolved = await resolveAssetReadURLs(assetIds);
+		} catch (error) {
+			console.error('[Load] Failed to resolve image URLs:', error);
+			return cloned;
+		}
+		if (!resolved) {
+			return cloned;
+		}
 		const resolvedMap = new Map(
 			resolved.items
 				.filter((item) => item.assetId && item.url)
