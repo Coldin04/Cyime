@@ -180,11 +180,7 @@ func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSON
 
 // DeleteContentByDocumentID soft deletes the content row for a document.
 func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	if _, _, err := acl.CanAccessDocumentOwnerOnly(tx, userID, documentID); err != nil {
 		return nil
 	}
 
@@ -197,11 +193,7 @@ func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error 
 
 // RestoreContentByDocumentID restores the content row for a document.
 func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	if _, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID); err != nil {
 		return nil
 	}
 
@@ -230,11 +222,7 @@ func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error
 
 // PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
 func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	if _, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID); err != nil {
 		return nil
 	}
 

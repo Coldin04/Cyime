@@ -31,6 +31,8 @@ type TokenService struct {
 	refreshTokenByteLength int
 }
 
+const mediaAccessTokenCookieName = "cyime_media_access_token"
+
 // SessionInfo is the API-facing session view used by the security page.
 type SessionInfo struct {
 	ID          uuid.UUID `json:"id"`
@@ -127,6 +129,17 @@ func (s *TokenService) DeliverTokensAndRedirect(c *fiber.Ctx, accessToken, refre
 		Secure:   c.Protocol() == "https", // Only set secure flag if on HTTPS
 		SameSite: "Lax",
 		Path:     "/api/v1/auth", // Important: Scope cookie to the auth path to prevent it being sent on every request
+	})
+
+	// Media content endpoints can be loaded by <img>, so we also provide a scoped access-token cookie.
+	c.Cookie(&fiber.Cookie{
+		Name:     mediaAccessTokenCookieName,
+		Value:    accessToken,
+		Expires:  time.Now().Add(s.accessTokenLifetime),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+		Path:     "/api/v1/media",
 	})
 
 	// 通过将过期时间设置为过去来清除 oidc_state cookie。
@@ -457,6 +470,16 @@ func (s *TokenService) HandleRefresh(c *fiber.Ctx) error {
 		Secure:   c.Protocol() == "https",
 		SameSite: "Lax",
 		Path:     "/api/v1/auth",
+	})
+
+	c.Cookie(&fiber.Cookie{
+		Name:     mediaAccessTokenCookieName,
+		Value:    newAccessToken,
+		Expires:  time.Now().Add(s.accessTokenLifetime),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+		Path:     "/api/v1/media",
 	})
 
 	// 5. Send the new access token in the response body.

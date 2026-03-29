@@ -34,30 +34,11 @@ func ensureSharingEnabledForUser(tx *gorm.DB, userID uuid.UUID) error {
 }
 
 func loadShareManagedDocument(tx *gorm.DB, actorUserID, documentID uuid.UUID) (*models.Document, string, error) {
-	var document models.Document
-	if err := tx.Where("id = ? AND deleted_at IS NULL", documentID).First(&document).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", errors.New("文档不存在或无权访问")
-		}
-		return nil, "", err
-	}
-
-	if document.OwnerUserID == actorUserID {
-		return &document, acl.RoleOwner, nil
-	}
-
-	var permission models.DocumentPermission
-	if err := tx.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, actorUserID).First(&permission).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", errors.New("文档不存在或无权访问")
-		}
-		return nil, "", err
-	}
-	if permission.Role != acl.RoleCollaborator {
+	document, role, err := acl.CanManageDocumentMembers(tx, actorUserID, documentID)
+	if err != nil {
 		return nil, "", errors.New("文档不存在或无权访问")
 	}
-
-	return &document, acl.RoleCollaborator, nil
+	return document, role, nil
 }
 
 func getInviteCooldownConfig() (baseSeconds, multiplier, maxSeconds int) {

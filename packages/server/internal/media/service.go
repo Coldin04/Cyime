@@ -14,7 +14,6 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -199,7 +198,7 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 		Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
 		Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
 		Where("refs.asset_id = ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", assetID, "editor_content").
-		Where("d.owner_user_id = ? OR perms.role IN ?", userID, []string{acl.RoleViewer, acl.RoleEditor, acl.RoleOwner}).
+		Where("d.owner_user_id = ? OR perms.role IN ?", userID, acl.AllowedRolesForAction(acl.ActionRead)).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
@@ -241,7 +240,7 @@ func ResolveAccessibleAssetThumbnailURL(ctx context.Context, baseURL string, use
 	return resolveAssetObjectURL(ctx, baseURL, userID, *asset, blob.ThumbnailObjectKey, blob.ThumbnailMimeType, "/thumbnail")
 }
 
-func resolveAssetObjectURL(ctx context.Context, baseURL string, userID uuid.UUID, asset models.Asset, objectKey string, contentType string, pathSuffix string) (string, time.Time, error) {
+func resolveAssetObjectURL(ctx context.Context, baseURL string, _ uuid.UUID, asset models.Asset, objectKey string, contentType string, pathSuffix string) (string, time.Time, error) {
 	if err := initStorageProvider(); err != nil {
 		return "", time.Time{}, err
 	}
@@ -255,23 +254,16 @@ func resolveAssetObjectURL(ctx context.Context, baseURL string, userID uuid.UUID
 		if err == nil {
 			return presigned.URL, presigned.ExpiresAt, nil
 		}
-		log.Printf("[media.resolve] presign failed provider=%s asset=%s path=%s fallback=token err=%v", storageProvider.ProviderName(), asset.ID, pathSuffix, err)
+		log.Printf("[media.resolve] presign failed provider=%s asset=%s path=%s fallback=protected_api err=%v", storageProvider.ProviderName(), asset.ID, pathSuffix, err)
 	}
 
 	readURL := strings.TrimRight(baseURL, "/") + "/api/v1/media/assets/" + asset.ID.String() + pathSuffix
 	if asset.Visibility == "public" {
 		return readURL, time.Time{}, nil
 	}
-
-	tokenService, err := NewTokenService()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	token, exp, err := tokenService.IssueAssetReadToken(asset.ID, userID)
-	if err != nil {
-		return "", time.Time{}, errors.New("failed to issue media token")
-	}
-	return readURL + "?token=" + url.QueryEscape(token), exp, nil
+	// Fallback path for providers without presign support: serve a stable API URL.
+	// Access control is enforced by JWT middleware + per-request ACL checks in handlers.
+	return readURL, time.Time{}, nil
 }
 
 func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
@@ -387,7 +379,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 		Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 		Joins("JOIN assets AS a ON a.id = refs.asset_id AND a.deleted_at IS NULL").
 		Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleCollaborator, acl.RoleOwner}, mediaRefTypeEditorContent).
+		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, acl.AllowedRolesForAction(acl.ActionEdit), mediaRefTypeEditorContent).
 		Where("d.owner_user_id <> ?", req.UserID)
 
 	kind := strings.TrimSpace(req.Kind)
@@ -467,7 +459,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 			Select("refs.asset_id", "d.id AS document_id", "d.title", "d.updated_at").
 			Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 			Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleCollaborator, acl.RoleOwner}, assetIDs, mediaRefTypeEditorContent).
+			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, acl.AllowedRolesForAction(acl.ActionEdit), assetIDs, mediaRefTypeEditorContent).
 			Order("d.updated_at desc").
 			Scan(&docRows).Error; err != nil {
 			return nil, err

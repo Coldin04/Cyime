@@ -318,6 +318,21 @@ func resolveListThumbnailURL(ctx context.Context, baseURL string, userID uuid.UU
 }
 
 func GetAssetContentHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user id",
+		})
+	}
+
 	assetID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -337,39 +352,13 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 	blob := record.Blob
 
 	if asset.Visibility != "public" {
-		token := c.Query("token")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Missing media token",
-			})
-		}
-
-		tokenService, err := NewTokenService()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
+		// Private media requires document/media ACL check per request.
+		if _, err := GetAccessibleAsset(userID, asset.ID); err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
 				Message: err.Error(),
 			})
 		}
-
-		claims, err := tokenService.VerifyAssetReadToken(token)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Invalid media token: " + err.Error(),
-			})
-		}
-
-		if claims.AssetID != asset.ID {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Media token does not match asset",
-			})
-		}
-
-		// Do not hard-bind user in the read token check.
-		// Token is already short-lived and signed server-side; asset binding is enough here.
 	}
 
 	if err := initStorageProvider(); err != nil {
@@ -406,6 +395,21 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 }
 
 func GetAssetThumbnailHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user id",
+		})
+	}
+
 	assetID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -425,34 +429,11 @@ func GetAssetThumbnailHandler(c *fiber.Ctx) error {
 	blob := record.Blob
 
 	if asset.Visibility != "public" {
-		token := c.Query("token")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Missing media token",
-			})
-		}
-
-		tokenService, err := NewTokenService()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
+		// Private media requires document/media ACL check per request.
+		if _, err := GetAccessibleAsset(userID, asset.ID); err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
 				Message: err.Error(),
-			})
-		}
-
-		claims, err := tokenService.VerifyAssetReadToken(token)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Invalid media token: " + err.Error(),
-			})
-		}
-
-		if claims.AssetID != asset.ID {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Media token does not match asset",
 			})
 		}
 	}

@@ -249,6 +249,7 @@ func HandleLogout(c *fiber.Ctx) error {
 	// This is the most critical step for the client-side.
 	// We only need to provide the path that the cookie was set with.
 	c.ClearCookie("cyime_refresh_token", "/api/v1/auth")
+	c.ClearCookie("cyime_media_access_token", "/api/v1/media")
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -313,6 +314,7 @@ func HandleRevokeSession(c *fiber.Ctx) error {
 
 	if isCurrent {
 		c.ClearCookie("cyime_refresh_token", "/api/v1/auth")
+		c.ClearCookie("cyime_media_access_token", "/api/v1/media")
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)

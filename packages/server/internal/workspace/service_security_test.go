@@ -119,6 +119,22 @@ func TestGetFile_Document_DeniesCrossUserAccess(t *testing.T) {
 	}
 }
 
+func TestGetFile_Document_AllowsSharedViewer(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	item, err := GetFile(viewerID, docID, "document")
+	if err != nil {
+		t.Fatalf("expected shared viewer access, got error: %v", err)
+	}
+	if item == nil || item.ID != docID {
+		t.Fatalf("unexpected document item: %+v", item)
+	}
+}
+
 func TestMoveDocument_DeniesCrossUserAccess(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
@@ -127,6 +143,101 @@ func TestMoveDocument_DeniesCrossUserAccess(t *testing.T) {
 
 	if _, err := MoveDocument(attackerID, docID, nil); err == nil {
 		t.Fatal("expected cross-user move to fail")
+	}
+}
+
+func TestBatchMoveFiles_DeniesSharedEditorForDocumentMove(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	resp, err := BatchMoveFiles(editorID, []ItemToMove{
+		{ID: docID, Type: "document"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("batch move failed unexpectedly: %v", err)
+	}
+	if resp.Success {
+		t.Fatal("expected batch move to report partial/failed result")
+	}
+	if resp.MovedCount != 0 {
+		t.Fatalf("expected zero moved items, got %d", resp.MovedCount)
+	}
+	if len(resp.FailedItems) != 1 {
+		t.Fatalf("expected one failed item, got %+v", resp.FailedItems)
+	}
+}
+
+func TestBatchMoveFiles_MixedOwnedAndForeignDocuments_OnlyMovesOwned(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	otherUserID := uuid.New()
+
+	ownerFolderID := uuid.New()
+	if err := db.Create(&models.Folder{
+		ID:          ownerFolderID,
+		OwnerUserID: ownerID,
+		Name:        "owner-folder",
+		CreatedBy:   ownerID,
+		UpdatedBy:   ownerID,
+	}).Error; err != nil {
+		t.Fatalf("create owner folder: %v", err)
+	}
+
+	otherFolderID := uuid.New()
+	if err := db.Create(&models.Folder{
+		ID:          otherFolderID,
+		OwnerUserID: otherUserID,
+		Name:        "other-folder",
+		CreatedBy:   otherUserID,
+		UpdatedBy:   otherUserID,
+	}).Error; err != nil {
+		t.Fatalf("create other folder: %v", err)
+	}
+
+	ownedDocID := seedDocumentForWorkspace(t, db, ownerID, "owned-doc")
+	foreignDocID := seedDocumentForWorkspace(t, db, otherUserID, "foreign-doc")
+
+	if err := db.Model(&models.Document{}).Where("id = ?", ownedDocID).Update("folder_id", ownerFolderID).Error; err != nil {
+		t.Fatalf("attach owned doc: %v", err)
+	}
+	if err := db.Model(&models.Document{}).Where("id = ?", foreignDocID).Update("folder_id", otherFolderID).Error; err != nil {
+		t.Fatalf("attach foreign doc: %v", err)
+	}
+
+	resp, err := BatchMoveFiles(ownerID, []ItemToMove{
+		{ID: ownedDocID, Type: "document"},
+		{ID: foreignDocID, Type: "document"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("batch move failed unexpectedly: %v", err)
+	}
+	if resp.Success {
+		t.Fatal("expected partial success because one document is unauthorized")
+	}
+	if resp.MovedCount != 1 {
+		t.Fatalf("expected one moved item, got %d", resp.MovedCount)
+	}
+	if len(resp.FailedItems) != 1 {
+		t.Fatalf("expected one failed item, got %+v", resp.FailedItems)
+	}
+
+	var ownedDoc models.Document
+	if err := db.First(&ownedDoc, "id = ?", ownedDocID).Error; err != nil {
+		t.Fatalf("load owned doc: %v", err)
+	}
+	if ownedDoc.FolderID != nil {
+		t.Fatalf("expected owned doc moved to root, got folder %v", *ownedDoc.FolderID)
+	}
+
+	var foreignDoc models.Document
+	if err := db.First(&foreignDoc, "id = ?", foreignDocID).Error; err != nil {
+		t.Fatalf("load foreign doc: %v", err)
+	}
+	if foreignDoc.FolderID == nil || *foreignDoc.FolderID != otherFolderID {
+		t.Fatalf("expected foreign doc unchanged, got %+v", foreignDoc.FolderID)
 	}
 }
 
@@ -168,6 +279,38 @@ func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
 
 	if err := UpdateDocumentImageTarget(attackerID, docID, config.ID.String()); err == nil {
 		t.Fatal("expected cross-user image target update to fail")
+	}
+}
+
+func TestUpdateDocumentTitle_AllowsEditor(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	if err := UpdateDocumentTitle(editorID, docID, "updated-by-editor"); err != nil {
+		t.Fatalf("expected editor title update success: %v", err)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load document: %v", err)
+	}
+	if doc.Title != "updated-by-editor" {
+		t.Fatalf("expected updated title, got %s", doc.Title)
+	}
+}
+
+func TestUpdateDocumentTitle_DeniesViewer(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	if err := UpdateDocumentTitle(viewerID, docID, "viewer-should-fail"); err == nil {
+		t.Fatal("expected viewer title update to fail")
 	}
 }
 

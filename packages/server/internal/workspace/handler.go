@@ -1009,7 +1009,7 @@ func UpdateDocumentTitleHandler(c *fiber.Ctx) error {
 	err = UpdateDocumentTitle(userID, documentID, req.Title)
 	if err != nil {
 		switch err.Error() {
-		case "文档不存在":
+		case "文档不存在", "文档不存在或无权访问":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -1074,7 +1074,7 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 				Error:   "Validation Error",
 				Message: err.Error(),
 			})
-		case "文档不存在":
+		case "文档不存在", "文档不存在或无权访问":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),

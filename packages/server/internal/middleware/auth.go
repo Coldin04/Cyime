@@ -19,7 +19,7 @@ func Protected() fiber.Handler {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fiber.NewError(fiber.StatusUnauthorized, "unexpected signing method: "+token.Header["alg"].(string))
 		}
-		
+
 		// Fetch the secret key. This logic should be consistent with how the token was signed.
 		secret := os.Getenv("JWT_SECRET_KEY")
 		if secret == "" {
@@ -30,20 +30,25 @@ func Protected() fiber.Handler {
 
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Missing or malformed JWT",
-			})
+		tokenString := ""
+		if authHeader != "" {
+			// The header should be in the format "Bearer {token}"
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "Malformed Authorization header, expected 'Bearer {token}'",
+				})
+			}
+			tokenString = parts[1]
+		} else {
+			// Media endpoints may rely on a scoped HttpOnly cookie for <img> requests.
+			tokenString = strings.TrimSpace(c.Cookies("cyime_media_access_token"))
+			if tokenString == "" {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "Missing or malformed JWT",
+				})
+			}
 		}
-
-		// The header should be in the format "Bearer {token}"
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Malformed Authorization header, expected 'Bearer {token}'",
-			})
-		}
-		tokenString := parts[1]
 
 		// Parse and validate the token.
 		claims := &auth.JWTClaims{}
@@ -51,7 +56,7 @@ func Protected() fiber.Handler {
 
 		if err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid or expired JWT",
+				"error":   "Invalid or expired JWT",
 				"details": err.Error(),
 			})
 		}

@@ -118,15 +118,15 @@ func main() {
 
 	// Media read routes:
 	// - URL exchange is protected by JWT.
-	// - Content endpoint is public but protected by short-lived media token.
+	// - Private content/thumbnail fallback endpoints require JWT and enforce ACL per request.
 	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
 	api.Get("/media/shared-assets", middleware.Protected(), media.ListSharedAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
 	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
-	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
-	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
+	api.Get("/media/assets/:id/thumbnail", middleware.Protected(), media.GetAssetThumbnailHandler)
+	api.Get("/media/assets/:id/content", middleware.Protected(), media.GetAssetContentHandler)
 
 	// Notifications routes (protected)
 	notificationRoutes := api.Group("/notifications", middleware.Protected())

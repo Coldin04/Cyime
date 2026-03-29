@@ -3,10 +3,12 @@ package media
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -26,6 +28,8 @@ func newMediaTestApp(userID uuid.UUID) *fiber.App {
 	app.Post("/media/assets/resolve", ResolveAssetURLsHandler)
 	app.Get("/media/assets/:id/references", GetAssetReferencesHandler)
 	app.Delete("/media/assets/:id", DeleteAssetHandler)
+	app.Get("/media/assets/:id/content", GetAssetContentHandler)
+	app.Get("/media/assets/:id/thumbnail", GetAssetThumbnailHandler)
 	return app
 }
 
@@ -324,8 +328,90 @@ func TestResolveAssetURLsHandler_ReturnsPerAssetResults(t *testing.T) {
 	if payload.Items[0].AssetID != asset.ID || payload.Items[0].URL == "" || payload.Items[0].Error != "" {
 		t.Fatalf("unexpected first item: %+v", payload.Items[0])
 	}
+	if strings.Contains(payload.Items[0].URL, "token=") {
+		t.Fatalf("resolved private asset URL should not include token query, got %s", payload.Items[0].URL)
+	}
 	if payload.Items[1].Code != "INVALID_ASSET_ID" {
 		t.Fatalf("unexpected second item: %+v", payload.Items[1])
+	}
+}
+
+func TestGetAssetContentHandler_PrivateAssetUsesACLWithoutQueryToken(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	strangerID := uuid.New()
+	docID := seedOwnedDocument(t, db, ownerID)
+	seedDocumentPermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	rootDir := t.TempDir()
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", rootDir)
+	storageProvider = nil
+	t.Cleanup(func() { storageProvider = nil })
+
+	objectKey := "owner/private-content.png"
+	filePath := filepath.Join(rootDir, "owner", "private-content.png")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	contentBytes := []byte("private-asset-content")
+	if err := os.WriteFile(filePath, contentBytes, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	blob := seedBlob(t, db, objectKey, "image/png", int64(len(contentBytes)), "hash-private-content")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "private-content.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 1,
+		CreatedBy:      ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	if err := db.Create(&models.DocumentAssetRef{
+		ID:          uuid.New(),
+		DocumentID:  docID,
+		AssetID:     asset.ID,
+		OwnerUserID: ownerID,
+		RefType:     "editor_content",
+	}).Error; err != nil {
+		t.Fatalf("create ref: %v", err)
+	}
+
+	viewerApp := newMediaTestApp(viewerID)
+	viewerReq := httptest.NewRequest(http.MethodGet, "/media/assets/"+asset.ID.String()+"/content", nil)
+	viewerResp, err := viewerApp.Test(viewerReq, -1)
+	if err != nil {
+		t.Fatalf("viewer request failed: %v", err)
+	}
+	if viewerResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected viewer 200, got %d", viewerResp.StatusCode)
+	}
+	gotBody, err := io.ReadAll(viewerResp.Body)
+	if err != nil {
+		t.Fatalf("read viewer body: %v", err)
+	}
+	if string(gotBody) != string(contentBytes) {
+		t.Fatalf("unexpected content body: %s", string(gotBody))
+	}
+
+	strangerApp := newMediaTestApp(strangerID)
+	strangerReq := httptest.NewRequest(http.MethodGet, "/media/assets/"+asset.ID.String()+"/content", nil)
+	strangerResp, err := strangerApp.Test(strangerReq, -1)
+	if err != nil {
+		t.Fatalf("stranger request failed: %v", err)
+	}
+	if strangerResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected stranger 404, got %d", strangerResp.StatusCode)
 	}
 }
 

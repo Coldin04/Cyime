@@ -671,6 +671,16 @@ func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDel
 				}
 				successCount++
 			} else if item.Type == "document" {
+				// Document destructive operations stay owner-only in V1.
+				if _, _, err := acl.AuthorizeDocumentAction(tx, userID, item.ID, acl.ActionOwnerOnly); err != nil {
+					failedItems = append(failedItems, FailedItem{
+						ID:     item.ID,
+						Type:   item.Type,
+						Reason: "文档不存在或无权删除",
+					})
+					continue
+				}
+
 				// Delete content first
 				if err := content.DeleteContentByDocumentID(tx, userID, item.ID); err != nil {
 					failedItems = append(failedItems, FailedItem{
@@ -682,7 +692,7 @@ func BatchDeleteFiles(userID uuid.UUID, itemsToDelete []ItemToDelete) (*BatchDel
 				}
 
 				// Soft delete document metadata
-				result := tx.Where("id = ? AND owner_user_id = ?", item.ID, userID).Delete(&models.Document{})
+				result := tx.Where("id = ?", item.ID).Delete(&models.Document{})
 				if result.Error != nil {
 					failedItems = append(failedItems, FailedItem{
 						ID:     item.ID,
@@ -743,13 +753,18 @@ func DeleteFile(userID uuid.UUID, fileID uuid.UUID, fileType string) error {
 	} else if fileType == "document" {
 		// Start a transaction to delete document and its content
 		return database.DB.Transaction(func(tx *gorm.DB) error {
+			// Guard owner-only mutations early for clearer permission semantics.
+			if _, _, err := acl.AuthorizeDocumentAction(tx, userID, fileID, acl.ActionOwnerOnly); err != nil {
+				return errors.New("文档不存在或无权删除")
+			}
+
 			// Delete content first
 			if err := content.DeleteContentByDocumentID(tx, userID, fileID); err != nil {
 				return err
 			}
 
 			// Soft delete document metadata
-			result := tx.Where("id = ? AND owner_user_id = ?", fileID, userID).Delete(&models.Document{})
+			result := tx.Where("id = ?", fileID).Delete(&models.Document{})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -890,16 +905,12 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 		item := folderToFileItem(folder)
 		return &item, nil
 	} else if fileType == "document" {
-		var document models.Document
-		result := database.DB.Where("id = ? AND owner_user_id = ?", fileID, userID).First(&document)
-		if result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("文件不存在")
-			}
-			return nil, result.Error
+		document, err := acl.CanReadDocument(database.DB, userID, fileID)
+		if err != nil {
+			return nil, errors.New("文件不存在")
 		}
 
-		item := documentToFileItem(document)
+		item := documentToFileItem(*document)
 		return &item, nil
 	}
 
@@ -918,14 +929,9 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 		return errors.New("文档标题不能超过 255 个字符")
 	}
 
-	// Verify the document exists and belongs to the user
-	var document models.Document
-	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return errors.New("文档不存在")
-		}
-		return result.Error
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionEdit)
+	if err != nil {
+		return errors.New("文档不存在或无权访问")
 	}
 
 	// Same title is treated as a no-op.
@@ -936,7 +942,7 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 	// Check duplicate title in the same folder.
 	var conflictCount int64
 	query := database.DB.Model(&models.Document{}).
-		Where("owner_user_id = ? AND id <> ? AND title = ? AND deleted_at IS NULL", userID, documentID, trimmedTitle)
+		Where("owner_user_id = ? AND id <> ? AND title = ? AND deleted_at IS NULL", document.OwnerUserID, documentID, trimmedTitle)
 	if document.FolderID != nil {
 		query = query.Where("folder_id = ?", document.FolderID)
 	} else {
@@ -950,10 +956,15 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 	}
 
 	// Update the title
-	return database.DB.Model(&document).Update("title", trimmedTitle).Error
+	return database.DB.Model(document).Update("title", trimmedTitle).Error
 }
 
 func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
+	if err != nil {
+		return errors.New("文档不存在或无权访问")
+	}
+
 	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
 	if normalized == "" {
 		return errors.New("不支持的图片上传目标")
@@ -971,20 +982,11 @@ func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferred
 		}
 	}
 
-	var document models.Document
-	result := database.DB.Where("id = ? AND owner_user_id = ?", documentID, userID).First(&document)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return errors.New("文档不存在")
-		}
-		return result.Error
-	}
-
 	if resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID) == normalized {
 		return nil
 	}
 
-	return database.DB.Model(&document).Update("preferred_image_target_id", normalized).Error
+	return database.DB.Model(document).Update("preferred_image_target_id", normalized).Error
 }
 
 // UpdateFolderName updates the name of a folder
@@ -1042,20 +1044,16 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 
 // MoveDocument moves a document to a different folder (or root).
 func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (*time.Time, error) {
-	// 1. Verify the document exists, belongs to the user, and is not deleted
-	var document models.Document
-	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, userID).First(&document)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档不存在或已被删除")
-		}
-		return nil, result.Error
+	// Move keeps owner-only semantics in V1: shared members can edit, but cannot reorganize owner tree.
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
+	if err != nil {
+		return nil, errors.New("文档不存在或已被删除")
 	}
 
 	// 2. Validate target folder if provided
 	if folderID != nil {
 		var folder models.Folder
-		result = database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
+		result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				return nil, errors.New("目标文件夹不存在或已被删除")
@@ -1066,7 +1064,7 @@ func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (
 
 	// 3. Check for naming conflict in the destination
 	var conflictCount int64
-	query := database.DB.Model(&models.Document{}).Where("title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.Title, userID)
+	query := database.DB.Model(&models.Document{}).Where("title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.Title, document.OwnerUserID)
 	if folderID != nil {
 		query = query.Where("folder_id = ?", folderID)
 	} else {
@@ -1079,7 +1077,7 @@ func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (
 
 	// 4. Update the folder_id
 	var updatedAt time.Time
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
 		// Update folder_id
 		if err := tx.Model(&document).Update("folder_id", folderID).Error; err != nil {
 			return err
@@ -1417,15 +1415,15 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 				}
 				restoredCount++
 			} else if item.Type == "document" {
-				var document models.Document
-				if err := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).First(&document).Error; err != nil {
+				document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, item.ID)
+				if err != nil {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "项目不存在。"})
 					continue
 				}
 
 				// Check for naming conflict
 				var conflictCount int64
-				tx.Model(&models.Document{}).Where("folder_id = ? AND title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.FolderID, document.Title, userID).Count(&conflictCount)
+				tx.Model(&models.Document{}).Where("folder_id = ? AND title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.FolderID, document.Title, document.OwnerUserID).Count(&conflictCount)
 				if conflictCount > 0 {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "恢复失败，目标位置已存在同名文档。"})
 					continue
@@ -1543,7 +1541,10 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 				if err := content.PermanentDeleteContentByDocumentID(tx, userID, item.ID); err != nil {
 					return err
 				}
-				result := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).Delete(&models.Document{})
+				if _, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, item.ID); err != nil {
+					continue
+				}
+				result := tx.Unscoped().Where("id = ?", item.ID).Delete(&models.Document{})
 				if result.Error != nil {
 					return result.Error
 				}
@@ -1606,95 +1607,38 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 	var movedCount int
 	var failedItems []FailedItem
 
-	// Use a transaction for the entire operation
+	// Use a single transaction so authorization + validation + write stay consistent.
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// --- 1. PRE-VALIDATION PHASE ---
-
-		// Validate destination folder exists and belongs to the user
-		if destFolderID != nil {
-			var destFolder models.Folder
-			if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", destFolderID, userID).First(&destFolder).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errors.New("目标文件夹不存在或已被删除")
-				}
-				return err
-			}
+		if err := validateBatchMoveDestination(tx, userID, destFolderID); err != nil {
+			return err
 		}
 
-		// Separate items by type and deduplicate IDs.
-		var foldersToMove []uuid.UUID
-		var documentsToMove []uuid.UUID
-		seenFolders := make(map[uuid.UUID]bool)
-		seenDocuments := make(map[uuid.UUID]bool)
-		for _, item := range itemsToMove {
-			if item.Type == "folder" {
-				if !seenFolders[item.ID] {
-					seenFolders[item.ID] = true
-					foldersToMove = append(foldersToMove, item.ID)
-				}
-			} else if item.Type == "document" {
-				if !seenDocuments[item.ID] {
-					seenDocuments[item.ID] = true
-					documentsToMove = append(documentsToMove, item.ID)
-				}
-			} else {
-				failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "无效的文件类型"})
-			}
-		}
+		foldersToMove, documentsToMove, normalizeFailedItems := normalizeBatchMoveItems(itemsToMove)
+		failedItems = append(failedItems, normalizeFailedItems...)
 
-		// Items that fail validation will be added to this map.
-		itemsToExclude := make(map[uuid.UUID]bool)
-		folderMap := make(map[uuid.UUID]models.Folder)
-		documentMap := make(map[uuid.UUID]models.Document)
-
-		// Validate all source folders belong to the current user and are not deleted.
-		if len(foldersToMove) > 0 {
-			var folders []models.Folder
-			if err := tx.Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", foldersToMove, userID).Find(&folders).Error; err != nil {
-				return err
-			}
-			for _, f := range folders {
-				folderMap[f.ID] = f
-			}
-			for _, folderID := range foldersToMove {
-				if _, ok := folderMap[folderID]; !ok {
-					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: "文件夹不存在或无权操作"})
-					itemsToExclude[folderID] = true
-				}
-			}
+		folderMap, excludedFolders, failedFolderItems, err := collectAuthorizedFoldersForMove(tx, userID, foldersToMove)
+		if err != nil {
+			return err
 		}
+		failedItems = append(failedItems, failedFolderItems...)
 
-		// Validate all source documents belong to the current user and are not deleted.
-		if len(documentsToMove) > 0 {
-			var documents []models.Document
-			if err := tx.Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", documentsToMove, userID).Find(&documents).Error; err != nil {
-				return err
-			}
-			for _, m := range documents {
-				documentMap[m.ID] = m
-			}
-			for _, documentID := range documentsToMove {
-				if _, ok := documentMap[documentID]; !ok {
-					failedItems = append(failedItems, FailedItem{ID: documentID, Type: "document", Reason: "文档不存在或无权操作"})
-					itemsToExclude[documentID] = true
-				}
-			}
-		}
+		documentMap, excludedDocuments, failedDocumentItems := collectAuthorizedDocumentsForMove(tx, userID, documentsToMove)
+		failedItems = append(failedItems, failedDocumentItems...)
 
 		// A. Circular dependency and self-move checks
 		if destFolderID != nil {
 			for _, folderID := range foldersToMove {
-				if itemsToExclude[folderID] {
+				if _, excluded := excludedFolders[folderID]; excluded {
 					continue
 				}
 				if folderID == *destFolderID {
 					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: "不能将文件夹移动到其自身内部"})
-					itemsToExclude[folderID] = true
+					excludedFolders[folderID] = struct{}{}
 					continue
 				}
 				if err := checkCircularDependency(tx, userID, &folderID, destFolderID); err != nil {
 					failedItems = append(failedItems, FailedItem{ID: folderID, Type: "folder", Reason: err.Error()})
-					itemsToExclude[folderID] = true
+					excludedFolders[folderID] = struct{}{}
 				}
 			}
 		}
@@ -1732,13 +1676,13 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		if len(foldersToMove) > 0 {
 			for _, folderID := range foldersToMove {
 				// Don't check items that already failed validation
-				if itemsToExclude[folderID] {
+				if _, excluded := excludedFolders[folderID]; excluded {
 					continue
 				}
 				f := folderMap[folderID]
 				if existingNames["folder_"+f.Name] {
 					failedItems = append(failedItems, FailedItem{ID: f.ID, Type: "folder", Reason: "目标位置已存在同名文件夹"})
-					itemsToExclude[f.ID] = true
+					excludedFolders[f.ID] = struct{}{}
 				} else {
 					// Add to map to check for self-conflicts within the moved items
 					existingNames["folder_"+f.Name] = true
@@ -1748,13 +1692,13 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		if len(documentsToMove) > 0 {
 			for _, documentID := range documentsToMove {
 				// Don't check items that already failed validation
-				if itemsToExclude[documentID] {
+				if _, excluded := excludedDocuments[documentID]; excluded {
 					continue
 				}
 				m := documentMap[documentID]
 				if existingNames["document_"+m.Title] {
 					failedItems = append(failedItems, FailedItem{ID: m.ID, Type: "document", Reason: "目标位置已存在同名文档"})
-					itemsToExclude[m.ID] = true
+					excludedDocuments[m.ID] = struct{}{}
 				} else {
 					// Add to map to check for self-conflicts within the moved items
 					existingNames["document_"+m.Title] = true
@@ -1766,13 +1710,13 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 
 		finalFoldersToMove := []uuid.UUID{}
 		for _, id := range foldersToMove {
-			if !itemsToExclude[id] {
+			if _, excluded := excludedFolders[id]; !excluded {
 				finalFoldersToMove = append(finalFoldersToMove, id)
 			}
 		}
 		finalDocumentsToMove := []uuid.UUID{}
 		for _, id := range documentsToMove {
-			if !itemsToExclude[id] {
+			if _, excluded := excludedDocuments[id]; !excluded {
 				finalDocumentsToMove = append(finalDocumentsToMove, id)
 			}
 		}
@@ -1793,7 +1737,7 @@ func BatchMoveFiles(userID uuid.UUID, itemsToMove []ItemToMove, destFolderID *uu
 		}
 		if len(finalDocumentsToMove) > 0 {
 			result := tx.Model(&models.Document{}).
-				Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", finalDocumentsToMove, userID).
+				Where("id IN ? AND deleted_at IS NULL", finalDocumentsToMove).
 				Updates(map[string]interface{}{"folder_id": destFolderID, "updated_at": now})
 			if result.Error != nil {
 				return result.Error
