@@ -279,7 +279,11 @@
 					console.log('[Load] Title loaded:', title);
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
-					toast.error(m.move_dialog_load_failed());
+					toast.error(
+						error instanceof Error && error.message.trim() !== ''
+							? error.message
+							: '加载文档失败'
+					);
 					goto('/workspace');
 				} finally {
 					isLoading = false;

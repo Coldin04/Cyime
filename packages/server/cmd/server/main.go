@@ -131,6 +131,7 @@ func main() {
 	// Notifications routes (protected)
 	notificationRoutes := api.Group("/notifications", middleware.Protected())
 	notificationRoutes.Get("/", workspace.ListNotificationsHandler)
+	notificationRoutes.Delete("/", workspace.ClearNotificationsHandler)
 	notificationRoutes.Post("/:id/read", workspace.MarkNotificationReadHandler)
 
 	// Simple root route to check if server is up

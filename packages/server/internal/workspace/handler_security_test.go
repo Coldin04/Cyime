@@ -27,6 +27,7 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 	app.Delete("/documents/:id/shares/me", LeaveSharedDocumentHandler)
 	app.Delete("/documents/:id/shares/:userId", RemoveDocumentMemberHandler)
 	app.Get("/notifications", ListNotificationsHandler)
+	app.Delete("/notifications", ClearNotificationsHandler)
 	app.Post("/notifications/:id/read", MarkNotificationReadHandler)
 	app.Post("/document-invites/:id/accept", AcceptDocumentInviteHandler)
 	app.Post("/document-invites/:id/decline", DeclineDocumentInviteHandler)
@@ -301,5 +302,119 @@ func TestDeclineDocumentInviteHandler_RemovesPermission(t *testing.T) {
 	}
 	if permissionCount != 0 {
 		t.Fatalf("expected permission removed, got %d", permissionCount)
+	}
+}
+
+func TestAcceptDocumentInviteHandler_UpdatesInviteStatusAndMarksNotificationRead(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	inviteeID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
+	seedVerifiedUser(t, db, inviteeID, "invitee@example.com")
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	ownerApp := newWorkspaceTestApp(ownerID)
+	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"collaborator"}`)
+	inviteReq := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", inviteBody)
+	inviteReq.Header.Set("Content-Type", "application/json")
+	inviteResp, err := ownerApp.Test(inviteReq, -1)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	if inviteResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected invite 200, got %d", inviteResp.StatusCode)
+	}
+
+	var invite models.DocumentInvite
+	if err := db.Where("document_id = ? AND invitee_user_id = ?", docID, inviteeID).First(&invite).Error; err != nil {
+		t.Fatalf("load invite: %v", err)
+	}
+
+	inviteeApp := newWorkspaceTestApp(inviteeID)
+	acceptReq := httptest.NewRequest(http.MethodPost, "/document-invites/"+invite.ID.String()+"/accept", nil)
+	acceptResp, err := inviteeApp.Test(acceptReq, -1)
+	if err != nil {
+		t.Fatalf("accept request failed: %v", err)
+	}
+	if acceptResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected accept 204, got %d", acceptResp.StatusCode)
+	}
+
+	var updatedInvite models.DocumentInvite
+	if err := db.Where("id = ?", invite.ID).First(&updatedInvite).Error; err != nil {
+		t.Fatalf("reload invite: %v", err)
+	}
+	if updatedInvite.Status != "accepted" {
+		t.Fatalf("expected accepted status, got %s", updatedInvite.Status)
+	}
+
+	var notification models.Notification
+	if err := db.Where("user_id = ? AND type = ?", inviteeID, "document_invite").First(&notification).Error; err != nil {
+		t.Fatalf("load notification: %v", err)
+	}
+	if notification.ReadAt == nil {
+		t.Fatalf("expected notification to be marked as read")
+	}
+}
+
+func TestClearNotificationsHandler_RemovesAllUserNotifications(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	otherUserID := uuid.New()
+	seedVerifiedUser(t, db, userID, "user@example.com")
+	seedVerifiedUser(t, db, otherUserID, "other@example.com")
+
+	if err := db.Create(&models.Notification{
+		ID:       uuid.New(),
+		UserID:   userID,
+		Type:     "document_invite",
+		GroupKey: "doc:test-1",
+		DataJSON: `{"inviteId":"a"}`,
+	}).Error; err != nil {
+		t.Fatalf("create notification 1: %v", err)
+	}
+	if err := db.Create(&models.Notification{
+		ID:       uuid.New(),
+		UserID:   userID,
+		Type:     "document_invite",
+		GroupKey: "doc:test-2",
+		DataJSON: `{"inviteId":"b"}`,
+	}).Error; err != nil {
+		t.Fatalf("create notification 2: %v", err)
+	}
+	if err := db.Create(&models.Notification{
+		ID:       uuid.New(),
+		UserID:   otherUserID,
+		Type:     "document_invite",
+		GroupKey: "doc:test-3",
+		DataJSON: `{"inviteId":"c"}`,
+	}).Error; err != nil {
+		t.Fatalf("create other notification: %v", err)
+	}
+
+	app := newWorkspaceTestApp(userID)
+	req := httptest.NewRequest(http.MethodDelete, "/notifications", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("clear request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var userCount int64
+	if err := db.Model(&models.Notification{}).Where("user_id = ?", userID).Count(&userCount).Error; err != nil {
+		t.Fatalf("count user notifications: %v", err)
+	}
+	if userCount != 0 {
+		t.Fatalf("expected user notifications cleared, got %d", userCount)
+	}
+
+	var otherCount int64
+	if err := db.Model(&models.Notification{}).Where("user_id = ?", otherUserID).Count(&otherCount).Error; err != nil {
+		t.Fatalf("count other notifications: %v", err)
+	}
+	if otherCount != 1 {
+		t.Fatalf("expected other user notifications untouched, got %d", otherCount)
 	}
 }

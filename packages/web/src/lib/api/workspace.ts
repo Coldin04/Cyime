@@ -65,6 +65,24 @@ export type ShareDocumentResponse = {
 	members: ShareDocumentMember[];
 };
 
+export type NotificationItem = {
+	id: string;
+	userId: string;
+	type: string;
+	groupKey: string;
+	data: Record<string, unknown>;
+	readAt?: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type NotificationListResponse = {
+	items: NotificationItem[];
+	hasMore: boolean;
+	total: number;
+	unreadCount: number;
+};
+
 /**
  * Fetches the file list from the workspace
  */
@@ -365,6 +383,78 @@ export async function updateDocumentMemberRole(
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to update member role');
+	}
+
+	return response.json();
+}
+
+export async function listNotifications(params?: {
+	type?: string;
+	unread?: boolean;
+	limit?: number;
+	offset?: number;
+}): Promise<NotificationListResponse> {
+	const query = new URLSearchParams();
+	if (params?.type) query.set('type', params.type);
+	if (params?.unread) query.set('unread', '1');
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	if (params?.offset !== undefined) query.set('offset', String(params.offset));
+
+	const url = query.toString()
+		? `/api/v1/notifications?${query.toString()}`
+		: '/api/v1/notifications';
+	const response = await apiFetch(url);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch notifications');
+	}
+
+	return response.json();
+}
+
+export async function acceptDocumentInvite(inviteId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/document-invites/${inviteId}/accept`, {
+		method: 'POST'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to accept invite');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
+export async function declineDocumentInvite(inviteId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/document-invites/${inviteId}/decline`, {
+		method: 'POST'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to decline invite');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
+export async function clearNotifications(): Promise<{ success: boolean; clearedCount: number }> {
+	const response = await apiFetch('/api/v1/notifications', {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to clear notifications');
 	}
 
 	return response.json();

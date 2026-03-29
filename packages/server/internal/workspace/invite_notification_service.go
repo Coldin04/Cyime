@@ -16,6 +16,7 @@ import (
 
 const (
 	documentInviteStatusSent       = "sent"
+	documentInviteStatusAccepted   = "accepted"
 	documentInviteStatusDeclined   = "declined"
 	notificationTypeDocumentInvite = "document_invite"
 )
@@ -120,7 +121,7 @@ func ListNotifications(userID uuid.UUID, notificationType string, unreadOnly boo
 		offset = 0
 	}
 
-	query := database.DB.Model(&models.Notification{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	query := database.DB.Model(&models.Notification{}).Where("user_id = ?", userID)
 	if t := strings.TrimSpace(notificationType); t != "" {
 		query = query.Where("type = ?", t)
 	}
@@ -135,7 +136,7 @@ func ListNotifications(userID uuid.UUID, notificationType string, unreadOnly boo
 
 	var unreadCount int64
 	if err := database.DB.Model(&models.Notification{}).
-		Where("user_id = ? AND deleted_at IS NULL AND read_at IS NULL", userID).
+		Where("user_id = ? AND read_at IS NULL", userID).
 		Count(&unreadCount).Error; err != nil {
 		return nil, err
 	}
@@ -170,7 +171,7 @@ func ListNotifications(userID uuid.UUID, notificationType string, unreadOnly boo
 func MarkNotificationRead(userID, notificationID uuid.UUID) error {
 	now := time.Now()
 	result := database.DB.Model(&models.Notification{}).
-		Where("id = ? AND user_id = ? AND deleted_at IS NULL AND read_at IS NULL", notificationID, userID).
+		Where("id = ? AND user_id = ? AND read_at IS NULL", notificationID, userID).
 		Updates(map[string]any{
 			"read_at":    now,
 			"updated_at": now,
@@ -184,6 +185,14 @@ func MarkNotificationRead(userID, notificationID uuid.UUID) error {
 	return nil
 }
 
+func ClearNotifications(userID uuid.UUID) (int64, error) {
+	result := database.DB.Where("user_id = ?", userID).Delete(&models.Notification{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := ensureSharingEnabledForUser(tx, userID); err != nil {
@@ -191,7 +200,7 @@ func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 		}
 
 		var invite models.DocumentInvite
-		if err := tx.Where("id = ? AND invitee_user_id = ? AND deleted_at IS NULL", inviteID, userID).First(&invite).Error; err != nil {
+		if err := tx.Where("id = ? AND invitee_user_id = ?", inviteID, userID).First(&invite).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New("邀请不存在")
 			}
@@ -203,8 +212,17 @@ func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 		}
 
 		now := time.Now()
+		if err := tx.Model(&models.DocumentInvite{}).
+			Where("id = ?", invite.ID).
+			Updates(map[string]any{
+				"status":     documentInviteStatusAccepted,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+
 		return tx.Model(&models.Notification{}).
-			Where("user_id = ? AND type = ? AND group_key = ? AND read_at IS NULL AND deleted_at IS NULL", userID, notificationTypeDocumentInvite, "doc:"+invite.DocumentID.String()).
+			Where("user_id = ? AND type = ? AND group_key = ?", userID, notificationTypeDocumentInvite, "doc:"+invite.DocumentID.String()).
 			Updates(map[string]any{
 				"read_at":    now,
 				"updated_at": now,
@@ -215,7 +233,7 @@ func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 func DeclineDocumentInvite(userID, inviteID uuid.UUID) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		var invite models.DocumentInvite
-		if err := tx.Where("id = ? AND invitee_user_id = ? AND deleted_at IS NULL", inviteID, userID).First(&invite).Error; err != nil {
+		if err := tx.Where("id = ? AND invitee_user_id = ?", inviteID, userID).First(&invite).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New("邀请不存在")
 			}
@@ -237,7 +255,7 @@ func DeclineDocumentInvite(userID, inviteID uuid.UUID) error {
 		}
 
 		return tx.Model(&models.Notification{}).
-			Where("user_id = ? AND type = ? AND group_key = ? AND read_at IS NULL AND deleted_at IS NULL", userID, notificationTypeDocumentInvite, "doc:"+invite.DocumentID.String()).
+			Where("user_id = ? AND type = ? AND group_key = ?", userID, notificationTypeDocumentInvite, "doc:"+invite.DocumentID.String()).
 			Updates(map[string]any{
 				"read_at":    now,
 				"updated_at": now,
