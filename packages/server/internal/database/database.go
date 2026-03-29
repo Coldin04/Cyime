@@ -86,6 +86,8 @@ func Connect() {
 		&models.Document{},
 		&models.DocumentBody{},
 		&models.DocumentPermission{},
+		&models.DocumentInvite{},
+		&models.Notification{},
 		&models.BlobObject{},
 		&models.Asset{},
 		&models.DocumentAssetRef{},

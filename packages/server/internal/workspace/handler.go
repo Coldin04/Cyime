@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -350,11 +351,62 @@ func ShareDocumentHandler(c *fiber.Ctx) error {
 		switch err.Error() {
 		case "文档不存在或无权访问":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "无效的共享角色", "不能给自己共享文档":
+		case "无效的共享角色", "不能给自己共享文档", "协同者不能授予协同者权限", "目标用户邮箱未验证", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
 		case "目标用户不存在":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
 		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
+		}
+	}
+	return c.JSON(result)
+}
+
+func InviteDocumentByEmailHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid document id",
+		})
+	}
+
+	var req InviteDocumentByEmailRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	result, err := InviteDocumentByEmail(userID, documentID, req.Email, req.Role)
+	if err != nil {
+		switch err.Error() {
+		case "文档不存在或无权访问", "邀请不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		case "目标用户不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		case "无效的共享角色", "邮箱不能为空", "不能给自己共享文档", "协同者不能授予协同者权限", "目标用户邮箱未验证", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		default:
+			if strings.HasPrefix(err.Error(), "邀请过于频繁") {
+				return c.Status(fiber.StatusTooManyRequests).JSON(ErrorResponse{Error: "Too Many Requests", Message: err.Error()})
+			}
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
 	}
@@ -429,13 +481,140 @@ func RemoveDocumentMemberHandler(c *fiber.Ctx) error {
 		switch err.Error() {
 		case "文档不存在或无权访问":
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "所有者不能移除自己":
+		case "不能移除自己", "不能移除文档所有者", "协同者不能移除协同者", "成员不存在", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
 	}
 	return c.JSON(result)
+}
+
+func ListNotificationsHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	unreadOnly := c.Query("unread", "0") == "1"
+	result, err := ListNotifications(userID, c.Query("type", ""), unreadOnly, c.QueryInt("limit", 20), c.QueryInt("offset", 0))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+	return c.JSON(result)
+}
+
+func MarkNotificationReadHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+	notificationID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid notification id",
+		})
+	}
+
+	if err := MarkNotificationRead(userID, notificationID); err != nil {
+		if err.Error() == "通知不存在" {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func AcceptDocumentInviteHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+	inviteID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid invite id",
+		})
+	}
+
+	if err := AcceptDocumentInvite(userID, inviteID); err != nil {
+		switch err.Error() {
+		case "邀请不存在":
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		case "邀请状态无效", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
+		}
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func DeclineDocumentInviteHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+	inviteID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid invite id",
+		})
+	}
+
+	if err := DeclineDocumentInvite(userID, inviteID); err != nil {
+		if err.Error() == "邀请不存在" {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func LeaveSharedDocumentHandler(c *fiber.Ctx) error {

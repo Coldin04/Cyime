@@ -95,8 +95,11 @@ func main() {
 	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
 	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
 	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
+	workspaceRoutes.Post("/documents/:id/invites", workspace.InviteDocumentByEmailHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/me", workspace.LeaveSharedDocumentHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
+	workspaceRoutes.Post("/document-invites/:id/accept", workspace.AcceptDocumentInviteHandler)
+	workspaceRoutes.Post("/document-invites/:id/decline", workspace.DeclineDocumentInviteHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document
@@ -124,6 +127,11 @@ func main() {
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
 	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
 	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
+
+	// Notifications routes (protected)
+	notificationRoutes := api.Group("/notifications", middleware.Protected())
+	notificationRoutes.Get("/", workspace.ListNotificationsHandler)
+	notificationRoutes.Post("/:id/read", workspace.MarkNotificationReadHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

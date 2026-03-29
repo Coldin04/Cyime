@@ -150,10 +150,16 @@ type ShareDocumentRequest struct {
 	Role   string    `json:"role"`
 }
 
+type InviteDocumentByEmailRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 type ShareDocumentMember struct {
 	UserID      uuid.UUID `json:"userId"`
 	Role        string    `json:"role"`
 	DisplayName *string   `json:"displayName,omitempty"`
+	Email       *string   `json:"email,omitempty"`
 }
 
 type ShareDocumentResponse struct {
@@ -179,4 +185,22 @@ type SharedDocumentListResponse struct {
 	Items   []SharedDocumentItem `json:"items"`
 	HasMore bool                 `json:"hasMore"`
 	Total   int64                `json:"total"`
+}
+
+type NotificationItem struct {
+	ID        uuid.UUID       `json:"id"`
+	UserID    uuid.UUID       `json:"userId"`
+	Type      string          `json:"type"`
+	GroupKey  string          `json:"groupKey"`
+	Data      json.RawMessage `json:"data"`
+	ReadAt    *time.Time      `json:"readAt,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+type NotificationListResponse struct {
+	Items       []NotificationItem `json:"items"`
+	HasMore     bool               `json:"hasMore"`
+	Total       int64              `json:"total"`
+	UnreadCount int64              `json:"unreadCount"`
 }

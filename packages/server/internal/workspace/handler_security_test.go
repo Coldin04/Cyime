@@ -23,8 +23,13 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 	app.Get("/shared/documents", ListSharedDocumentsHandler)
 	app.Get("/documents/:id/shares", ListDocumentMembersHandler)
 	app.Post("/documents/:id/shares", ShareDocumentHandler)
+	app.Post("/documents/:id/invites", InviteDocumentByEmailHandler)
 	app.Delete("/documents/:id/shares/me", LeaveSharedDocumentHandler)
 	app.Delete("/documents/:id/shares/:userId", RemoveDocumentMemberHandler)
+	app.Get("/notifications", ListNotificationsHandler)
+	app.Post("/notifications/:id/read", MarkNotificationReadHandler)
+	app.Post("/document-invites/:id/accept", AcceptDocumentInviteHandler)
+	app.Post("/document-invites/:id/decline", DeclineDocumentInviteHandler)
 	app.Delete("/files/:id", DeleteFileHandler)
 	app.Post("/files/batch-delete", BatchDeleteHandler)
 	app.Post("/files/batch-move", BatchMoveHandler)
@@ -182,9 +187,7 @@ func TestShareDocumentHandler_CreatesPermission(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	targetUserID := uuid.New()
-	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
+	seedVerifiedUser(t, db, targetUserID, targetUserID.String()+"@example.com")
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	app := newWorkspaceTestApp(ownerID)
@@ -215,5 +218,88 @@ func TestLeaveSharedDocumentHandler_RemovesOnlySelfPermission(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestInviteDocumentByEmailHandler_CreatesPermissionAndNotification(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	inviteeID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
+	seedVerifiedUser(t, db, inviteeID, "invitee@example.com")
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	app := newWorkspaceTestApp(ownerID)
+	body := bytes.NewBufferString(`{"email":"invitee@example.com","role":"editor"}`)
+	req := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var permission models.DocumentPermission
+	if err := db.Where("document_id = ? AND user_id = ?", docID, inviteeID).First(&permission).Error; err != nil {
+		t.Fatalf("load permission: %v", err)
+	}
+	if permission.Role != "editor" {
+		t.Fatalf("expected editor role, got %s", permission.Role)
+	}
+
+	var notificationCount int64
+	if err := db.Model(&models.Notification{}).Where("user_id = ? AND type = ?", inviteeID, "document_invite").Count(&notificationCount).Error; err != nil {
+		t.Fatalf("count notifications: %v", err)
+	}
+	if notificationCount != 1 {
+		t.Fatalf("expected 1 notification, got %d", notificationCount)
+	}
+}
+
+func TestDeclineDocumentInviteHandler_RemovesPermission(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	inviteeID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
+	seedVerifiedUser(t, db, inviteeID, "invitee@example.com")
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	ownerApp := newWorkspaceTestApp(ownerID)
+	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"viewer"}`)
+	inviteReq := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", inviteBody)
+	inviteReq.Header.Set("Content-Type", "application/json")
+	inviteResp, err := ownerApp.Test(inviteReq, -1)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	if inviteResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected invite 200, got %d", inviteResp.StatusCode)
+	}
+
+	var invite models.DocumentInvite
+	if err := db.Where("document_id = ? AND invitee_user_id = ?", docID, inviteeID).First(&invite).Error; err != nil {
+		t.Fatalf("load invite: %v", err)
+	}
+
+	inviteeApp := newWorkspaceTestApp(inviteeID)
+	declineReq := httptest.NewRequest(http.MethodPost, "/document-invites/"+invite.ID.String()+"/decline", nil)
+	declineResp, err := inviteeApp.Test(declineReq, -1)
+	if err != nil {
+		t.Fatalf("decline request failed: %v", err)
+	}
+	if declineResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected decline 204, got %d", declineResp.StatusCode)
+	}
+
+	var permissionCount int64
+	if err := db.Model(&models.DocumentPermission{}).
+		Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", docID, inviteeID).
+		Count(&permissionCount).Error; err != nil {
+		t.Fatalf("count permissions: %v", err)
+	}
+	if permissionCount != 0 {
+		t.Fatalf("expected permission removed, got %d", permissionCount)
 	}
 }

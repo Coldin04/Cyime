@@ -4,6 +4,7 @@
 	import { portal } from '$lib/actions/portal';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 	import { updateDocumentTitle } from '$lib/api/workspace';
+	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import FileText from '~icons/ph/file-text';
@@ -360,11 +361,10 @@
 									</p>
 								</div>
 
-								<div class="rounded-xl bg-zinc-50/80 p-4 dark:bg-zinc-900/70">
-									<div class="flex min-h-28 items-center justify-center text-sm text-zinc-400 dark:text-zinc-500">
-										{m.editor_document_settings_permissions_placeholder()}
-									</div>
-								</div>
+								<DocumentCollaborationSettings
+									{documentId}
+									enabled={open && activeSection === 'permissions'}
+								/>
 							</section>
 
 							<section

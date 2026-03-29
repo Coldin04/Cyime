@@ -61,45 +61,51 @@ func resolveDocumentPreferredImageTargetID(value string) string {
 
 func normalizePermissionRole(role string) string {
 	switch strings.TrimSpace(role) {
-	case acl.RoleViewer, acl.RoleEditor:
+	case acl.RoleViewer, acl.RoleEditor, acl.RoleCollaborator:
 		return strings.TrimSpace(role)
 	default:
 		return ""
 	}
 }
 
-func ShareDocument(ownerUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
+func ShareDocument(actorUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
 	normalizedRole := normalizePermissionRole(role)
 	if normalizedRole == "" {
 		return nil, errors.New("无效的共享角色")
 	}
-	if ownerUserID == targetUserID {
+	if actorUserID == targetUserID {
 		return nil, errors.New("不能给自己共享文档")
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var document models.Document
-		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+		if err := ensureSharingEnabledForUser(tx, actorUserID); err != nil {
+			return err
+		}
+		_, actorRole, err := loadShareManagedDocument(tx, actorUserID, documentID)
+		if err != nil {
+			return err
+		}
+		if actorRole == acl.RoleCollaborator && normalizedRole == acl.RoleCollaborator {
+			return errors.New("协同者不能授予协同者权限")
+		}
+
+		var targetUser models.User
+		if err := tx.Select("id", "email_verified").Where("id = ?", targetUserID).First(&targetUser).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("文档不存在或无权访问")
+				return errors.New("目标用户不存在")
 			}
 			return err
 		}
-
-		var userCount int64
-		if err := tx.Model(&models.User{}).Where("id = ?", targetUserID).Count(&userCount).Error; err != nil {
-			return err
-		}
-		if userCount == 0 {
-			return errors.New("目标用户不存在")
+		if !targetUser.EmailVerified {
+			return errors.New("目标用户邮箱未验证")
 		}
 
 		var permission models.DocumentPermission
 		// Include soft-deleted permissions so re-sharing can "revive" an existing row
 		// instead of failing unique(document_id, user_id).
-		err := tx.Unscoped().Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
+		permissionErr := tx.Unscoped().Where("document_id = ? AND user_id = ?", documentID, targetUserID).First(&permission).Error
 		switch {
-		case err == nil:
+		case permissionErr == nil:
 			now := time.Now()
 			if err := tx.Unscoped().Model(&models.DocumentPermission{}).
 				Where("id = ?", permission.ID).
@@ -112,37 +118,51 @@ func ShareDocument(ownerUserID, documentID, targetUserID uuid.UUID, role string)
 					"role":       normalizedRole,
 					"updated_at": now,
 				}).Error
-		case errors.Is(err, gorm.ErrRecordNotFound):
+		case errors.Is(permissionErr, gorm.ErrRecordNotFound):
 			return tx.Create(&models.DocumentPermission{
 				ID:         uuid.New(),
 				DocumentID: documentID,
 				UserID:     targetUserID,
 				Role:       normalizedRole,
-				CreatedBy:  ownerUserID,
+				CreatedBy:  actorUserID,
 			}).Error
 		default:
-			return err
+			return permissionErr
 		}
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return ListDocumentMembers(ownerUserID, documentID)
+	return ListDocumentMembers(actorUserID, documentID)
 }
 
-func RemoveDocumentMember(ownerUserID, documentID, targetUserID uuid.UUID) (*ShareDocumentResponse, error) {
-	if ownerUserID == targetUserID {
-		return nil, errors.New("所有者不能移除自己")
+func RemoveDocumentMember(actorUserID, documentID, targetUserID uuid.UUID) (*ShareDocumentResponse, error) {
+	if actorUserID == targetUserID {
+		return nil, errors.New("不能移除自己")
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var document models.Document
-		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
+		if err := ensureSharingEnabledForUser(tx, actorUserID); err != nil {
+			return err
+		}
+		document, actorRole, err := loadShareManagedDocument(tx, actorUserID, documentID)
+		if err != nil {
+			return err
+		}
+		if document.OwnerUserID == targetUserID {
+			return errors.New("不能移除文档所有者")
+		}
+
+		var targetPermission models.DocumentPermission
+		if err := tx.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, targetUserID).First(&targetPermission).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("文档不存在或无权访问")
+				return errors.New("成员不存在")
 			}
 			return err
+		}
+		if actorRole == acl.RoleCollaborator && targetPermission.Role == acl.RoleCollaborator {
+			return errors.New("协同者不能移除协同者")
 		}
 
 		return tx.Where("document_id = ? AND user_id = ?", documentID, targetUserID).Delete(&models.DocumentPermission{}).Error
@@ -151,7 +171,7 @@ func RemoveDocumentMember(ownerUserID, documentID, targetUserID uuid.UUID) (*Sha
 		return nil, err
 	}
 
-	return ListDocumentMembers(ownerUserID, documentID)
+	return ListDocumentMembers(actorUserID, documentID)
 }
 
 func LeaveSharedDocument(userID, documentID uuid.UUID) error {
@@ -178,12 +198,13 @@ func LeaveSharedDocument(userID, documentID uuid.UUID) error {
 	})
 }
 
-func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentResponse, error) {
-	var document models.Document
-	if err := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, ownerUserID).First(&document).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档不存在或无权访问")
-		}
+func ListDocumentMembers(actorUserID, documentID uuid.UUID) (*ShareDocumentResponse, error) {
+	document, _, err := loadShareManagedDocument(database.DB, actorUserID, documentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ensureSharingEnabledForUser(database.DB, actorUserID); err != nil {
 		return nil, err
 	}
 
@@ -193,7 +214,7 @@ func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentRespo
 	}
 
 	userIDs := make([]uuid.UUID, 0, len(permissions)+1)
-	userIDs = append(userIDs, ownerUserID)
+	userIDs = append(userIDs, document.OwnerUserID)
 	for _, permission := range permissions {
 		userIDs = append(userIDs, permission.UserID)
 	}
@@ -208,11 +229,12 @@ func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentRespo
 	}
 
 	members := make([]ShareDocumentMember, 0, len(permissions)+1)
-	ownerUser := userMap[ownerUserID]
+	ownerUser := userMap[document.OwnerUserID]
 	members = append(members, ShareDocumentMember{
-		UserID:      ownerUserID,
+		UserID:      document.OwnerUserID,
 		Role:        acl.RoleOwner,
 		DisplayName: ownerUser.DisplayName,
+		Email:       ownerUser.Email,
 	})
 	for _, permission := range permissions {
 		memberUser := userMap[permission.UserID]
@@ -220,6 +242,7 @@ func ListDocumentMembers(ownerUserID, documentID uuid.UUID) (*ShareDocumentRespo
 			UserID:      permission.UserID,
 			Role:        permission.Role,
 			DisplayName: memberUser.DisplayName,
+			Email:       memberUser.Email,
 		})
 	}
 

@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	RoleViewer = "viewer"
-	RoleEditor = "editor"
-	RoleOwner  = "owner"
+	RoleViewer       = "viewer"
+	RoleEditor       = "editor"
+	RoleCollaborator = "collaborator"
+	RoleOwner        = "owner"
 )
 
 func CanReadDocument(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, error) {
@@ -55,11 +56,13 @@ func roleRank(role string) int {
 	switch role {
 	case RoleOwner:
 		return 3
-	case RoleEditor:
+	case RoleCollaborator:
 		return 2
-	case RoleViewer:
+	case RoleEditor:
 		return 1
-	default:
+	case RoleViewer:
 		return 0
+	default:
+		return -1
 	}
 }

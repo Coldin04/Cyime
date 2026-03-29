@@ -19,6 +19,8 @@ func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
 type User struct {
 	ID              uuid.UUID `gorm:"type:uuid;primary_key"`
 	Email           *string   `gorm:"unique"`
+	EmailVerified   bool      `gorm:"not null;default:false"`
+	EmailVerifiedAt *time.Time
 	DisplayName     *string
 	AvatarURL       *string
 	AvatarObjectKey *string
@@ -232,6 +234,50 @@ type DocumentPermission struct {
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (i *DocumentInvite) BeforeCreate(tx *gorm.DB) (err error) {
+	if i.ID == uuid.Nil {
+		i.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentInvite stores share invitation records for rate limiting and inbox notifications.
+type DocumentInvite struct {
+	ID            uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID    uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_invite_scope"`
+	InviterUserID uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_invite_scope"`
+	InviteeUserID uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_document_invite_scope"`
+	Role          string         `gorm:"type:varchar(20);not null;default:'viewer'"`
+	Status        string         `gorm:"type:varchar(20);not null;default:'sent';index"`
+	ResendCount   int            `gorm:"not null;default:0"`
+	LastSentAt    time.Time      `gorm:"not null"`
+	CreatedAt     time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt     gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (n *Notification) BeforeCreate(tx *gorm.DB) (err error) {
+	if n.ID == uuid.Nil {
+		n.ID = uuid.New()
+	}
+	return
+}
+
+// Notification stores user-visible activity entries for workspace inbox.
+type Notification struct {
+	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
+	Type      string    `gorm:"type:varchar(50);not null;index"`
+	GroupKey  string    `gorm:"type:varchar(120);not null;index"`
+	DataJSON  string    `gorm:"type:text;not null"`
+	ReadAt    *time.Time
+	CreatedAt time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
 func (a *Asset) BeforeCreate(tx *gorm.DB) (err error) {
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
@@ -389,6 +435,14 @@ func (DocumentBody) TableName() string {
 
 func (DocumentPermission) TableName() string {
 	return "document_permissions"
+}
+
+func (DocumentInvite) TableName() string {
+	return "document_invites"
+}
+
+func (Notification) TableName() string {
+	return "notifications"
 }
 
 func (BlobObject) TableName() string {

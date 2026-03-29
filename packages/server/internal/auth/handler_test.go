@@ -195,3 +195,79 @@ func TestFindOrCreateUser_AllowsMultipleUsersWithoutEmail(t *testing.T) {
 		t.Fatalf("expected different users to be created")
 	}
 }
+
+func TestFindOrCreateUser_MergesVerifiedEmailAcrossProviders(t *testing.T) {
+	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.UserIdentityProvider{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	email := "same@example.com"
+	existing := models.User{
+		ID:            uuid.New(),
+		Email:         &email,
+		EmailVerified: true,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing user: %v", err)
+	}
+
+	profile := &UserProfile{
+		Subject:       "oidc-sub-1",
+		Email:         "same@example.com",
+		EmailVerified: true,
+		Name:          "Merged User",
+	}
+
+	user, err := findOrCreateUser(db, "oidc", profile)
+	if err != nil {
+		t.Fatalf("find or create user: %v", err)
+	}
+	if user.ID != existing.ID {
+		t.Fatalf("expected merge to existing user %s, got %s", existing.ID, user.ID)
+	}
+
+	var identity models.UserIdentityProvider
+	if err := db.Where("provider_name = ? AND provider_user_id = ?", "oidc", "oidc-sub-1").First(&identity).Error; err != nil {
+		t.Fatalf("load identity: %v", err)
+	}
+	if identity.UserID != existing.ID {
+		t.Fatalf("expected identity to link to existing user, got %s", identity.UserID)
+	}
+}
+
+func TestFindOrCreateUser_DeniesUnverifiedEmailMerge(t *testing.T) {
+	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.UserIdentityProvider{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	email := "same@example.com"
+	existing := models.User{
+		ID:            uuid.New(),
+		Email:         &email,
+		EmailVerified: true,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing user: %v", err)
+	}
+
+	profile := &UserProfile{
+		Subject:       "oidc-sub-2",
+		Email:         "same@example.com",
+		EmailVerified: false,
+		Name:          "No Merge",
+	}
+
+	if _, err := findOrCreateUser(db, "oidc", profile); err == nil {
+		t.Fatalf("expected unverified email merge to fail")
+	}
+}

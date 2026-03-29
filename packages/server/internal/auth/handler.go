@@ -44,10 +44,11 @@ func getTokenService() (*TokenService, error) {
 
 // Shared struct to store user info from any provider
 type UserProfile struct {
-	Subject string
-	Email   string
-	Name    string
-	Picture string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Name          string
+	Picture       string
 }
 
 // ProviderInfo represents the data sent to the frontend for a login provider.
@@ -360,11 +361,39 @@ func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile
 		return nil, fmt.Errorf("查询身份提供商信息失败: %w", err)
 	}
 
+	normalizedEmail := normalizeEmail(userProfile.Email)
+	var existingByEmail models.User
+	if normalizedEmail != nil {
+		queryErr := tx.Where("email = ?", *normalizedEmail).First(&existingByEmail).Error
+		switch {
+		case queryErr == nil:
+			if !userProfile.EmailVerified {
+				return nil, fmt.Errorf("该邮箱已存在，请先在个人中心绑定登录方式")
+			}
+			if err := tx.Create(&models.UserIdentityProvider{
+				UserID:         existingByEmail.ID,
+				ProviderName:   providerName,
+				ProviderUserID: userProfile.Subject,
+			}).Error; err != nil {
+				return nil, fmt.Errorf("关联身份提供商失败: %w", err)
+			}
+			return &existingByEmail, nil
+		case errors.Is(queryErr, gorm.ErrRecordNotFound):
+		default:
+			return nil, fmt.Errorf("查询邮箱信息失败: %w", queryErr)
+		}
+	}
+
 	// 2. Identity not found, so we create a new user and a new identity.
 	newUser := models.User{
-		Email:       optionalStringPtr(userProfile.Email),
-		DisplayName: optionalStringPtr(userProfile.Name),
-		AvatarURL:   optionalStringPtr(userProfile.Picture),
+		Email:         normalizedEmail,
+		EmailVerified: userProfile.EmailVerified,
+		DisplayName:   optionalStringPtr(userProfile.Name),
+		AvatarURL:     optionalStringPtr(userProfile.Picture),
+	}
+	if userProfile.EmailVerified && normalizedEmail != nil {
+		now := time.Now()
+		newUser.EmailVerifiedAt = &now
 	}
 	if err := tx.Create(&newUser).Error; err != nil {
 		return nil, fmt.Errorf("创建新用户失败: %w", err)
@@ -470,15 +499,22 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			return nil, fmt.Errorf("无效的 id_token")
 		}
 		var claims struct {
-			Email   string `json:"email"`
-			Name    string `json:"name"`
-			Picture string `json:"picture"`
-			Subject string `json:"sub"`
+			Email         string `json:"email"`
+			EmailVerified bool   `json:"email_verified"`
+			Name          string `json:"name"`
+			Picture       string `json:"picture"`
+			Subject       string `json:"sub"`
 		}
 		if err := idToken.Claims(&claims); err != nil {
 			return nil, fmt.Errorf("无法解析 id_token 的 claims")
 		}
-		userProfile = UserProfile{Subject: claims.Subject, Email: claims.Email, Name: claims.Name, Picture: claims.Picture}
+		userProfile = UserProfile{
+			Subject:       claims.Subject,
+			Email:         claims.Email,
+			EmailVerified: claims.EmailVerified,
+			Name:          claims.Name,
+			Picture:       claims.Picture,
+		}
 
 	case "oauth2":
 		if provider.UserInfoURL == nil || *provider.UserInfoURL == "" {
@@ -519,10 +555,11 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 				userEmail = fallbackEmail
 			}
 			userProfile = UserProfile{
-				Subject: fmt.Sprintf("%d", ghUser.ID),
-				Email:   userEmail,
-				Name:    userName,
-				Picture: ghUser.Avatar,
+				Subject:       fmt.Sprintf("%d", ghUser.ID),
+				Email:         userEmail,
+				EmailVerified: userEmail != "",
+				Name:          userName,
+				Picture:       ghUser.Avatar,
 			}
 		} else {
 			return nil, fmt.Errorf("未实现对 '%s' 的用户信息解析", provider.Name)
@@ -578,6 +615,14 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 
 func optionalStringPtr(value string) *string {
 	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func normalizeEmail(value string) *string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
 	if trimmed == "" {
 		return nil
 	}

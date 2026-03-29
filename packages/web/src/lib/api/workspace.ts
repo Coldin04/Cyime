@@ -53,6 +53,18 @@ export type DeleteResponse = {
 	message: string;
 };
 
+export type ShareDocumentMember = {
+	userId: string;
+	role: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	displayName?: string | null;
+	email?: string | null;
+};
+
+export type ShareDocumentResponse = {
+	documentId: string;
+	members: ShareDocumentMember[];
+};
+
 /**
  * Fetches the file list from the workspace
  */
@@ -284,6 +296,75 @@ export async function getDocumentDetails(id: string): Promise<FileItem> {
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to fetch document details');
+	}
+
+	return response.json();
+}
+
+export async function listDocumentMembers(documentId: string): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch document members');
+	}
+
+	return response.json();
+}
+
+export async function inviteDocumentByEmail(
+	documentId: string,
+	email: string,
+	role: 'viewer' | 'editor' | 'collaborator'
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/invites`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ email, role })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to invite collaborator');
+	}
+
+	return response.json();
+}
+
+export async function removeDocumentMember(
+	documentId: string,
+	userId: string
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares/${userId}`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to remove member');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentMemberRole(
+	documentId: string,
+	userId: string,
+	role: 'viewer' | 'editor' | 'collaborator'
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ userId, role })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update member role');
 	}
 
 	return response.json();

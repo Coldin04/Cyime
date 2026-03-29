@@ -387,7 +387,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 		Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 		Joins("JOIN assets AS a ON a.id = refs.asset_id AND a.deleted_at IS NULL").
 		Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleOwner}, mediaRefTypeEditorContent).
+		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleCollaborator, acl.RoleOwner}, mediaRefTypeEditorContent).
 		Where("d.owner_user_id <> ?", req.UserID)
 
 	kind := strings.TrimSpace(req.Kind)
@@ -467,7 +467,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 			Select("refs.asset_id", "d.id AS document_id", "d.title", "d.updated_at").
 			Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 			Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleOwner}, assetIDs, mediaRefTypeEditorContent).
+			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleCollaborator, acl.RoleOwner}, assetIDs, mediaRefTypeEditorContent).
 			Order("d.updated_at desc").
 			Scan(&docRows).Error; err != nil {
 			return nil, err

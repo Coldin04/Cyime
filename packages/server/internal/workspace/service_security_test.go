@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -13,6 +14,7 @@ import (
 
 func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	t.Setenv("SMTP_ENABLED", "true")
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -27,6 +29,8 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.Document{},
 		&models.DocumentBody{},
 		&models.DocumentPermission{},
+		&models.DocumentInvite{},
+		&models.Notification{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -35,8 +39,31 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func seedVerifiedUser(t *testing.T, db *gorm.DB, userID uuid.UUID, email string) {
+	t.Helper()
+	var count int64
+	if err := db.Model(&models.User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
+		t.Fatalf("count user: %v", err)
+	}
+	if count > 0 {
+		return
+	}
+	normalizedEmail := email
+	now := time.Now()
+	user := models.User{
+		ID:              userID,
+		Email:           &normalizedEmail,
+		EmailVerified:   true,
+		EmailVerifiedAt: &now,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+}
+
 func seedDocumentForWorkspace(t *testing.T, db *gorm.DB, ownerID uuid.UUID, title string) uuid.UUID {
 	t.Helper()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
 
 	doc := models.Document{
 		ID:           uuid.New(),
@@ -148,9 +175,7 @@ func TestShareDocument_AllowsOwnerToGrantEditor(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	targetUserID := uuid.New()
-	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
+	seedVerifiedUser(t, db, targetUserID, targetUserID.String()+"@example.com")
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	result, err := ShareDocument(ownerID, docID, targetUserID, "editor")
@@ -166,9 +191,7 @@ func TestShareDocument_RevivesSoftDeletedPermission(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	targetUserID := uuid.New()
-	if err := db.Create(&models.User{ID: targetUserID}).Error; err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
+	seedVerifiedUser(t, db, targetUserID, targetUserID.String()+"@example.com")
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	if _, err := ShareDocument(ownerID, docID, targetUserID, "viewer"); err != nil {
