@@ -80,6 +80,7 @@ func main() {
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+	workspaceRoutes.Get("/shared/summary", workspace.SharedDocumentSummaryHandler)
 	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
@@ -92,6 +93,7 @@ func main() {
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
 	// Update document title
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
+	workspaceRoutes.Put("/documents/:id/excerpt", workspace.UpdateDocumentExcerptHandler)
 	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
 	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
 	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)

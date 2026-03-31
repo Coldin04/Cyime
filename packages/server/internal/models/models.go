@@ -180,6 +180,7 @@ type Document struct {
 	FolderID               *uuid.UUID `gorm:"index:idx_owner_folder"`
 	Title                  string     `gorm:"type:varchar(255);not null"`
 	Excerpt                string     `gorm:"type:text"`
+	ManualExcerpt          string     `gorm:"type:text;not null;default:''"`
 	DocumentType           string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
 	PreferredImageTargetID string     `gorm:"type:varchar(100)"`
 	EditorType             string     `gorm:"type:varchar(50);not null;default:'tiptap'"`

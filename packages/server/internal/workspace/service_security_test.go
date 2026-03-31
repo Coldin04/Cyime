@@ -315,6 +315,45 @@ func TestUpdateDocumentTitle_DeniesViewer(t *testing.T) {
 	}
 }
 
+func TestUpdateDocumentManualExcerpt_AllowsCollaborator(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	collaboratorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, collaboratorID, ownerID, "collaborator")
+
+	manualExcerpt, excerpt, err := UpdateDocumentManualExcerpt(collaboratorID, docID, "手动介绍")
+	if err != nil {
+		t.Fatalf("expected collaborator manual excerpt update success: %v", err)
+	}
+	if manualExcerpt != "手动介绍" {
+		t.Fatalf("expected returned manual excerpt, got %q", manualExcerpt)
+	}
+	if excerpt != "手动介绍" {
+		t.Fatalf("expected returned excerpt to be manual text, got %q", excerpt)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load document: %v", err)
+	}
+	if doc.ManualExcerpt != "手动介绍" {
+		t.Fatalf("expected manual excerpt saved, got %q", doc.ManualExcerpt)
+	}
+}
+
+func TestUpdateDocumentManualExcerpt_DeniesEditor(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	if _, _, err := UpdateDocumentManualExcerpt(editorID, docID, "editor-should-fail"); err == nil {
+		t.Fatal("expected editor manual excerpt update to fail")
+	}
+}
+
 func TestShareDocument_AllowsOwnerToGrantEditor(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()

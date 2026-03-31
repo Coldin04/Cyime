@@ -24,7 +24,8 @@
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
-	let title = $state('');
+let title = $state('');
+let manualExcerpt = $state('');
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -198,6 +199,10 @@
 		title = newTitle;
 	}
 
+	function handleExcerptChange(newExcerpt: string) {
+		manualExcerpt = newExcerpt;
+	}
+
 	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
 			return !hasUnsavedChanges;
@@ -272,6 +277,7 @@
 					content = await refreshSignedImageSources(loadedContent);
 					// Use the title from the API
 					title = details.title ?? '';
+					manualExcerpt = details.manualExcerpt ?? '';
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
@@ -357,6 +363,7 @@
 			<EditorTopBar
 				{documentId}
 				initialTitle={title}
+				initialExcerpt={manualExcerpt}
 				{documentType}
 				{preferredImageTargetId}
 				{availableImageTargets}
@@ -365,6 +372,7 @@
 				{lastSaved}
 				{hasUnsavedChanges}
 				onTitleChange={handleTitleChange}
+				onManualExcerptChange={handleExcerptChange}
 				onImageTargetChange={handleImageTargetChange}
 			/>
 	{/if}

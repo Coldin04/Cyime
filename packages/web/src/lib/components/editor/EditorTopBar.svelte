@@ -13,33 +13,38 @@
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
 
-	let {
-		documentId,
-		initialTitle,
-		documentType = 'rich_text',
-		preferredImageTargetId,
-		availableImageTargets,
-		isUpdatingImageTarget = false,
-		isSaving,
-		lastSaved,
-		hasUnsavedChanges,
-		onTitleChange,
-		onImageTargetChange
-	}: {
-		documentId: string;
-		initialTitle: string;
-		documentType?: string;
-		preferredImageTargetId: string;
-		availableImageTargets: DocumentImageTargetOption[];
-		isUpdatingImageTarget?: boolean;
-		isSaving: boolean;
-		lastSaved: Date | null;
-		hasUnsavedChanges: boolean;
-		onTitleChange?: (title: string) => void;
-		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
-	} = $props();
+let {
+	documentId,
+	initialTitle,
+	initialExcerpt = '',
+	documentType = 'rich_text',
+	preferredImageTargetId,
+	availableImageTargets,
+	isUpdatingImageTarget = false,
+	isSaving,
+	lastSaved,
+	hasUnsavedChanges,
+	onTitleChange,
+		onManualExcerptChange,
+	onImageTargetChange
+}: {
+	documentId: string;
+	initialTitle: string;
+	initialExcerpt?: string;
+	documentType?: string;
+	preferredImageTargetId: string;
+	availableImageTargets: DocumentImageTargetOption[];
+	isUpdatingImageTarget?: boolean;
+	isSaving: boolean;
+	lastSaved: Date | null;
+	hasUnsavedChanges: boolean;
+	onTitleChange?: (title: string) => void;
+	onManualExcerptChange?: (excerpt: string) => void;
+	onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
+} = $props();
 
-	let title = $state('');
+let title = $state('');
+let excerpt = $state('');
 
 	// Title editing state
 	let isEditingTitle = $state(false);
@@ -49,10 +54,16 @@
 	$effect(() => {
 		// When the initial title from the parent changes (e.g., on new doc load),
 		// update the component's internal title state.
-		if (initialTitle !== title) {
-			title = initialTitle;
-		}
-	});
+	if (initialTitle !== title) {
+		title = initialTitle;
+	}
+});
+
+$effect(() => {
+	if (initialExcerpt !== excerpt) {
+		excerpt = initialExcerpt;
+	}
+});
 
 	async function startEditingTitle() {
 		editingTitle = title;
@@ -181,6 +192,7 @@
 		<EditorDocumentSettingsDialog
 			{documentId}
 			documentTitle={title}
+			documentManualExcerpt={excerpt}
 			{documentType}
 			currentTargetId={preferredImageTargetId}
 			options={availableImageTargets}
@@ -189,6 +201,10 @@
 			onTitleChange={(nextTitle) => {
 				title = nextTitle;
 				onTitleChange?.(nextTitle);
+			}}
+			onManualExcerptChange={(nextExcerpt) => {
+				excerpt = nextExcerpt;
+				onManualExcerptChange?.(nextExcerpt);
 			}}
 		/>
 		<button

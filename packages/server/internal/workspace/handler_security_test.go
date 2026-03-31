@@ -20,6 +20,7 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 		return c.Next()
 	})
 	app.Get("/files/:id", GetFileHandler)
+	app.Get("/shared/summary", SharedDocumentSummaryHandler)
 	app.Get("/shared/documents", ListSharedDocumentsHandler)
 	app.Get("/documents/:id/shares", ListDocumentMembersHandler)
 	app.Post("/documents/:id/shares", ShareDocumentHandler)
@@ -182,6 +183,32 @@ func TestListSharedDocumentsHandler_ReturnsSharedDocs(t *testing.T) {
 	}
 	if len(payload.Items) != 1 || payload.Items[0].DocumentID != docID {
 		t.Fatalf("unexpected shared payload: %+v", payload)
+	}
+}
+
+func TestSharedDocumentSummaryHandler_ReturnsHasSharedDocuments(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "viewer")
+
+	app := newWorkspaceTestApp(sharedUserID)
+	req := httptest.NewRequest(http.MethodGet, "/shared/summary", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload SharedDocumentSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.HasSharedDocuments {
+		t.Fatal("expected hasSharedDocuments=true")
 	}
 }
 
@@ -398,6 +425,61 @@ func TestAcceptDocumentInviteHandler_UpdatesInviteStatusAndMarksNotificationRead
 	if notification.ReadAt == nil {
 		t.Fatalf("expected notification to be marked as read")
 	}
+
+	// 权限生效校验：接受后可读取该共享文档
+	readReq := httptest.NewRequest(http.MethodGet, "/files/"+docID.String()+"?type=document", nil)
+	readResp, err := inviteeApp.Test(readReq, -1)
+	if err != nil {
+		t.Fatalf("read shared file request failed: %v", err)
+	}
+	if readResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected read shared document 200 after accept, got %d", readResp.StatusCode)
+	}
+}
+
+func TestDeclineDocumentInviteHandler_DeniesSharedDocumentRead(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	inviteeID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
+	seedVerifiedUser(t, db, inviteeID, "invitee@example.com")
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+
+	ownerApp := newWorkspaceTestApp(ownerID)
+	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"viewer"}`)
+	inviteReq := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", inviteBody)
+	inviteReq.Header.Set("Content-Type", "application/json")
+	inviteResp, err := ownerApp.Test(inviteReq, -1)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	if inviteResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected invite 200, got %d", inviteResp.StatusCode)
+	}
+
+	var invite models.DocumentInvite
+	if err := db.Where("document_id = ? AND invitee_user_id = ?", docID, inviteeID).First(&invite).Error; err != nil {
+		t.Fatalf("load invite: %v", err)
+	}
+
+	inviteeApp := newWorkspaceTestApp(inviteeID)
+	declineReq := httptest.NewRequest(http.MethodPost, "/document-invites/"+invite.ID.String()+"/decline", nil)
+	declineResp, err := inviteeApp.Test(declineReq, -1)
+	if err != nil {
+		t.Fatalf("decline request failed: %v", err)
+	}
+	if declineResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected decline 204, got %d", declineResp.StatusCode)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/files/"+docID.String()+"?type=document", nil)
+	readResp, err := inviteeApp.Test(readReq, -1)
+	if err != nil {
+		t.Fatalf("read shared file request failed: %v", err)
+	}
+	if readResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected read shared document 404 after decline, got %d", readResp.StatusCode)
+	}
 }
 
 func TestClearNotificationsHandler_RemovesAllUserNotifications(t *testing.T) {
@@ -459,5 +541,106 @@ func TestClearNotificationsHandler_RemovesAllUserNotifications(t *testing.T) {
 	}
 	if otherCount != 1 {
 		t.Fatalf("expected other user notifications untouched, got %d", otherCount)
+	}
+}
+
+func TestInviteAcceptNotificationFlow_EndToEnd(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	inviteeID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, ownerID.String()+"@example.com")
+	seedVerifiedUser(t, db, inviteeID, "invitee@example.com")
+	docID := seedDocumentForWorkspace(t, db, ownerID, "flow-doc")
+
+	ownerApp := newWorkspaceTestApp(ownerID)
+	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"viewer"}`)
+	inviteReq := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", inviteBody)
+	inviteReq.Header.Set("Content-Type", "application/json")
+	inviteResp, err := ownerApp.Test(inviteReq, -1)
+	if err != nil {
+		t.Fatalf("invite request failed: %v", err)
+	}
+	if inviteResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected invite 200, got %d", inviteResp.StatusCode)
+	}
+
+	inviteeApp := newWorkspaceTestApp(inviteeID)
+	listUnreadReq := httptest.NewRequest(http.MethodGet, "/notifications?unread=1", nil)
+	listUnreadResp, err := inviteeApp.Test(listUnreadReq, -1)
+	if err != nil {
+		t.Fatalf("list unread notifications failed: %v", err)
+	}
+	if listUnreadResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected unread list 200, got %d", listUnreadResp.StatusCode)
+	}
+	var unreadPayload NotificationListResponse
+	if err := json.NewDecoder(listUnreadResp.Body).Decode(&unreadPayload); err != nil {
+		t.Fatalf("decode unread list: %v", err)
+	}
+	if unreadPayload.UnreadCount != 1 || len(unreadPayload.Items) != 1 {
+		t.Fatalf("expected one unread notification, got unread=%d items=%d", unreadPayload.UnreadCount, len(unreadPayload.Items))
+	}
+
+	var invite models.DocumentInvite
+	if err := db.Where("document_id = ? AND invitee_user_id = ?", docID, inviteeID).First(&invite).Error; err != nil {
+		t.Fatalf("load invite: %v", err)
+	}
+	acceptReq := httptest.NewRequest(http.MethodPost, "/document-invites/"+invite.ID.String()+"/accept", nil)
+	acceptResp, err := inviteeApp.Test(acceptReq, -1)
+	if err != nil {
+		t.Fatalf("accept request failed: %v", err)
+	}
+	if acceptResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected accept 204, got %d", acceptResp.StatusCode)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/files/"+docID.String()+"?type=document", nil)
+	readResp, err := inviteeApp.Test(readReq, -1)
+	if err != nil {
+		t.Fatalf("read shared file request failed: %v", err)
+	}
+	if readResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected read shared document 200 after accept, got %d", readResp.StatusCode)
+	}
+
+	listUnreadAfterReq := httptest.NewRequest(http.MethodGet, "/notifications?unread=1", nil)
+	listUnreadAfterResp, err := inviteeApp.Test(listUnreadAfterReq, -1)
+	if err != nil {
+		t.Fatalf("list unread notifications after accept failed: %v", err)
+	}
+	if listUnreadAfterResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected unread-after list 200, got %d", listUnreadAfterResp.StatusCode)
+	}
+	var unreadAfterPayload NotificationListResponse
+	if err := json.NewDecoder(listUnreadAfterResp.Body).Decode(&unreadAfterPayload); err != nil {
+		t.Fatalf("decode unread-after list: %v", err)
+	}
+	if unreadAfterPayload.UnreadCount != 0 {
+		t.Fatalf("expected unread count 0 after accept, got %d", unreadAfterPayload.UnreadCount)
+	}
+
+	clearReq := httptest.NewRequest(http.MethodDelete, "/notifications", nil)
+	clearResp, err := inviteeApp.Test(clearReq, -1)
+	if err != nil {
+		t.Fatalf("clear notifications failed: %v", err)
+	}
+	if clearResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected clear 200, got %d", clearResp.StatusCode)
+	}
+
+	listAllReq := httptest.NewRequest(http.MethodGet, "/notifications", nil)
+	listAllResp, err := inviteeApp.Test(listAllReq, -1)
+	if err != nil {
+		t.Fatalf("list notifications after clear failed: %v", err)
+	}
+	if listAllResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected list-all 200, got %d", listAllResp.StatusCode)
+	}
+	var allPayload NotificationListResponse
+	if err := json.NewDecoder(listAllResp.Body).Decode(&allPayload); err != nil {
+		t.Fatalf("decode list-all: %v", err)
+	}
+	if allPayload.Total != 0 || len(allPayload.Items) != 0 {
+		t.Fatalf("expected no notifications after clear, total=%d items=%d", allPayload.Total, len(allPayload.Items))
 	}
 }

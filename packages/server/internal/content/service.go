@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
@@ -296,13 +297,15 @@ func joinWithSpace(parts []string) string {
 }
 
 func buildExcerpt(plainText string) string {
-	if len(plainText) == 0 {
+	text := strings.TrimSpace(plainText)
+	if text == "" {
 		return ""
 	}
-	if len(plainText) > 100 {
-		return plainText[:100] + "..."
+	runes := []rune(text)
+	if len(runes) > 100 {
+		return string(runes[:100]) + "..."
 	}
-	return plainText
+	return text
 }
 
 // BuildExcerptFromContentJSON derives a document excerpt from editor JSON.
@@ -311,7 +314,44 @@ func BuildExcerptFromContentJSON(contentJSONRaw string) string {
 	if err != nil {
 		return ""
 	}
+	firstParagraph := extractFirstParagraph(contentJSON)
+	if firstParagraph != "" {
+		return buildExcerpt(firstParagraph)
+	}
 	return buildExcerpt(toPlainText(contentJSON))
+}
+
+func extractFirstParagraph(contentJSON string) string {
+	var node map[string]any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return ""
+	}
+
+	contentNodes, ok := node["content"].([]any)
+	if !ok {
+		return ""
+	}
+
+	for _, rawBlock := range contentNodes {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		blockType, _ := block["type"].(string)
+		if blockType != "paragraph" && blockType != "heading" {
+			continue
+		}
+
+		parts := make([]string, 0, 16)
+		collectText(block, &parts)
+		plain := strings.TrimSpace(joinWithSpace(parts))
+		if plain != "" {
+			return plain
+		}
+	}
+
+	return ""
 }
 
 func extractAssetIDsFromContentJSON(contentJSON string) ([]uuid.UUID, error) {

@@ -176,7 +176,7 @@
 	onkeydown={handleKeyDown}
 >
 	<!-- Left Side: Name -->
-	<div class="flex min-w-0 items-center gap-3 pr-4">
+	<div class="flex min-w-0 items-start gap-3 pr-4">
 		<input
 			type="checkbox"
 			class={checkboxClasses}
@@ -185,15 +185,16 @@
 			onchange={() => onToggle(item.id)}
 		/>
 		{#if iconKind === 'table'}
-			<Table class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+			<Table class="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
 		{:else}
-			<FileText class="h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
+			<FileText class="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-500 dark:text-blue-400" />
 		{/if}
-		<span
-			class="truncate font-normal text-zinc-800 dark:text-zinc-200"
-		>
-			{item.title}
-		</span>
+		<div class="min-w-0">
+			<span class="block truncate font-normal text-zinc-800 dark:text-zinc-200">{item.title}</span>
+			{#if item.excerpt}
+				<p class="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">{item.excerpt}</p>
+			{/if}
+		</div>
 	</div>
 
 	<!-- Right Side: Metadata -->

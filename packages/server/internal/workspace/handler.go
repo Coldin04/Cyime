@@ -283,7 +283,7 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 		DocumentType:           document.DocumentType,
 		PreferredImageTargetID: resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID),
 		Title:                  document.Title,
-		Excerpt:                document.Excerpt,
+		Excerpt:                resolveDocumentListExcerpt(document.Excerpt, document.ManualExcerpt),
 		FolderID:               document.FolderID,
 		CreatedAt:              document.CreatedAt,
 		UpdatedAt:              document.UpdatedAt,
@@ -310,6 +310,32 @@ func ListSharedDocumentsHandler(c *fiber.Ctx) error {
 	}
 
 	result, err := ListSharedDocuments(userID, c.QueryInt("limit", 20), c.QueryInt("offset", 0))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+	return c.JSON(result)
+}
+
+func SharedDocumentSummaryHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	result, err := GetSharedDocumentSummary(userID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Internal Server Error",
@@ -1046,6 +1072,68 @@ func UpdateDocumentTitleHandler(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"success": true,
+	})
+}
+
+// UpdateDocumentExcerptHandler handles PUT /api/v1/workspace/documents/:id/excerpt
+func UpdateDocumentExcerptHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
+		})
+	}
+
+	var req UpdateDocumentExcerptRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	manualExcerpt, excerpt, err := UpdateDocumentManualExcerpt(userID, documentID, req.Excerpt)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case errors.Is(err, ErrDocumentExcerptTooLong):
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":       true,
+		"manualExcerpt": manualExcerpt,
+		"excerpt":       excerpt,
 	})
 }
 

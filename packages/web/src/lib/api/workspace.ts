@@ -11,6 +11,7 @@ export type FileItem = {
 	folderId?: string | null;
 	title?: string | null;
 	excerpt?: string | null;
+	manualExcerpt?: string | null;
 	createdAt: string;
 	updatedAt: string;
 	creator: {
@@ -81,6 +82,30 @@ export type NotificationListResponse = {
 	hasMore: boolean;
 	total: number;
 	unreadCount: number;
+};
+
+export type SharedDocumentItem = {
+	documentId: string;
+	title: string;
+	excerpt: string;
+	documentType: 'rich_text' | 'table' | string;
+	preferredImageTargetId: 'managed-r2' | string;
+	folderId?: string | null;
+	ownerUserId: string;
+	ownerDisplayName?: string | null;
+	myRole: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type SharedDocumentListResponse = {
+	items: SharedDocumentItem[];
+	hasMore: boolean;
+	total: number;
+};
+
+export type SharedDocumentSummaryResponse = {
+	hasSharedDocuments: boolean;
 };
 
 /**
@@ -319,6 +344,54 @@ export async function getDocumentDetails(id: string): Promise<FileItem> {
 	return response.json();
 }
 
+export async function getSharedDocumentSummary(): Promise<SharedDocumentSummaryResponse> {
+	const response = await apiFetch('/api/v1/workspace/shared/summary');
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch shared document summary');
+	}
+	return response.json();
+}
+
+export async function getSharedDocuments(params: {
+	limit?: number;
+	offset?: number;
+}): Promise<SharedDocumentListResponse> {
+	const queryParams = new URLSearchParams();
+	if (params.limit !== undefined) {
+		queryParams.set('limit', String(params.limit));
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', String(params.offset));
+	}
+	const query = queryParams.toString();
+	const response = await apiFetch(
+		query ? `/api/v1/workspace/shared/documents?${query}` : '/api/v1/workspace/shared/documents'
+	);
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch shared documents');
+	}
+	return response.json();
+}
+
+export async function leaveSharedDocument(documentId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares/me`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to leave shared document');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
 export async function listDocumentMembers(documentId: string): Promise<ShareDocumentResponse> {
 	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`);
 
@@ -475,6 +548,26 @@ export async function updateDocumentTitle(id: string, title: string): Promise<{ 
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to update title');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentExcerpt(
+	id: string,
+	excerpt: string
+): Promise<{ success: boolean; excerpt: string; manualExcerpt: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/excerpt`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ excerpt })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update excerpt');
 	}
 
 	return response.json();

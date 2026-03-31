@@ -25,6 +25,7 @@ type FileItem struct {
 	FolderID               *uuid.UUID  `json:"folderId,omitempty"`
 	Title                  *string     `json:"title,omitempty"`
 	Excerpt                *string     `json:"excerpt,omitempty"`
+	ManualExcerpt          *string     `json:"manualExcerpt,omitempty"`
 	CreatedAt              time.Time   `json:"createdAt"`
 	UpdatedAt              time.Time   `json:"updatedAt"`
 	Creator                CreatorInfo `json:"creator"`
@@ -128,6 +129,10 @@ type UpdateDocumentImageTargetRequest struct {
 	PreferredImageTargetID string `json:"preferredImageTargetId"`
 }
 
+type UpdateDocumentExcerptRequest struct {
+	Excerpt string `json:"excerpt"`
+}
+
 type BatchMoveRequest struct {
 	Items               []ItemToMove `json:"items"`
 	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"`
@@ -185,6 +190,10 @@ type SharedDocumentListResponse struct {
 	Items   []SharedDocumentItem `json:"items"`
 	HasMore bool                 `json:"hasMore"`
 	Total   int64                `json:"total"`
+}
+
+type SharedDocumentSummaryResponse struct {
+	HasSharedDocuments bool `json:"hasSharedDocuments"`
 }
 
 type NotificationItem struct {

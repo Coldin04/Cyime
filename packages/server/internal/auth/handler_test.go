@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -269,5 +271,42 @@ func TestFindOrCreateUser_DeniesUnverifiedEmailMerge(t *testing.T) {
 
 	if _, err := findOrCreateUser(db, "oidc", profile); err == nil {
 		t.Fatalf("expected unverified email merge to fail")
+	}
+}
+
+func TestGetUserProfile_ParsesGoogleOAuthUserInfoAsTrusted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"google-user-1","email":"person@example.com","verified_email":false,"name":"Google User","picture":"https://example.com/avatar.png"}`))
+	}))
+	defer server.Close()
+
+	provider := &models.AuthProvider{
+		Name:         "google",
+		ProtocolType: "oauth2",
+		UserInfoURL:  &server.URL,
+		ClientID:     "test-client",
+	}
+	oauth2Config := &oauth2.Config{}
+	token := &oauth2.Token{AccessToken: "token", TokenType: "Bearer"}
+
+	profile, err := getUserProfile(context.Background(), provider, oauth2Config, token)
+	if err != nil {
+		t.Fatalf("get user profile: %v", err)
+	}
+	if profile.Subject != "google-user-1" {
+		t.Fatalf("expected subject google-user-1, got %q", profile.Subject)
+	}
+	if profile.Email != "person@example.com" {
+		t.Fatalf("expected email person@example.com, got %q", profile.Email)
+	}
+	if !profile.EmailVerified {
+		t.Fatalf("expected google email to be trusted by default")
+	}
+	if profile.Name != "Google User" {
+		t.Fatalf("expected name Google User, got %q", profile.Name)
+	}
+	if profile.Picture != "https://example.com/avatar.png" {
+		t.Fatalf("expected picture propagated, got %q", profile.Picture)
 	}
 }

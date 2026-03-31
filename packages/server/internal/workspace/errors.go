@@ -32,6 +32,7 @@ var (
 	ErrUnsupportedImageTarget         = errors.New("不支持的图片上传目标")
 	ErrDocumentTitleRequired          = errors.New("文档标题不能为空")
 	ErrDocumentTitleTooLong           = errors.New("文档标题不能超过 255 个字符")
+	ErrDocumentExcerptTooLong         = errors.New("文档介绍不能超过 500 个字符")
 	ErrFolderNotFound                 = errors.New("文件夹不存在")
 	ErrDuplicateDocumentTitle         = errors.New("同名文档已存在")
 	ErrImageTargetNotFound            = errors.New("图片上传目标不存在")

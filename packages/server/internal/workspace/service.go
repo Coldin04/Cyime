@@ -59,6 +59,14 @@ func resolveDocumentPreferredImageTargetID(value string) string {
 	return LegacyPreferredImageTargetID
 }
 
+func resolveDocumentListExcerpt(autoExcerpt, manualExcerpt string) string {
+	trimmed := strings.TrimSpace(manualExcerpt)
+	if trimmed != "" {
+		return trimmed
+	}
+	return autoExcerpt
+}
+
 func normalizePermissionRole(role string) string {
 	switch strings.TrimSpace(role) {
 	case acl.RoleViewer, acl.RoleEditor, acl.RoleCollaborator:
@@ -275,6 +283,7 @@ func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentLi
 		DocumentID             uuid.UUID
 		Title                  string
 		Excerpt                string
+		ManualExcerpt          string
 		DocumentType           string
 		PreferredImageTargetID string
 		FolderID               *uuid.UUID
@@ -286,7 +295,7 @@ func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentLi
 
 	var rows []row
 	if err := query.
-		Select("d.id AS document_id", "d.title", "d.excerpt", "d.document_type", "d.preferred_image_target_id", "d.folder_id", "d.owner_user_id", "perms.role AS my_role", "d.created_at", "d.updated_at").
+		Select("d.id AS document_id", "d.title", "d.excerpt", "d.manual_excerpt", "d.document_type", "d.preferred_image_target_id", "d.folder_id", "d.owner_user_id", "perms.role AS my_role", "d.created_at", "d.updated_at").
 		Order("d.updated_at desc").
 		Limit(limit).
 		Offset(offset).
@@ -316,7 +325,7 @@ func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentLi
 		items = append(items, SharedDocumentItem{
 			DocumentID:             item.DocumentID,
 			Title:                  item.Title,
-			Excerpt:                item.Excerpt,
+			Excerpt:                resolveDocumentListExcerpt(item.Excerpt, item.ManualExcerpt),
 			DocumentType:           item.DocumentType,
 			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(item.PreferredImageTargetID),
 			FolderID:               item.FolderID,
@@ -333,6 +342,30 @@ func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentLi
 		HasMore: int64(offset+len(items)) < total,
 		Total:   total,
 	}, nil
+}
+
+func GetSharedDocumentSummary(userID uuid.UUID) (*SharedDocumentSummaryResponse, error) {
+	type probeRow struct {
+		DocumentID uuid.UUID
+	}
+
+	var row probeRow
+	err := database.DB.
+		Table("document_permissions AS perms").
+		Joins("JOIN documents AS d ON d.id = perms.document_id AND d.deleted_at IS NULL").
+		Where("perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+		Where("perms.role IN ?", acl.AllowedRolesForAction(acl.ActionRead)).
+		Select("perms.document_id").
+		Limit(1).
+		Take(&row).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return &SharedDocumentSummaryResponse{HasSharedDocuments: false}, nil
+	case err != nil:
+		return nil, err
+	default:
+		return &SharedDocumentSummaryResponse{HasSharedDocuments: true}, nil
+	}
 }
 
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
@@ -406,7 +439,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		query.Count(&total)
 
 		var documents []models.Document
-		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "document_type", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
+		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "manual_excerpt", "document_type", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
 			return nil, err
 		}
 
@@ -841,6 +874,8 @@ func folderToFileItem(folder models.Folder) FileItem {
 // documentToFileItem converts a Document model to FileItem DTO
 func documentToFileItem(document models.Document) FileItem {
 	preferredImageTargetID := resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID)
+	excerpt := resolveDocumentListExcerpt(document.Excerpt, document.ManualExcerpt)
+	manualExcerpt := document.ManualExcerpt
 	return FileItem{
 		ID:                     document.ID,
 		Type:                   "document",
@@ -848,7 +883,8 @@ func documentToFileItem(document models.Document) FileItem {
 		PreferredImageTargetID: &preferredImageTargetID,
 		Name:                   document.Title,
 		Title:                  &document.Title,
-		Excerpt:                &document.Excerpt,
+		Excerpt:                &excerpt,
+		ManualExcerpt:          &manualExcerpt,
 		FolderID:               document.FolderID,
 		CreatedAt:              document.CreatedAt,
 		UpdatedAt:              document.UpdatedAt,
@@ -955,6 +991,32 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 
 	// Update the title
 	return database.DB.Model(document).Update("title", trimmedTitle).Error
+}
+
+func UpdateDocumentManualExcerpt(userID uuid.UUID, documentID uuid.UUID, manualExcerpt string) (string, string, error) {
+	trimmed := strings.TrimSpace(manualExcerpt)
+	if len(trimmed) > 500 {
+		return "", "", ErrDocumentExcerptTooLong
+	}
+
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionManageMembers)
+	if err != nil {
+		return "", "", ErrDocumentNotFoundOrUnauthorized
+	}
+
+	if document.ManualExcerpt == trimmed {
+		return document.ManualExcerpt, resolveDocumentListExcerpt(document.Excerpt, document.ManualExcerpt), nil
+	}
+
+	if err := database.DB.Model(document).Updates(map[string]any{
+		"manual_excerpt": trimmed,
+		"updated_at":     time.Now(),
+		"updated_by":     userID,
+	}).Error; err != nil {
+		return "", "", err
+	}
+
+	return trimmed, resolveDocumentListExcerpt(document.Excerpt, trimmed), nil
 }
 
 func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {

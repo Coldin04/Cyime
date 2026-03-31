@@ -9,13 +9,21 @@
 	import DocumentListItemSkeleton from '$lib/components/workspace/DocumentListItemSkeleton.svelte';
 	import NewFolderItem from '$lib/components/workspace/NewFolderItem.svelte';
 	import MoveDialog from '$lib/components/workspace/MoveDialog.svelte';
-	import { getFiles, getFolderAncestors, batchDeleteFiles, type FileItem } from '$lib/api/workspace';
+	import SharedFolderListItem from '$lib/components/workspace/SharedFolderListItem.svelte';
+	import {
+		getFiles,
+		getFolderAncestors,
+		getSharedDocumentSummary,
+		batchDeleteFiles,
+		type FileItem
+	} from '$lib/api/workspace';
 	import { breadcrumbItems, workspaceContext } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
 	import { toast } from 'svelte-sonner';
 
 	let items = $state<FileItem[]>([]);
 	let hasMore = $state(false);
+	let hasSharedEntry = $state(false);
 	let sortBy = $state('updated_at');
 	let order = $state('desc');
 	let filterType = $state<'all' | 'folders' | 'documents'>('all');
@@ -26,6 +34,7 @@
 	// Use local state for selected items to avoid store overhead during rapid selection
 	let bulkMode = $state(false);
 	let selectedItems = $state<{ [key: string]: boolean }>({});
+	const selectableItems = $derived(items);
 
 	// Sync bulk mode with store and reset local selection when bulk mode changes
 	$effect(() => {
@@ -39,7 +48,7 @@
 
 	// Use local state for derived values (much faster than store-derived)
 	const selectedItemsCount = $derived(Object.keys(selectedItems).length);
-	const allSelected = $derived(items.length > 0 && selectedItemsCount === items.length);
+	const allSelected = $derived(selectableItems.length > 0 && selectedItemsCount === selectableItems.length);
 	const someSelected = $derived(selectedItemsCount > 0 && !allSelected);
 
 	// Skeleton delay state - only show skeleton if loading takes more than 200ms
@@ -63,6 +72,9 @@
 
 		(async () => {
 			try {
+				const shouldProbeSharedFolder =
+					$workspaceContext.currentFolderId === null && (filterType === 'all' || filterType === 'folders');
+
 				const filesPromise = getFiles({
 					parent_id: $workspaceContext.currentFolderId,
 					limit: 50,
@@ -75,11 +87,19 @@
 				const ancestorsPromise = $workspaceContext.currentFolderId
 					? getFolderAncestors($workspaceContext.currentFolderId)
 					: Promise.resolve([]);
+				const sharedSummaryPromise = shouldProbeSharedFolder
+					? getSharedDocumentSummary().catch(() => ({ hasSharedDocuments: false }))
+					: Promise.resolve({ hasSharedDocuments: false });
 
-				const [fileData, ancestorData] = await Promise.all([filesPromise, ancestorsPromise]);
+				const [fileData, ancestorData, sharedSummary] = await Promise.all([
+					filesPromise,
+					ancestorsPromise,
+					sharedSummaryPromise
+				]);
 
 				if (aborted) return;
 
+				hasSharedEntry = !!sharedSummary?.hasSharedDocuments;
 				items = fileData.items || [];
 				hasMore = fileData.hasMore;
 				breadcrumbItems.set(ancestorData);
@@ -88,6 +108,7 @@
 				console.error('Failed to load workspace data:', error);
 				items = [];
 				hasMore = false;
+				hasSharedEntry = false;
 				breadcrumbItems.set([]);
 			} finally {
 				if (aborted) return;
@@ -126,7 +147,7 @@
 			selectedItems = {};
 		} else {
 			const newSelected: { [key: string]: boolean } = {};
-			for (const item of items) {
+			for (const item of selectableItems) {
 				newSelected[item.id] = true;
 			}
 			selectedItems = newSelected;
@@ -256,11 +277,11 @@
 		{/if}
 
 		<!-- 文件列表 -->
-		{#if showSkeleton}
-			<FolderListItemSkeleton />
-			<DocumentListItemSkeleton />
-		{:else if items.length === 0}
-			<div class="flex flex-col items-center justify-center py-12 text-center">
+	{#if showSkeleton}
+		<FolderListItemSkeleton />
+		<DocumentListItemSkeleton />
+	{:else if items.length === 0 && !hasSharedEntry}
+		<div class="flex flex-col items-center justify-center py-12 text-center">
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
 					width="48"
@@ -284,24 +305,28 @@
 					{m.workspace_empty_description()}
 				</p>
 			</div>
-		{:else}
-			{#each items as item (item.id)}
-				{#if item.type === 'folder'}
-					<FolderListItem
+	{:else}
+		{#if hasSharedEntry && $workspaceContext.currentFolderId === null && (filterType === 'all' || filterType === 'folders')}
+			<SharedFolderListItem />
+		{/if}
+
+		{#each items as item (item.id)}
+			{#if item.type === 'folder'}
+				<FolderListItem
+					{item}
+					{selectedItems}
+					{bulkMode}
+					onToggle={toggleItem}
+					onNavigate={(id) => {
+						workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
+						resetBulkMode();
+					}}
+					onRefresh={() => refreshTrigger++}
+				/>
+			{:else if item.type === 'document'}
+				{#if item.documentType === 'table'}
+					<TableDocumentListItem
 						{item}
-						{selectedItems}
-						{bulkMode}
-						onToggle={toggleItem}
-						onNavigate={(id) => {
-							workspaceContext.update((ctx) => ({ ...ctx, currentFolderId: id, bulkMode: false }));
-							resetBulkMode();
-						}}
-						onRefresh={() => refreshTrigger++}
-					/>
-				{:else if item.type === 'document'}
-					{#if item.documentType === 'table'}
-						<TableDocumentListItem
-							{item}
 							{selectedItems}
 							{bulkMode}
 							onToggle={toggleItem}

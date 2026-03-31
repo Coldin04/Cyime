@@ -79,7 +79,7 @@ func getAPIBaseURL() string {
 		if port == "" {
 			port = "8080"
 		}
-			port = strings.TrimPrefix(port, ":")
+		port = strings.TrimPrefix(port, ":")
 		baseURL = fmt.Sprintf("http://localhost:%s", port)
 	}
 
@@ -560,6 +560,25 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 				EmailVerified: userEmail != "",
 				Name:          userName,
 				Picture:       ghUser.Avatar,
+			}
+		} else if provider.Name == "google" {
+			var googleUser struct {
+				ID            string `json:"id"`
+				Email         string `json:"email"`
+				VerifiedEmail bool   `json:"verified_email"`
+				Name          string `json:"name"`
+				Picture       string `json:"picture"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&googleUser); err != nil {
+				return nil, fmt.Errorf("无法解析Google用户信息")
+			}
+
+			userProfile = UserProfile{
+				Subject:       strings.TrimSpace(googleUser.ID),
+				Email:         strings.TrimSpace(googleUser.Email),
+				EmailVerified: strings.TrimSpace(googleUser.Email) != "",
+				Name:          strings.TrimSpace(googleUser.Name),
+				Picture:       strings.TrimSpace(googleUser.Picture),
 			}
 		} else {
 			return nil, fmt.Errorf("未实现对 '%s' 的用户信息解析", provider.Name)

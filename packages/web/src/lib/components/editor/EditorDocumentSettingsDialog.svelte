@@ -3,7 +3,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
-	import { updateDocumentTitle } from '$lib/api/workspace';
+	import { updateDocumentExcerpt, updateDocumentTitle } from '$lib/api/workspace';
 	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
@@ -18,12 +18,14 @@
 	type Props = {
 		documentId: string;
 		documentTitle?: string;
+		documentManualExcerpt?: string;
 		documentType?: string;
 		currentTargetId: string;
 		options: DocumentImageTargetOption[];
 		isUpdating?: boolean;
 		onSelect: (targetId: string) => void | Promise<unknown>;
 		onTitleChange?: (title: string) => void;
+		onManualExcerptChange?: (excerpt: string) => void;
 	};
 
 	type DesignSection = {
@@ -46,18 +48,22 @@
 	let {
 		documentId,
 		documentTitle = '',
+		documentManualExcerpt = '',
 		documentType = 'rich_text',
 		currentTargetId,
 		options,
 		isUpdating = false,
 		onSelect,
-		onTitleChange
+		onTitleChange,
+		onManualExcerptChange
 	}: Props = $props();
 
 	let open = $state(false);
 	let activeSection = $state<DesignSectionId>('basic');
 	let isEditingTitle = $state(false);
 	let draftTitle = $state('');
+	let draftExcerpt = $state('');
+	let isSavingExcerpt = $state(false);
 	let titleInput: HTMLInputElement | null = $state(null);
 	let contentArea: HTMLElement | null = $state(null);
 	let basicSection: HTMLElement | null = $state(null);
@@ -89,6 +95,12 @@
 	$effect(() => {
 		if (!isEditingTitle) {
 			draftTitle = documentTitle;
+		}
+	});
+
+	$effect(() => {
+		if (!open || !isSavingExcerpt) {
+			draftExcerpt = documentManualExcerpt;
 		}
 	});
 
@@ -187,6 +199,34 @@
 		} catch (error) {
 			console.error('Failed to update title:', error);
 			toast.error(m.editor_topbar_title_update_failed());
+		}
+	}
+
+	async function saveExcerpt() {
+		if (isSavingExcerpt) return;
+
+		const nextExcerpt = draftExcerpt.trim();
+		const currentExcerpt = documentManualExcerpt.trim();
+		if (nextExcerpt === currentExcerpt) {
+			draftExcerpt = documentManualExcerpt;
+			return;
+		}
+
+		isSavingExcerpt = true;
+		try {
+			const response = await updateDocumentExcerpt(documentId, nextExcerpt);
+			onManualExcerptChange?.(response.manualExcerpt);
+			draftExcerpt = response.manualExcerpt;
+			toast.success(m.editor_document_settings_description_updated());
+		} catch (error) {
+			console.error('Failed to update excerpt:', error);
+			toast.error(
+				error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_document_settings_description_update_failed()
+			);
+		} finally {
+			isSavingExcerpt = false;
 		}
 	}
 
@@ -329,15 +369,26 @@
 								</div>
 
 								<div class="space-y-3">
-									<label
-										for="document-design-description"
-										class="text-xs font-medium text-zinc-500 dark:text-zinc-400"
-									>
-										{m.editor_document_settings_description_label()}
-									</label>
+									<div class="flex items-center justify-between gap-3">
+										<label
+											for="document-design-description"
+											class="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+										>
+											{m.editor_document_settings_description_label()}
+										</label>
+										<button
+											type="button"
+											class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+											onclick={() => void saveExcerpt()}
+											disabled={isSavingExcerpt}
+										>
+											{isSavingExcerpt ? m.common_saving() : m.common_save()}
+										</button>
+									</div>
 									<textarea
 										id="document-design-description"
 										rows="3"
+										bind:value={draftExcerpt}
 										class="w-full resize-none rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
 										placeholder={m.editor_document_settings_description_placeholder()}
 									></textarea>
