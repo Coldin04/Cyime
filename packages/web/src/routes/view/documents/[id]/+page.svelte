@@ -7,8 +7,12 @@
 	import { auth } from '$lib/stores/auth';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import { getDocumentContent, resolveAssetReadURLs } from '$lib/api/editor';
-	import { getDocumentDetails } from '$lib/api/workspace';
+	import {
+		getDocumentContent,
+		getPublicDocumentContent,
+		resolveAssetReadURLs
+	} from '$lib/api/editor';
+	import { getDocumentDetails, getPublicDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -24,6 +28,7 @@
 	let documentType = $state<'rich_text' | 'table' | string>('rich_text');
 	let preferredImageTargetId = $state('managed-r2');
 	let isLoading = $state(true);
+	let requireSignIn = $state(false);
 
 	function cloneContentJson(value: JSONContent): JSONContent {
 		return JSON.parse(JSON.stringify(value)) as JSONContent;
@@ -111,10 +116,15 @@
 	const canOpenEditor = $derived(myRole !== 'viewer');
 
 	$effect(() => {
-		if (documentId && $auth.token) {
-			isLoading = true;
-			const loadContent = async () => {
-				try {
+		if (!documentId || $auth.loading) {
+			return;
+		}
+
+		isLoading = true;
+		const loadContent = async () => {
+			try {
+				requireSignIn = false;
+				if ($auth.token) {
 					const [details, data] = await Promise.all([
 						getDocumentDetails(documentId),
 						getDocumentContent(documentId)
@@ -126,22 +136,41 @@
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					content = await refreshSignedImageSources(data.contentJson ?? EMPTY_DOC);
-				} catch (error) {
-					console.error('[View] Failed to load document:', error);
-					toast.error(
-						error instanceof Error && error.message.trim() !== ''
-							? error.message
-							: '加载文档失败'
-					);
-					goto('/workspace');
-				} finally {
-					isLoading = false;
+					return;
 				}
-			};
-			loadContent();
-		} else if (documentId && !$auth.loading) {
-			isLoading = false;
-		}
+
+				const [details, data] = await Promise.all([
+					getPublicDocumentDetails(documentId),
+					getPublicDocumentContent(documentId)
+				]);
+
+				title = details.title ?? '';
+				manualExcerpt = details.manualExcerpt ?? '';
+				myRole = 'viewer';
+				documentType = details.documentType ?? 'rich_text';
+				preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
+				content = data.contentJson ?? EMPTY_DOC;
+			} catch (error) {
+				console.error('[View] Failed to load document:', error);
+				if (
+					!$auth.token &&
+					error instanceof Error &&
+					(error as Error & { status?: number }).status === 401
+				) {
+					requireSignIn = true;
+					return;
+				}
+				toast.error(
+					error instanceof Error && error.message.trim() !== ''
+						? error.message
+						: '加载文档失败'
+				);
+				goto('/workspace');
+			} finally {
+				isLoading = false;
+			}
+		};
+		loadContent();
 	});
 </script>
 
@@ -169,7 +198,7 @@
 
 	<main class="flex-1 overflow-hidden">
 		<div class="h-full w-full">
-			{#if !$auth.token && !$auth.loading}
+			{#if requireSignIn}
 				<div class="flex h-full items-center justify-center px-6">
 					<div class="max-w-md text-center">
 						<p class="text-sm text-zinc-600 dark:text-zinc-300">{m.viewer_sign_in_required()}</p>

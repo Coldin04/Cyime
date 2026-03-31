@@ -27,6 +27,8 @@
 	let title = $state('');
 	let manualExcerpt = $state('');
 	let myRole = $state<'owner' | 'collaborator' | 'editor' | 'viewer' | string>('owner');
+	let publicAccess = $state<'private' | 'authenticated' | 'public' | string>('private');
+	let publicUrl = $state('');
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -204,6 +206,11 @@
 		manualExcerpt = newExcerpt;
 	}
 
+	function handlePublicAccessChange(nextPublicAccess: string, nextPublicURL: string) {
+		publicAccess = nextPublicAccess;
+		publicUrl = nextPublicURL;
+	}
+
 	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
 			return !hasUnsavedChanges;
@@ -285,6 +292,8 @@
 					title = details.title ?? '';
 					manualExcerpt = details.manualExcerpt ?? '';
 					myRole = details.myRole ?? 'owner';
+					publicAccess = details.publicAccess ?? 'private';
+					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
@@ -375,6 +384,8 @@
 				{preferredImageTargetId}
 				{availableImageTargets}
 				{myRole}
+				{publicAccess}
+				{publicUrl}
 				readOnly={false}
 				showEditShortcut={false}
 				{isUpdatingImageTarget}
@@ -384,6 +395,8 @@
 				onTitleChange={handleTitleChange}
 				onManualExcerptChange={handleExcerptChange}
 				onImageTargetChange={handleImageTargetChange}
+				onPublicAccessChange={(nextPublicAccess, nextPublicURL) =>
+					handlePublicAccessChange(nextPublicAccess, nextPublicURL)}
 			/>
 	{/if}
 

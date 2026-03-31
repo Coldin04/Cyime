@@ -95,6 +95,7 @@ func main() {
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
 	workspaceRoutes.Put("/documents/:id/excerpt", workspace.UpdateDocumentExcerptHandler)
 	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
+	workspaceRoutes.Put("/documents/:id/public-access", workspace.UpdateDocumentPublicAccessHandler)
 	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
 	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
 	workspaceRoutes.Post("/documents/:id/invites", workspace.InviteDocumentByEmailHandler)
@@ -135,6 +136,11 @@ func main() {
 	notificationRoutes.Get("/", workspace.ListNotificationsHandler)
 	notificationRoutes.Delete("/", workspace.ClearNotificationsHandler)
 	notificationRoutes.Post("/:id/read", workspace.MarkNotificationReadHandler)
+
+	// Public document read routes (no authentication)
+	publicRoutes := api.Group("/public", middleware.OptionalProtected())
+	publicRoutes.Get("/documents/:id", workspace.GetPublicDocumentHandler)
+	publicRoutes.Get("/documents/:id/content", workspace.GetPublicDocumentContentHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

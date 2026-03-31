@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -121,6 +122,88 @@ func GetFileHandler(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(file)
+}
+
+// GetPublicDocumentHandler handles GET /api/v1/public/documents/:id
+func GetPublicDocumentHandler(c *fiber.Ctx) error {
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
+		})
+	}
+
+	var userID *uuid.UUID
+	if userIDStr, ok := c.Locals("userId").(string); ok && strings.TrimSpace(userIDStr) != "" {
+		if parsed, parseErr := uuid.Parse(userIDStr); parseErr == nil {
+			userID = &parsed
+		}
+	}
+
+	item, err := GetPublicDocument(documentID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPublicDocumentNotFound):
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: ErrPublicDocumentNotFound.Error(),
+			})
+		case errors.Is(err, ErrPublicDocumentAuthRequired):
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: ErrPublicDocumentAuthRequired.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(item)
+}
+
+// GetPublicDocumentContentHandler handles GET /api/v1/public/documents/:id/content
+func GetPublicDocumentContentHandler(c *fiber.Ctx) error {
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
+		})
+	}
+
+	var userID *uuid.UUID
+	if userIDStr, ok := c.Locals("userId").(string); ok && strings.TrimSpace(userIDStr) != "" {
+		if parsed, parseErr := uuid.Parse(userIDStr); parseErr == nil {
+			userID = &parsed
+		}
+	}
+
+	content, err := GetPublicDocumentContent(documentID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPublicDocumentNotFound):
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: ErrPublicDocumentNotFound.Error(),
+			})
+		case errors.Is(err, ErrPublicDocumentAuthRequired):
+			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+				Error:   "Unauthorized",
+				Message: ErrPublicDocumentAuthRequired.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(content)
 }
 
 // CreateFolderHandler handles POST /api/v1/workspace/folders
@@ -1200,6 +1283,67 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success":                true,
 		"preferredImageTargetId": normalizePreferredImageTargetID(req.PreferredImageTargetID),
+	})
+}
+
+// UpdateDocumentPublicAccessHandler handles PUT /api/v1/workspace/documents/:id/public-access
+func UpdateDocumentPublicAccessHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid Document ID",
+			Message: "Document ID must be a valid UUID",
+		})
+	}
+
+	var req UpdateDocumentPublicAccessRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid request body",
+		})
+	}
+
+	if err := UpdateDocumentPublicAccess(userID, documentID, req.PublicAccess); err != nil {
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
+				Message: err.Error(),
+			})
+		case errors.Is(err, ErrPublicAccessInvalid):
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: err.Error(),
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: err.Error(),
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":      true,
+		"publicAccess": req.PublicAccess,
+		"publicUrl":    buildDocumentPublicURL(documentID),
 	})
 }
 

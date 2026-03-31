@@ -20,6 +20,8 @@ type FileItem struct {
 	DocumentType           *string     `json:"documentType,omitempty"`
 	PreferredImageTargetID *string     `json:"preferredImageTargetId,omitempty"`
 	MyRole                 *string     `json:"myRole,omitempty"`
+	PublicAccess           *string     `json:"publicAccess,omitempty"`
+	PublicURL              *string     `json:"publicUrl,omitempty"`
 	Name                   string      `json:"name"`
 	Description            *string     `json:"description,omitempty"`
 	ParentID               *uuid.UUID  `json:"parentId,omitempty"`
@@ -132,6 +134,20 @@ type UpdateDocumentImageTargetRequest struct {
 
 type UpdateDocumentExcerptRequest struct {
 	Excerpt string `json:"excerpt"`
+}
+
+type UpdateDocumentPublicAccessRequest struct {
+	PublicAccess string `json:"publicAccess"`
+}
+
+type DocumentPublicContentResponse struct {
+	ID             uuid.UUID       `json:"id"`
+	DocumentID     uuid.UUID       `json:"documentId"`
+	ContentJSON    json.RawMessage `json:"contentJson"`
+	PlainText      string          `json:"plainText"`
+	ContentVersion int64           `json:"contentVersion"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
 type BatchMoveRequest struct {

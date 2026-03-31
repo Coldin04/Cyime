@@ -3,13 +3,19 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
-	import { updateDocumentExcerpt, updateDocumentTitle } from '$lib/api/workspace';
+	import {
+		updateDocumentExcerpt,
+		updateDocumentPublicAccess,
+		updateDocumentTitle
+	} from '$lib/api/workspace';
 	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import FileText from '~icons/ph/file-text';
 	import ImageSquare from '~icons/ph/image-square';
 	import LockKey from '~icons/ph/lock-key';
+	import Copy from '~icons/ph/copy';
+	import Check from '~icons/ph/check';
 	import SlidersHorizontal from '~icons/ph/sliders-horizontal';
 	import X from '~icons/ph/x';
 
@@ -25,10 +31,14 @@
 		canEditBasic?: boolean;
 		canManageMembers?: boolean;
 		canEditImageSettings?: boolean;
+		canManagePublic?: boolean;
+		publicAccess?: 'private' | 'authenticated' | 'public' | string;
+		publicUrl?: string;
 		isUpdating?: boolean;
 		onSelect: (targetId: string) => void | Promise<unknown>;
 		onTitleChange?: (title: string) => void;
 		onManualExcerptChange?: (excerpt: string) => void;
+		onPublicAccessChange?: (publicAccess: string, publicUrl: string) => void;
 	};
 
 	type DesignSection = {
@@ -58,10 +68,14 @@
 		canEditBasic = true,
 		canManageMembers = true,
 		canEditImageSettings = true,
+		canManagePublic = false,
+		publicAccess = 'private',
+		publicUrl = '',
 		isUpdating = false,
 		onSelect,
 		onTitleChange,
-		onManualExcerptChange
+		onManualExcerptChange,
+		onPublicAccessChange
 	}: Props = $props();
 
 	const visibleSections = $derived(
@@ -85,12 +99,20 @@
 	let draftTitle = $state('');
 	let draftExcerpt = $state('');
 	let isSavingExcerpt = $state(false);
+	let isSavingPublicAccess = $state(false);
+	let copiedPublicURL = $state(false);
 	let titleInput: HTMLInputElement | null = $state(null);
 	let contentArea: HTMLElement | null = $state(null);
 	let basicSection: HTMLElement | null = $state(null);
 	let permissionsSection: HTMLElement | null = $state(null);
 	let imageSection: HTMLElement | null = $state(null);
 	let sectionObserver: IntersectionObserver | null = null;
+
+	$effect(() => {
+		if (!open || !isSavingPublicAccess) {
+			draftPublicAccess = publicAccess;
+		}
+	});
 
 	function getSectionElement(id: DesignSectionId): HTMLElement | null {
 		switch (id) {
@@ -104,6 +126,7 @@
 				return null;
 		}
 	}
+	let draftPublicAccess = $state<'private' | 'authenticated' | 'public' | string>('private');
 
 	$effect(() => {
 		if (!browser) return;
@@ -254,6 +277,56 @@
 		}
 	}
 
+	function resolvePublicAccessURL() {
+		const current = publicUrl.trim();
+		return current !== '' ? current : `/view/documents/${documentId}`;
+	}
+
+	async function savePublicAccess() {
+		if (!canManagePublic || isSavingPublicAccess) return;
+		if (draftPublicAccess === publicAccess) return;
+		isSavingPublicAccess = true;
+		try {
+			const response = await updateDocumentPublicAccess(documentId, draftPublicAccess);
+			draftPublicAccess = response.publicAccess;
+			onPublicAccessChange?.(response.publicAccess, response.publicUrl);
+			toast.success(
+				response.publicAccess === 'private'
+					? m.editor_document_settings_public_disabled()
+					: m.editor_document_settings_public_enabled()
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_document_settings_public_update_failed()
+			);
+		} finally {
+			isSavingPublicAccess = false;
+		}
+	}
+
+	async function handlePublicAccessSelect(event: Event) {
+		const nextValue = (event.currentTarget as HTMLSelectElement).value;
+		draftPublicAccess = nextValue;
+		await savePublicAccess();
+	}
+
+	async function copyPublicURL() {
+		const targetURL = resolvePublicAccessURL();
+		if (!targetURL) return;
+		try {
+			await navigator.clipboard.writeText(targetURL);
+			copiedPublicURL = true;
+			setTimeout(() => {
+				copiedPublicURL = false;
+			}, 1200);
+			toast.success(m.editor_document_settings_public_copy_success());
+		} catch {
+			toast.error(m.editor_document_settings_public_copy_failed());
+		}
+	}
+
 	function handleTitleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Enter') {
 			void saveTitle();
@@ -372,15 +445,15 @@
 											class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
 											placeholder={m.document_name_placeholder()}
 										/>
-										<div class="flex gap-2">
-											<button
-												type="button"
-												class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-												onclick={() => void saveTitle()}
-											>
-												{m.common_save()}
-											</button>
-											{#if isEditingTitle}
+										{#if isEditingTitle}
+											<div class="flex gap-2">
+												<button
+													type="button"
+													class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+													onclick={() => void saveTitle()}
+												>
+													{m.common_save()}
+												</button>
 												<button
 													type="button"
 													class="rounded-lg bg-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
@@ -388,8 +461,8 @@
 												>
 													{m.common_cancel()}
 												</button>
-											{/if}
-										</div>
+											</div>
+										{/if}
 									</div>
 									</div>
 
@@ -401,14 +474,16 @@
 										>
 											{m.editor_document_settings_description_label()}
 										</label>
-										<button
-											type="button"
-											class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-											onclick={() => void saveExcerpt()}
-											disabled={isSavingExcerpt}
-										>
-											{isSavingExcerpt ? m.common_saving() : m.common_save()}
-										</button>
+										{#if draftExcerpt.trim() !== documentManualExcerpt.trim()}
+											<button
+												type="button"
+												class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+												onclick={() => void saveExcerpt()}
+												disabled={isSavingExcerpt}
+											>
+												{isSavingExcerpt ? m.common_saving() : m.common_save()}
+											</button>
+										{/if}
 									</div>
 									<textarea
 										id="document-design-description"
@@ -421,6 +496,54 @@
 										{m.editor_document_settings_description_hint()}
 									</p>
 									</div>
+
+									{#if canManagePublic}
+										<div class="space-y-3">
+											<div class="flex items-center justify-between gap-3">
+												<div>
+													<p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+														{m.editor_document_settings_public_label()}
+													</p>
+													<p class="text-xs text-zinc-500 dark:text-zinc-400">
+														{m.editor_document_settings_public_hint()}
+													</p>
+												</div>
+												<div class="flex items-center gap-2">
+													<select
+														class="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
+														bind:value={draftPublicAccess}
+														disabled={isSavingPublicAccess}
+														onchange={(event) => void handlePublicAccessSelect(event)}
+													>
+														<option value="private">{m.editor_document_settings_public_option_private()}</option>
+														<option value="authenticated">{m.editor_document_settings_public_option_authenticated()}</option>
+														<option value="public">{m.editor_document_settings_public_option_public()}</option>
+													</select>
+												</div>
+											</div>
+											<div class="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+												<input
+													type="text"
+													readonly
+													value={resolvePublicAccessURL()}
+													class="min-w-0 flex-1 bg-transparent text-xs text-zinc-700 outline-none dark:text-zinc-300"
+												/>
+												<button
+													type="button"
+													class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+													onclick={() => void copyPublicURL()}
+													aria-label={m.editor_document_settings_public_copy_action()}
+													title={m.editor_document_settings_public_copy_action()}
+												>
+													{#if copiedPublicURL}
+														<Check class="h-3.5 w-3.5" />
+													{:else}
+														<Copy class="h-3.5 w-3.5" />
+													{/if}
+												</button>
+											</div>
+										</div>
+									{/if}
 								</section>
 							{/if}
 

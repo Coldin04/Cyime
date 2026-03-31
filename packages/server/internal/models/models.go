@@ -181,6 +181,7 @@ type Document struct {
 	Title                  string     `gorm:"type:varchar(255);not null"`
 	Excerpt                string     `gorm:"type:text"`
 	ManualExcerpt          string     `gorm:"type:text;not null;default:''"`
+	PublicAccess           string     `gorm:"type:varchar(20);not null;default:'private';index"`
 	DocumentType           string     `gorm:"type:varchar(50);not null;default:'rich_text'"`
 	PreferredImageTargetID string     `gorm:"type:varchar(100)"`
 	EditorType             string     `gorm:"type:varchar(50);not null;default:'tiptap'"`

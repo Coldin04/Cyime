@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,6 +35,9 @@ var ErrDocumentQuotaExceeded = errors.New("已达到文档数量上限")
 const (
 	DefaultPreferredImageTargetID = "managed-r2"
 	LegacyPreferredImageTargetID  = "managed-r2"
+	PublicAccessPrivate           = "private"
+	PublicAccessAuthenticated     = "authenticated"
+	PublicAccessGlobal            = "public"
 )
 
 func normalizePreferredImageTargetID(value string) string {
@@ -74,6 +78,21 @@ func normalizePermissionRole(role string) string {
 	default:
 		return ""
 	}
+}
+
+func normalizePublicAccess(value string) string {
+	switch strings.TrimSpace(value) {
+	case "":
+		return PublicAccessPrivate
+	case PublicAccessPrivate, PublicAccessAuthenticated, PublicAccessGlobal:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
+}
+
+func buildDocumentPublicURL(documentID uuid.UUID) string {
+	return "/view/documents/" + documentID.String()
 }
 
 func ShareDocument(actorUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
@@ -876,6 +895,8 @@ func documentToFileItem(document models.Document, role string) FileItem {
 	preferredImageTargetID := resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID)
 	excerpt := resolveDocumentListExcerpt(document.Excerpt, document.ManualExcerpt)
 	manualExcerpt := document.ManualExcerpt
+	publicAccess := normalizePublicAccess(document.PublicAccess)
+	publicURL := buildDocumentPublicURL(document.ID)
 	var myRole *string
 	if strings.TrimSpace(role) != "" {
 		myRole = &role
@@ -886,6 +907,8 @@ func documentToFileItem(document models.Document, role string) FileItem {
 		DocumentType:           &document.DocumentType,
 		PreferredImageTargetID: &preferredImageTargetID,
 		MyRole:                 myRole,
+		PublicAccess:           &publicAccess,
+		PublicURL:              &publicURL,
 		Name:                   document.Title,
 		Title:                  &document.Title,
 		Excerpt:                &excerpt,
@@ -954,6 +977,117 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 	}
 
 	return nil, errors.New("无效的文件类型")
+}
+
+func GetPublicDocument(fileID uuid.UUID, userID *uuid.UUID) (*FileItem, error) {
+	var document models.Document
+	if err := database.DB.
+		Where("id = ? AND deleted_at IS NULL", fileID).
+		First(&document).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPublicDocumentNotFound
+		}
+		return nil, err
+	}
+	switch normalizePublicAccess(document.PublicAccess) {
+	case PublicAccessGlobal:
+		// ok
+	case PublicAccessAuthenticated:
+		if userID == nil || *userID == uuid.Nil {
+			return nil, ErrPublicDocumentAuthRequired
+		}
+	default:
+		return nil, ErrPublicDocumentNotFound
+	}
+
+	item := documentToFileItem(document, "")
+	return &item, nil
+}
+
+func sanitizePublicContentJSON(raw string) json.RawMessage {
+	var node any
+	if err := json.Unmarshal([]byte(raw), &node); err != nil {
+		return json.RawMessage(raw)
+	}
+	stripImageAttrs(node)
+	normalized, err := json.Marshal(node)
+	if err != nil {
+		return json.RawMessage(raw)
+	}
+	return normalized
+}
+
+func stripImageAttrs(node any) {
+	obj, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if nodeType, _ := obj["type"].(string); nodeType == "image" {
+		if attrs, ok := obj["attrs"].(map[string]any); ok {
+			if rawSrc, ok := attrs["src"].(string); ok {
+				src := strings.TrimSpace(rawSrc)
+				keepExternal := strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://")
+				if strings.Contains(src, "/api/v1/media/assets/") {
+					keepExternal = false
+				}
+				if !keepExternal {
+					delete(attrs, "src")
+				}
+			} else {
+				delete(attrs, "src")
+			}
+			delete(attrs, "assetId")
+			obj["attrs"] = attrs
+		}
+	}
+	if children, ok := obj["content"].([]any); ok {
+		for _, child := range children {
+			stripImageAttrs(child)
+		}
+	}
+}
+
+func GetPublicDocumentContent(documentID uuid.UUID, userID *uuid.UUID) (*DocumentPublicContentResponse, error) {
+	var document models.Document
+	if err := database.DB.
+		Select("id", "public_access").
+		Where("id = ? AND deleted_at IS NULL", documentID).
+		First(&document).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPublicDocumentNotFound
+		}
+		return nil, err
+	}
+	switch normalizePublicAccess(document.PublicAccess) {
+	case PublicAccessGlobal:
+		// ok
+	case PublicAccessAuthenticated:
+		if userID == nil || *userID == uuid.Nil {
+			return nil, ErrPublicDocumentAuthRequired
+		}
+	default:
+		return nil, ErrPublicDocumentNotFound
+	}
+
+	var body models.DocumentBody
+	if err := database.DB.
+		Where("document_id = ? AND deleted_at IS NULL", documentID).
+		First(&body).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPublicDocumentNotFound
+		}
+		return nil, err
+	}
+
+	return &DocumentPublicContentResponse{
+		ID:             body.ID,
+		DocumentID:     body.DocumentID,
+		ContentJSON:    sanitizePublicContentJSON(body.ContentJSON),
+		PlainText:      body.PlainText,
+		ContentVersion: body.ContentVersion,
+		CreatedAt:      body.CreatedAt,
+		UpdatedAt:      body.UpdatedAt,
+	}, nil
 }
 
 // UpdateDocumentTitle updates the title of a document.
@@ -1253,6 +1387,27 @@ func checkCircularDependency(db *gorm.DB, userID uuid.UUID, sourceFolderID, targ
 	}
 
 	return nil
+}
+
+func UpdateDocumentPublicAccess(userID uuid.UUID, documentID uuid.UUID, publicAccess string) error {
+	normalized := normalizePublicAccess(publicAccess)
+	if normalized == "" {
+		return ErrPublicAccessInvalid
+	}
+
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
+	if err != nil {
+		return ErrDocumentNotFoundOrUnauthorized
+	}
+
+	if normalizePublicAccess(document.PublicAccess) == normalized {
+		return nil
+	}
+
+	return database.DB.Model(document).Updates(map[string]any{
+		"public_access": normalized,
+		"updated_by":    userID,
+	}).Error
 }
 
 // Helper function for Go versions without built-in max

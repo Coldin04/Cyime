@@ -91,6 +91,27 @@ export async function getDocumentContent(documentId: string): Promise<DocumentCo
 	return parseJSONResponse<DocumentContent>(response, 'Failed to parse document content response');
 }
 
+export async function getPublicDocumentContent(documentId: string): Promise<DocumentContent> {
+	const response = await apiFetch(`/api/v1/public/documents/${documentId}/content`);
+
+	if (!response.ok) {
+		const error = await parseJSONResponse<{ message?: string }>(
+			response,
+			'Failed to fetch public document content'
+		);
+		const err = new Error(error.message || 'Failed to fetch public document content') as Error & {
+			status?: number;
+		};
+		err.status = response.status;
+		throw err;
+	}
+
+	return parseJSONResponse<DocumentContent>(
+		response,
+		'Failed to parse public document content response'
+	);
+}
+
 export async function updateDocumentContent(
 	documentId: string,
 	contentJson: JSONContent

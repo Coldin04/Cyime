@@ -6,6 +6,8 @@ export type FileItem = {
 	documentType?: 'rich_text' | 'table' | string;
 	preferredImageTargetId?: 'managed-r2' | string;
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string | null;
+	publicAccess?: 'private' | 'authenticated' | 'public' | string | null;
+	publicUrl?: string | null;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
@@ -345,6 +347,21 @@ export async function getDocumentDetails(id: string): Promise<FileItem> {
 	return response.json();
 }
 
+export async function getPublicDocumentDetails(id: string): Promise<FileItem> {
+	const response = await apiFetch(`/api/v1/public/documents/${id}`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		const err = new Error(error.message || 'Failed to fetch public document details') as Error & {
+			status?: number;
+		};
+		err.status = response.status;
+		throw err;
+	}
+
+	return response.json();
+}
+
 export async function getSharedDocumentSummary(): Promise<SharedDocumentSummaryResponse> {
 	const response = await apiFetch('/api/v1/workspace/shared/summary');
 	if (!response.ok) {
@@ -589,6 +606,26 @@ export async function updateDocumentImageTarget(
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to update image target');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentPublicAccess(
+	id: string,
+	publicAccess: 'private' | 'authenticated' | 'public' | string
+): Promise<{ success: boolean; publicAccess: string; publicUrl: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/public-access`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ publicAccess })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.Message || error.message || 'Failed to update document public access');
 	}
 
 	return response.json();

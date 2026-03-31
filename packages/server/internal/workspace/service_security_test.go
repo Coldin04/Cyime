@@ -261,6 +261,71 @@ func TestDeleteFile_Document_DeniesCrossUserAccessAndKeepsRow(t *testing.T) {
 	}
 }
 
+func TestGetPublicDocument_PrivateDocumentNotExposed(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "private-doc")
+
+	item, err := GetPublicDocument(docID, nil)
+	if err == nil || item != nil {
+		t.Fatalf("expected private doc to be hidden, got item=%+v err=%v", item, err)
+	}
+}
+
+func TestGetPublicDocument_PublicDocumentReadable(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "public-doc")
+
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("public_access", PublicAccessGlobal).Error; err != nil {
+		t.Fatalf("set public_access: %v", err)
+	}
+
+	item, err := GetPublicDocument(docID, nil)
+	if err != nil {
+		t.Fatalf("expected public doc readable, got err=%v", err)
+	}
+	if item == nil || item.PublicAccess == nil || *item.PublicAccess != PublicAccessGlobal {
+		t.Fatalf("expected public access in response, got item=%+v", item)
+	}
+}
+
+func TestGetPublicDocument_AuthenticatedRequiresLogin(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	readerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "auth-doc")
+	seedVerifiedUser(t, db, readerID, readerID.String()+"@example.com")
+
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("public_access", PublicAccessAuthenticated).Error; err != nil {
+		t.Fatalf("set public_access: %v", err)
+	}
+
+	if _, err := GetPublicDocument(docID, nil); err == nil {
+		t.Fatal("expected unauthenticated access to fail")
+	}
+
+	item, err := GetPublicDocument(docID, &readerID)
+	if err != nil {
+		t.Fatalf("expected authenticated read success, got err=%v", err)
+	}
+	if item == nil {
+		t.Fatal("expected document item")
+	}
+}
+
+func TestUpdateDocumentPublicAccess_DeniesNonOwner(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "public-control")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	if err := UpdateDocumentPublicAccess(editorID, docID, PublicAccessGlobal); err == nil {
+		t.Fatal("expected non-owner to be denied public-access update")
+	}
+}
+
 func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()

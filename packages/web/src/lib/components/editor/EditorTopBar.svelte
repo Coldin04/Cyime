@@ -22,6 +22,8 @@ let {
 	preferredImageTargetId,
 	availableImageTargets,
 	myRole = 'owner',
+	publicAccess = 'private',
+	publicUrl = '',
 	readOnly = false,
 	showEditShortcut = false,
 	editHref = '',
@@ -30,8 +32,9 @@ let {
 	lastSaved,
 	hasUnsavedChanges,
 	onTitleChange,
-		onManualExcerptChange,
-	onImageTargetChange
+	onManualExcerptChange,
+	onImageTargetChange,
+	onPublicAccessChange
 }: {
 	documentId: string;
 	initialTitle: string;
@@ -40,6 +43,8 @@ let {
 	preferredImageTargetId: string;
 	availableImageTargets: DocumentImageTargetOption[];
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	publicAccess?: 'private' | 'authenticated' | 'public' | string;
+	publicUrl?: string;
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -50,6 +55,7 @@ let {
 	onTitleChange?: (title: string) => void;
 	onManualExcerptChange?: (excerpt: string) => void;
 	onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
+	onPublicAccessChange?: (publicAccess: string, publicUrl: string) => void;
 } = $props();
 
 let title = $state('');
@@ -220,6 +226,9 @@ $effect(() => {
 				canEditBasic={canEditDocumentMeta}
 				canManageMembers={myRole === 'owner' || myRole === 'collaborator'}
 				canEditImageSettings={canEditDocumentMeta}
+				canManagePublic={myRole === 'owner'}
+				{publicAccess}
+				{publicUrl}
 				isUpdating={isUpdatingImageTarget}
 				onSelect={(targetId) => onImageTargetChange?.(targetId)}
 				onTitleChange={(nextTitle) => {
@@ -230,6 +239,8 @@ $effect(() => {
 					excerpt = nextExcerpt;
 					onManualExcerptChange?.(nextExcerpt);
 				}}
+				onPublicAccessChange={(nextPublicAccess, nextPublicURL) =>
+					onPublicAccessChange?.(nextPublicAccess, nextPublicURL)}
 			/>
 		{/if}
 		{#if showEditShortcut && editHref}
