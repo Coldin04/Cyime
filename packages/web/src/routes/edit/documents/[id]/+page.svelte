@@ -26,6 +26,7 @@
 
 	let title = $state('');
 	let manualExcerpt = $state('');
+	let myRole = $state<'owner' | 'collaborator' | 'editor' | 'viewer' | string>('owner');
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -283,6 +284,7 @@
 					// Use the title from the API
 					title = details.title ?? '';
 					manualExcerpt = details.manualExcerpt ?? '';
+					myRole = details.myRole ?? 'owner';
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
@@ -372,6 +374,7 @@
 				{documentType}
 				{preferredImageTargetId}
 				{availableImageTargets}
+				{myRole}
 				readOnly={false}
 				showEditShortcut={false}
 				{isUpdatingImageTarget}

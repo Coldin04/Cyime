@@ -2,6 +2,7 @@
 	import { afterNavigate } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import { getLocale } from '$paraglide/runtime';
 	import { auth } from '$lib/stores/auth';
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import { portal } from '$lib/actions/portal';
@@ -87,7 +88,8 @@
 			notifications = data.items || [];
 			unreadCount = data.unreadCount || 0;
 		} catch (error) {
-			notificationError = error instanceof Error ? error.message : '加载通知失败';
+			notificationError =
+				error instanceof Error ? error.message : m.workspace_notification_load_failed();
 		} finally {
 			isLoadingNotificationList = false;
 		}
@@ -108,30 +110,30 @@
 		if (!raw) {
 			return {
 				inviteId: '',
-				documentTitle: '未命名文档',
-				inviterDisplayName: '系统通知',
+				documentTitle: m.workspace_notification_untitled_document(),
+				inviterDisplayName: m.workspace_notification_system_message(),
 				role: ''
 			};
 		}
 
 		return {
 			inviteId: String(raw.inviteId || ''),
-			documentTitle: String(raw.documentTitle || '未命名文档'),
-			inviterDisplayName: String(raw.inviterDisplayName || '系统通知'),
+			documentTitle: String(raw.documentTitle || m.workspace_notification_untitled_document()),
+			inviterDisplayName: String(raw.inviterDisplayName || m.workspace_notification_system_message()),
 			role: String(raw.role || '')
 		};
 	}
 
 	function roleLabel(role: string): string {
-		if (role === 'viewer') return '查看者';
-		if (role === 'editor') return '编辑者';
-		if (role === 'collaborator') return '协同者';
-		return role || '成员';
+		if (role === 'viewer') return m.workspace_shared_role_viewer();
+		if (role === 'editor') return m.workspace_shared_role_editor();
+		if (role === 'collaborator') return m.workspace_shared_role_collaborator();
+		return role || m.workspace_notification_role_member();
 	}
 
 	function formatTime(ts: string): string {
 		try {
-			return new Intl.DateTimeFormat('zh-CN', {
+			return new Intl.DateTimeFormat(getLocale(), {
 				month: '2-digit',
 				day: '2-digit',
 				hour: '2-digit',
@@ -149,14 +151,16 @@
 		try {
 			if (action === 'accept') {
 				await acceptDocumentInvite(inviteId);
-				toast.success('已接受邀请');
+				toast.success(m.workspace_notification_invite_accepted());
 			} else {
 				await declineDocumentInvite(inviteId);
-				toast.success('已拒绝邀请');
+				toast.success(m.workspace_notification_invite_declined());
 			}
 			await refreshNotificationList();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '处理邀请失败');
+			toast.error(
+				error instanceof Error ? error.message : m.workspace_notification_invite_action_failed()
+			);
 		} finally {
 			processingInviteId = '';
 		}
@@ -169,9 +173,15 @@
 			const result = await clearNotifications();
 			notifications = [];
 			unreadCount = 0;
-			toast.success(result.clearedCount > 0 ? `已清空 ${result.clearedCount} 条通知` : '通知已清空');
+			toast.success(
+				result.clearedCount > 0
+					? m.workspace_notification_cleared_count({ count: result.clearedCount })
+					: m.workspace_notification_cleared()
+			);
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '清空通知失败');
+			toast.error(
+				error instanceof Error ? error.message : m.workspace_notification_clear_failed()
+			);
 		} finally {
 			isClearingNotifications = false;
 		}
@@ -219,7 +229,7 @@
 				{$auth.user?.displayName || m.common_user()}
 			</p>
 			<p class="truncate text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
-				{$auth.user?.email || 'No email'}
+				{$auth.user?.email || m.user_common_no_email()}
 			</p>
 		</div>
 		{#if unreadCount > 0}
@@ -245,7 +255,7 @@
 							{$auth.user?.displayName || m.common_user()}
 						</span>
 						<span class="truncate text-xs leading-tight text-zinc-500 dark:text-zinc-400">
-							{$auth.user?.email || 'No email'}
+							{$auth.user?.email || m.user_common_no_email()}
 						</span>
 					</span>
 				</span>
@@ -262,7 +272,7 @@
 			>
 				<span class="flex items-center gap-2">
 					<Bell class="h-4 w-4" />
-					<span>通知</span>
+					<span>{m.workspace_notification_menu_label()}</span>
 				</span>
 				{#if unreadCount > 0}
 					<span class="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
@@ -300,7 +310,7 @@
 		<button
 			type="button"
 			class="absolute inset-0 bg-black/20 backdrop-blur-[1px]"
-			aria-label="关闭通知抽屉"
+			aria-label={m.workspace_notification_close_drawer()}
 			onclick={closeNotificationDrawer}
 		></button>
 
@@ -308,31 +318,33 @@
 			class="absolute right-0 top-0 flex h-full w-screen flex-col border-l border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:w-[min(92vw,420px)]"
 			role="dialog"
 			aria-modal="true"
-			aria-label="通知抽屉"
+			aria-label={m.workspace_notification_drawer_aria_label()}
 		>
 			<div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
 				<div>
-					<p class="text-base font-semibold text-zinc-900 dark:text-zinc-100">通知</p>
-					<p class="text-xs text-zinc-500 dark:text-zinc-400">邀请与协作状态</p>
+					<p class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.workspace_notification_title()}</p>
+					<p class="text-xs text-zinc-500 dark:text-zinc-400">{m.workspace_notification_subtitle()}</p>
 				</div>
 				<div class="flex items-center gap-1">
 					{#if notifications.length > 0}
 						<button
 							type="button"
 							class="inline-flex h-8 items-center justify-center rounded-full px-3 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							aria-label="清空通知"
+							aria-label={m.workspace_notification_clear_action()}
 							disabled={isClearingNotifications}
 							onclick={() => {
 								void handleClearNotifications();
 							}}
 						>
-							{isClearingNotifications ? '清空中...' : '清空'}
+							{isClearingNotifications
+								? m.workspace_notification_clearing_action()
+								: m.workspace_notification_clear_action()}
 						</button>
 					{/if}
 					<button
 						type="button"
 						class="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-						aria-label="刷新通知"
+						aria-label={m.workspace_notification_refresh_action()}
 						onclick={() => {
 							void refreshNotificationList();
 						}}
@@ -342,7 +354,7 @@
 					<button
 						type="button"
 						class="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-						aria-label="关闭通知抽屉"
+						aria-label={m.workspace_notification_close_drawer()}
 						onclick={closeNotificationDrawer}
 					>
 						<X class="h-4 w-4" />
@@ -352,7 +364,7 @@
 
 			<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
 				{#if isLoadingNotificationList}
-					<p class="px-2 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">正在加载通知...</p>
+					<p class="px-2 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{m.workspace_notification_loading()}</p>
 				{:else if notificationError}
 					<p class="px-2 py-6 text-center text-sm text-rose-600 dark:text-rose-400">{notificationError}</p>
 				{:else if notifications.length === 0}
@@ -360,8 +372,8 @@
 						<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
 							<Bell class="h-5 w-5 text-zinc-400 dark:text-zinc-500" />
 						</div>
-						<p class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">通知为空</p>
-						<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">有新的协作邀请后会显示在这里</p>
+						<p class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">{m.workspace_notification_empty_title()}</p>
+						<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{m.workspace_notification_empty_description()}</p>
 					</div>
 				{:else}
 					<div class="space-y-2">
@@ -373,13 +385,16 @@
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
 										<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-											{invite.inviterDisplayName} 邀请你协作文档
+											{m.workspace_notification_invite_title({ inviter: invite.inviterDisplayName })}
 										</p>
 										<p class="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">
 											《{invite.documentTitle}》
 										</p>
 										<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-											角色：{roleLabel(invite.role)} · {formatTime(item.createdAt)}
+											{m.workspace_notification_invite_meta({
+												role: roleLabel(invite.role),
+												time: formatTime(item.createdAt)
+											})}
 										</p>
 									</div>
 									{#if !item.readAt}
@@ -396,7 +411,9 @@
 												void handleInviteAction(invite.inviteId, 'accept');
 											}}
 										>
-											{processingInviteId === invite.inviteId ? '处理中...' : '同意'}
+											{processingInviteId === invite.inviteId
+												? m.workspace_notification_processing_action()
+												: m.workspace_notification_accept_action()}
 										</button>
 										<button
 											type="button"
@@ -406,7 +423,7 @@
 												void handleInviteAction(invite.inviteId, 'decline');
 											}}
 										>
-											拒绝
+											{m.workspace_notification_decline_action()}
 										</button>
 									</div>
 								{/if}
