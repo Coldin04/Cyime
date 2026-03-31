@@ -22,6 +22,9 @@
 		documentType?: string;
 		currentTargetId: string;
 		options: DocumentImageTargetOption[];
+		canEditBasic?: boolean;
+		canManageMembers?: boolean;
+		canEditImageSettings?: boolean;
 		isUpdating?: boolean;
 		onSelect: (targetId: string) => void | Promise<unknown>;
 		onTitleChange?: (title: string) => void;
@@ -52,11 +55,29 @@
 		documentType = 'rich_text',
 		currentTargetId,
 		options,
+		canEditBasic = true,
+		canManageMembers = true,
+		canEditImageSettings = true,
 		isUpdating = false,
 		onSelect,
 		onTitleChange,
 		onManualExcerptChange
 	}: Props = $props();
+
+	const visibleSections = $derived(
+		sections.filter((section) => {
+			switch (section.id) {
+				case 'basic':
+					return canEditBasic;
+				case 'permissions':
+					return canManageMembers;
+				case 'image':
+					return canEditImageSettings;
+				default:
+					return false;
+			}
+		})
+	);
 
 	let open = $state(false);
 	let activeSection = $state<DesignSectionId>('basic');
@@ -106,7 +127,7 @@
 
 	$effect(() => {
 		if (!open) {
-			activeSection = 'basic';
+			activeSection = (visibleSections[0]?.id ?? 'basic') as DesignSectionId;
 			isEditingTitle = false;
 		}
 	});
@@ -133,7 +154,7 @@
 			}
 		);
 
-		for (const section of sections) {
+		for (const section of visibleSections) {
 			const el = getSectionElement(section.id);
 			if (el) {
 				sectionObserver.observe(el);
@@ -172,6 +193,7 @@
 	}
 
 	async function startEditingTitle() {
+		if (!canEditBasic) return;
 		draftTitle = documentTitle;
 		isEditingTitle = true;
 		await tick();
@@ -184,6 +206,7 @@
 	}
 
 	async function saveTitle() {
+		if (!canEditBasic) return;
 		const nextTitle = draftTitle.trim();
 		if (!nextTitle || nextTitle === documentTitle) {
 			isEditingTitle = false;
@@ -203,6 +226,7 @@
 	}
 
 	async function saveExcerpt() {
+		if (!canEditBasic) return;
 		if (isSavingExcerpt) return;
 
 		const nextExcerpt = draftExcerpt.trim();
@@ -248,7 +272,7 @@
 	class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 	title={m.editor_topbar_image_target_settings()}
 	aria-label={m.editor_topbar_image_target_settings()}
-	disabled={isUpdating}
+	disabled={isUpdating || visibleSections.length === 0}
 	onclick={() => (open = true)}
 >
 	<SlidersHorizontal class="h-5 w-5" />
@@ -298,7 +322,7 @@
 				<div class="flex min-h-0 flex-1 flex-col md:flex-row">
 					<aside class="border-b border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40 md:w-56 md:shrink-0 md:border-b-0 md:border-r">
 						<nav class="flex gap-1 overflow-x-auto p-3 md:h-full md:flex-col md:overflow-y-auto md:p-4">
-							{#each sections as section (section.id)}
+							{#each visibleSections as section (section.id)}
 								<button
 									type="button"
 									class={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition md:w-full ${
@@ -317,11 +341,12 @@
 
 					<section bind:this={contentArea} class="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
 						<div class="max-w-2xl space-y-10 pb-12">
-							<section
-								bind:this={basicSection}
-								data-section-id="basic"
-								class="scroll-mt-6 space-y-6"
-							>
+							{#if canEditBasic}
+								<section
+									bind:this={basicSection}
+									data-section-id="basic"
+									class="scroll-mt-6 space-y-6"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_basic_title()}
@@ -331,7 +356,7 @@
 									</p>
 								</div>
 
-								<div class="space-y-3">
+									<div class="space-y-3">
 									<label for="document-title-input" class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
 										{m.editor_document_settings_title_label()}
 									</label>
@@ -366,9 +391,9 @@
 											{/if}
 										</div>
 									</div>
-								</div>
+									</div>
 
-								<div class="space-y-3">
+									<div class="space-y-3">
 									<div class="flex items-center justify-between gap-3">
 										<label
 											for="document-design-description"
@@ -395,14 +420,16 @@
 									<p class="text-xs leading-6 text-zinc-400 dark:text-zinc-500">
 										{m.editor_document_settings_description_hint()}
 									</p>
-								</div>
-							</section>
+									</div>
+								</section>
+							{/if}
 
-							<section
-								bind:this={permissionsSection}
-								data-section-id="permissions"
-								class="scroll-mt-6 space-y-5"
-							>
+							{#if canManageMembers}
+								<section
+									bind:this={permissionsSection}
+									data-section-id="permissions"
+									class="scroll-mt-6 space-y-5"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_permissions_title()}
@@ -412,17 +439,19 @@
 									</p>
 								</div>
 
-								<DocumentCollaborationSettings
-									{documentId}
-									enabled={open && activeSection === 'permissions'}
-								/>
-							</section>
+									<DocumentCollaborationSettings
+										{documentId}
+										enabled={open && activeSection === 'permissions'}
+									/>
+								</section>
+							{/if}
 
-							<section
-								bind:this={imageSection}
-								data-section-id="image"
-								class="scroll-mt-6 space-y-5"
-							>
+							{#if canEditImageSettings}
+								<section
+									bind:this={imageSection}
+									data-section-id="image"
+									class="scroll-mt-6 space-y-5"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_image_title()}
@@ -462,7 +491,8 @@
 										</p>
 									</div>
 								</div>
-							</section>
+								</section>
+							{/if}
 						</div>
 					</section>
 				</div>

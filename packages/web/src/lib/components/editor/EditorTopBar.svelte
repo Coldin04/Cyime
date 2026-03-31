@@ -21,6 +21,7 @@ let {
 	documentType = 'rich_text',
 	preferredImageTargetId,
 	availableImageTargets,
+	myRole = 'owner',
 	readOnly = false,
 	showEditShortcut = false,
 	editHref = '',
@@ -38,6 +39,7 @@ let {
 	documentType?: string;
 	preferredImageTargetId: string;
 	availableImageTargets: DocumentImageTargetOption[];
+	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -52,6 +54,8 @@ let {
 
 let title = $state('');
 let excerpt = $state('');
+const canEditDocumentMeta = $derived(myRole === 'owner' || myRole === 'collaborator');
+const canOpenDocumentSettings = $derived(canEditDocumentMeta);
 
 	// Title editing state
 	let isEditingTitle = $state(false);
@@ -73,7 +77,7 @@ $effect(() => {
 });
 
 	async function startEditingTitle() {
-		if (readOnly) return;
+		if (readOnly || !canEditDocumentMeta) return;
 		editingTitle = title;
 		isEditingTitle = true;
 		// Focus the input after render
@@ -165,7 +169,7 @@ $effect(() => {
 					</button>
 				</div>
 			{:else}
-				{#if readOnly}
+				{#if readOnly || !canEditDocumentMeta}
 					<h1 class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 dark:text-zinc-100" title={title}>
 						{title}
 					</h1>
@@ -205,7 +209,7 @@ $effect(() => {
 
 	<!-- Right Controls -->
 	<div class="flex items-center gap-4 pr-4">
-		{#if !readOnly}
+		{#if !readOnly && canOpenDocumentSettings}
 			<EditorDocumentSettingsDialog
 				{documentId}
 				documentTitle={title}
@@ -213,6 +217,9 @@ $effect(() => {
 				{documentType}
 				currentTargetId={preferredImageTargetId}
 				options={availableImageTargets}
+				canEditBasic={canEditDocumentMeta}
+				canManageMembers={myRole === 'owner' || myRole === 'collaborator'}
+				canEditImageSettings={canEditDocumentMeta}
 				isUpdating={isUpdatingImageTarget}
 				onSelect={(targetId) => onImageTargetChange?.(targetId)}
 				onTitleChange={(nextTitle) => {
