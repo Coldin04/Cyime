@@ -230,3 +230,23 @@ type NotificationListResponse struct {
 	Total       int64              `json:"total"`
 	UnreadCount int64              `json:"unreadCount"`
 }
+
+// DocumentACLResponse represents the ACL information for a document
+type DocumentACLResponse struct {
+	MyRole           string `json:"myRole"`           // "viewer", "editor", "collaborator", "owner"
+	CanRead          bool   `json:"canRead"`
+	CanEdit          bool   `json:"canEdit"`
+	CanManageMembers bool   `json:"canManageMembers"`
+}
+
+// GetYjsStateResponse represents the Yjs state response
+type GetYjsStateResponse struct {
+	YjsState       string `json:"yjsState"`
+	YjsStateVector string `json:"yjsStateVector"`
+}
+
+// UpdateYjsStateRequest represents the request to update Yjs state
+type UpdateYjsStateRequest struct {
+	YjsState       string `json:"yjsState"`
+	YjsStateVector string `json:"yjsStateVector"`
+}

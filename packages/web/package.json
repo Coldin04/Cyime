@@ -37,6 +37,7 @@
 	},
 	"dependencies": {
 		"@tiptap/core": "^3.20.4",
+		"@tiptap/extension-collaboration": "^3.21.0",
 		"@tiptap/extension-image": "^3.20.4",
 		"@tiptap/extension-link": "^3.20.4",
 		"@tiptap/extension-placeholder": "^3.20.4",
@@ -49,7 +50,10 @@
 		"marked": "^17.0.4",
 		"phosphor-svelte": "^3.1.0",
 		"svelte-easy-crop": "^5.0.0",
-		"svelte-sonner": "^1.0.8"
+		"svelte-sonner": "^1.0.8",
+		"y-protocols": "^1.0.7",
+		"y-websocket": "^3.0.0",
+		"yjs": "^13.6.30"
 	},
 	"pnpm": {
 		"overrides": {

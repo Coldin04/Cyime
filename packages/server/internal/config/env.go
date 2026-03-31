@@ -65,3 +65,13 @@ func GetOptionalNonNegativeInt(key string) (*int, error) {
 
 	return &value, nil
 }
+
+// GetRealtimeWSURL returns the WebSocket URL for realtime collaboration.
+// Defaults to /api/v1/realtime/ws if not configured.
+func GetRealtimeWSURL() string {
+	url := os.Getenv("REALTIME_WS_URL")
+	if strings.TrimSpace(url) == "" {
+		return "/api/v1/realtime/ws"
+	}
+	return strings.TrimSpace(url)
+}

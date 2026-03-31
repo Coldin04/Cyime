@@ -52,6 +52,9 @@ func main() {
 	// --- ROUTING ---
 	api := app.Group("/api/v1")
 
+	// Client config endpoint (public)
+	api.Get("/config", config.GetClientConfigHandler)
+
 	// Auth routes
 	authRoutes := api.Group("/auth")
 	authRoutes.Get("/config", auth.GetAuthConfig)
@@ -111,6 +114,13 @@ func main() {
 	workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
 	// Batch move files and folders
 	workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
+	// ACL endpoint for realtime collaboration
+	workspaceRoutes.Get("/documents/:id/acl", workspace.GetDocumentACLHandler)
+
+	// Realtime routes for Yjs state management
+	realtimeRoutes := api.Group("/realtime", middleware.Protected())
+	realtimeRoutes.Get("/documents/:id/state", workspace.GetYjsStateHandler)
+	realtimeRoutes.Put("/documents/:id/state", workspace.UpdateYjsStateHandler)
 
 	// Edit routes (protected) - for document content management
 	editRoutes := api.Group("/edit/documents", middleware.Protected())
