@@ -13,6 +13,8 @@
 	import PencilSimple from '~icons/ph/pencil-simple';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
+	import User from '~icons/ph/user';
+	import UsersThree from '~icons/ph/users-three';
 
 let {
 	documentId,
@@ -24,6 +26,7 @@ let {
 	myRole = 'owner',
 	publicAccess = 'private',
 	publicUrl = '',
+	collaborationIndicator = null,
 	readOnly = false,
 	showEditShortcut = false,
 	editHref = '',
@@ -45,6 +48,7 @@ let {
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
 	publicAccess?: 'private' | 'authenticated' | 'public' | string;
 	publicUrl?: string;
+	collaborationIndicator?: { kind: 'single' | 'multi'; label: string } | null;
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -195,7 +199,32 @@ $effect(() => {
 				{/if}
 			{/if}
 
-			<div class="px-2 py-0 text-left leading-3">
+			<div class="flex items-center gap-2 px-2 py-0 text-left leading-3">
+				{#if collaborationIndicator}
+					<div class="group relative flex items-center">
+						<div
+							class={`grid h-5 w-5 place-content-center rounded-full ${
+								collaborationIndicator.kind === 'multi'
+									? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+									: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+							}`}
+							title={collaborationIndicator.label}
+							aria-label={collaborationIndicator.label}
+						>
+							{#if collaborationIndicator.kind === 'multi'}
+								<UsersThree class="h-3.5 w-3.5" />
+							{:else}
+								<User class="h-3.5 w-3.5" />
+							{/if}
+						</div>
+						<div
+							class="pointer-events-none absolute left-0 top-7 z-40 w-max max-w-xs rounded-md bg-zinc-900 px-2 py-1 text-[11px] text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-zinc-100 dark:text-zinc-900"
+						>
+							{collaborationIndicator.label}
+						</div>
+					</div>
+				{/if}
+
 				{#if readOnly}
 					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_read_only()}</span>
 				{:else if isSaving}

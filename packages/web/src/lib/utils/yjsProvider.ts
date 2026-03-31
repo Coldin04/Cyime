@@ -1,220 +1,190 @@
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
+import { HocuspocusProvider } from '@hocuspocus/provider';
 import type { Awareness } from 'y-protocols/awareness';
+import type {
+	onAuthenticationFailedParameters,
+	onStatusParameters,
+	onSyncedParameters
+} from '@hocuspocus/provider';
 
 interface ProviderConfig {
-  wsUrl: string;
-  documentId: string;
-  userId: string;
-  token: string;
+	wsUrl: string;
+	documentId: string;
+	userId: string;
+	token: string;
 }
 
 interface ProviderInstance {
-  provider: WebsocketProvider | null;
-  doc: Y.Doc | null;
-  awareness: Awareness | null;
-  isConnected: boolean;
-  error: string | null;
+	provider: HocuspocusProvider | null;
+	doc: Y.Doc | null;
+	awareness: Awareness | null;
+	isConnected: boolean;
+	isSynced: boolean;
+	error: string | null;
 }
 
 class YjsProviderManager {
-  private instances = new Map<string, ProviderInstance>();
-  private connectionTimeouts = new Map<string, NodeJS.Timeout>();
-  private readonly CONNECTION_TIMEOUT = 10000; // 10s timeout
+	private instances = new Map<string, ProviderInstance>();
+	private readonly CONNECTION_TIMEOUT = 10000;
 
-  /**
-   * 创建或获取 Y.js 协作 provider
-   */
-  async createProvider(config: ProviderConfig): Promise<ProviderInstance> {
-    const docId = config.documentId;
+	async createProvider(config: ProviderConfig): Promise<ProviderInstance> {
+		const docId = config.documentId;
 
-    // 检查是否已有实例
-    if (this.instances.has(docId)) {
-      return this.instances.get(docId)!;
-    }
+		if (this.instances.has(docId)) {
+			return this.instances.get(docId)!;
+		}
 
-    const instance: ProviderInstance = {
-      provider: null,
-      doc: null,
-      awareness: null,
-      isConnected: false,
-      error: null
-    };
+		const instance: ProviderInstance = {
+			provider: null,
+			doc: null,
+			awareness: null,
+			isConnected: false,
+			isSynced: false,
+			error: null
+		};
 
-    try {
-      // 构建 WebSocket URL
-      const wsUrl = this.buildWebSocketUrl(config.wsUrl, config.documentId, config.token);
+		try {
+			const ydoc = new Y.Doc();
+			const provider = new HocuspocusProvider({
+				url: this.buildWebSocketUrl(config.wsUrl),
+				name: `doc:${docId}`,
+				document: ydoc,
+				token: config.token,
+				onStatus: ({ status }: onStatusParameters) => {
+					instance.isConnected = status === 'connected';
+					if (status === 'connected') {
+						instance.error = null;
+						console.log(`[Yjs] Connected to collaboration server for ${docId}`);
+					} else if (status === 'disconnected') {
+						console.warn(`[Yjs] Disconnected from collaboration server for ${docId}`);
+					}
+				},
+				onSynced: ({ state }: onSyncedParameters) => {
+					instance.isSynced = state;
+					if (state) {
+						console.log(`[Yjs] Document ${docId} synced`);
+					}
+				},
+				onAuthenticationFailed: ({ reason }: onAuthenticationFailedParameters) => {
+					instance.error = reason || 'Authentication failed';
+					instance.isConnected = false;
+					console.error(`[Yjs] Authentication failed for ${docId}: ${instance.error}`);
+				}
+			});
 
-      const ydoc = new Y.Doc();
+			instance.provider = provider;
+			instance.doc = ydoc;
+			instance.awareness = provider.awareness;
 
-      // 创建 WebSocket provider
-      const provider = new WebsocketProvider(wsUrl, `doc:${docId}`, ydoc);
+			provider.setAwarenessField('user', {
+				id: config.userId
+			});
 
-      // 设置连接超时检测
-      await this.waitForConnection(provider, this.CONNECTION_TIMEOUT);
+			this.instances.set(docId, instance);
+			await provider.connect();
+			await this.waitForConnection(provider, this.CONNECTION_TIMEOUT);
 
-      instance.provider = provider;
-      instance.doc = ydoc;
-      instance.awareness = provider.awareness;
-      instance.isConnected = true;
+			console.log(`[Yjs] Provider created for document ${docId}`);
+			return instance;
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+			instance.error = errorMsg;
+			instance.isConnected = false;
+			instance.isSynced = false;
 
-      // 监听连接状态变化
-      this.setupConnectionHandlers(docId, provider, instance);
+			console.warn(
+				`[Yjs] Failed to create Hocuspocus provider for ${docId}: ${errorMsg}. Falling back to local mode.`
+			);
 
-      // 保存到实例缓存
-      this.instances.set(docId, instance);
+			if (instance.provider) {
+				instance.provider.destroy();
+				instance.provider = null;
+				instance.awareness = null;
+			}
 
-      console.log(`[Yjs] Provider created for document ${docId}`);
-      return instance;
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      instance.error = errorMsg;
-      instance.isConnected = false;
+			try {
+				const ydoc = new Y.Doc();
+				instance.doc = ydoc;
+			} catch (fallbackError) {
+				console.error('[Yjs] Fallback failed:', fallbackError);
+			}
 
-      console.warn(
-        `[Yjs] Failed to create WebSocket provider for ${docId}: ${errorMsg}. Falling back to local mode.`
-      );
+			this.instances.set(docId, instance);
+			return instance;
+		}
+	}
 
-      // 降级：仍然创建本地 Y.js doc，但不连接 WS
-      try {
-        const ydoc = new Y.Doc();
-        instance.doc = ydoc;
-      } catch (fallbackError) {
-        console.error('[Yjs] Fallback failed:', fallbackError);
-      }
+	private async waitForConnection(provider: HocuspocusProvider, timeout: number): Promise<void> {
+		if (provider.configuration.websocketProvider.status === 'connected') {
+			return;
+		}
 
-      this.instances.set(docId, instance);
-      return instance;
-    }
-  }
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				cleanup();
+				reject(new Error('WebSocket connection timeout'));
+			}, timeout);
 
-  /**
-   * 等待 WebSocket 连接建立
-   */
-  private async waitForConnection(
-    provider: WebsocketProvider,
-    timeout: number
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('WebSocket connection timeout'));
-      }, timeout);
+			const handleStatus = ({ status }: { status: string }) => {
+				if (status === 'connected') {
+					cleanup();
+					resolve();
+				}
+			};
 
-      const checkConnection = () => {
-        // 检查内部 ws 对象的连接状态
-        if ((provider as any).ws?.readyState === 1) {
-          clearTimeout(timer);
-          resolve();
-        } else {
-          setTimeout(checkConnection, 100);
-        }
-      };
+			const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
+				cleanup();
+				reject(new Error(reason || 'Authentication failed'));
+			};
 
-      checkConnection();
-    });
-  }
+			const cleanup = () => {
+				clearTimeout(timer);
+				provider.off('status', handleStatus);
+				provider.off('authenticationFailed', handleAuthenticationFailed);
+			};
 
-  /**
-   * 设置连接状态处理器
-   */
-  private setupConnectionHandlers(
-    docId: string,
-    provider: WebsocketProvider,
-    instance: ProviderInstance
-  ): void {
-    provider.on('status', (event: { status: 'connected' | 'disconnected' | 'connecting' }) => {
-      instance.isConnected = event.status === 'connected';
-      if (event.status === 'connected') {
-        console.log(`[Yjs] Connected to collaboration server for ${docId}`);
-        instance.error = null;
-      } else if (event.status === 'disconnected') {
-        console.warn(`[Yjs] Disconnected from collaboration server for ${docId}`);
-      }
-    });
+			provider.on('status', handleStatus);
+			provider.on('authenticationFailed', handleAuthenticationFailed);
+		});
+	}
 
-    provider.on('connection-error', (event: Event, _provider: WebsocketProvider) => {
-      console.error(`[Yjs] Connection error for ${docId}:`, event);
-      instance.error = 'Connection error occurred';
-      instance.isConnected = false;
-    });
+	private buildWebSocketUrl(baseUrl: string): string {
+		let url = baseUrl;
 
-    provider.on('sync', (isSynced: boolean) => {
-      if (isSynced) {
-        console.log(`[Yjs] Document ${docId} synced`);
-      }
-    });
-  }
+		if (
+			!url.startsWith('http://') &&
+			!url.startsWith('https://') &&
+			!url.startsWith('ws://') &&
+			!url.startsWith('wss://')
+		) {
+			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+			url = `${protocol}//${window.location.host}${url}`;
+		}
 
-  /**
-   * 构建 WebSocket URL
-   */
-  private buildWebSocketUrl(
-    baseUrl: string,
-    documentId: string,
-    token: string
-  ): string {
-    // baseUrl 来自配置，可能是相对路径或完整 URL
-    let url = baseUrl;
+		return url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+	}
 
-    // 如果是相对路径，添加当前协议和主机
-    if (
-      !url.startsWith('http://') &&
-      !url.startsWith('https://') &&
-      !url.startsWith('ws://') &&
-      !url.startsWith('wss://')
-    ) {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      url = `${protocol}//${host}${url}`;
-    }
+	getProvider(documentId: string): ProviderInstance | undefined {
+		return this.instances.get(documentId);
+	}
 
-    // 转换 http/https 为 ws/wss
-    url = url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+	destroyProvider(documentId: string): void {
+		const instance = this.instances.get(documentId);
+		if (!instance) {
+			return;
+		}
 
-    // 添加 token query 参数
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}token=${encodeURIComponent(token)}`;
-  }
+		instance.provider?.destroy();
+		instance.doc?.destroy();
+		this.instances.delete(documentId);
+		console.log(`[Yjs] Provider destroyed for document ${documentId}`);
+	}
 
-  /**
-   * 获取现有 provider 实例
-   */
-  getProvider(documentId: string): ProviderInstance | undefined {
-    return this.instances.get(documentId);
-  }
-
-  /**
-   * 销毁 provider 实例
-   */
-  destroyProvider(documentId: string): void {
-    const instance = this.instances.get(documentId);
-    if (instance) {
-      if (instance.provider) {
-        instance.provider.destroy();
-      }
-      if (instance.doc) {
-        instance.doc.destroy();
-      }
-      this.instances.delete(documentId);
-      console.log(`[Yjs] Provider destroyed for document ${documentId}`);
-    }
-
-    // 清理超时计时器
-    const timeout = this.connectionTimeouts.get(documentId);
-    if (timeout) {
-      clearTimeout(timeout);
-      this.connectionTimeouts.delete(documentId);
-    }
-  }
-
-  /**
-   * 销毁所有实例
-   */
-  destroyAll(): void {
-    for (const [docId] of this.instances) {
-      this.destroyProvider(docId);
-    }
-  }
+	destroyAll(): void {
+		for (const [docId] of this.instances) {
+			this.destroyProvider(docId);
+		}
+	}
 }
 
 export const yjsProvider = new YjsProviderManager();

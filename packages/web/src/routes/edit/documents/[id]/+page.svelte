@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { JSONContent } from '@tiptap/core';
 	import { browser } from '$app/environment';
 	import { beforeNavigate, goto } from '$app/navigation';
@@ -14,6 +14,9 @@
 		readAutoSaveEnabled,
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
+	import { auth } from '$lib/stores/auth';
+	import { realtimeConfig } from '$lib/stores/realtime';
+	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
 	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
 	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
@@ -43,6 +46,10 @@
 	let lastSaved = $state<Date | null>(null);
 	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
+	let collaboration = $state<ProviderInstance | null>(null);
+	let collaborationError = $state<string | null>(null);
+	let collaborationIndicator = $state<{ kind: 'single' | 'multi'; label: string } | null>(null);
+	let detachCollaborationListeners: (() => void) | null = null;
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
@@ -156,6 +163,8 @@
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
 	let pageSignal = $state(get(page));
 	page.subscribe((p) => (pageSignal = p));
+	let authSignal = $state(get(auth));
+	auth.subscribe((state) => (authSignal = state));
 	const documentId = $derived(pageSignal.params?.id);
 
 	beforeNavigate((navigation) => {
@@ -209,6 +218,102 @@
 	function handlePublicAccessChange(nextPublicAccess: string, nextPublicURL: string) {
 		publicAccess = nextPublicAccess;
 		publicUrl = nextPublicURL;
+	}
+
+	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+		if (!authSignal.token) {
+			throw new Error('Missing access token');
+		}
+
+		let wsUrl = get(realtimeConfig).config?.realtimeWsUrl ?? '';
+		if (!wsUrl) {
+			await realtimeConfig.reload();
+			wsUrl = get(realtimeConfig).config?.realtimeWsUrl ?? '';
+		}
+		if (!wsUrl) {
+			throw new Error('Realtime WebSocket URL is not configured');
+		}
+
+		const instance = await yjsProvider.createProvider({
+			wsUrl,
+			documentId: nextDocumentId,
+			userId: authSignal.user?.id ?? 'unknown',
+			token: authSignal.token
+		});
+
+		if (instance.error) {
+			console.warn('[Collaboration] Falling back to local Y.js mode:', instance.error);
+		}
+
+		return instance;
+	}
+
+	function clearCollaborationListeners() {
+		detachCollaborationListeners?.();
+		detachCollaborationListeners = null;
+	}
+
+	function attachCollaborationListeners(instance: ProviderInstance) {
+		clearCollaborationListeners();
+
+		if (!instance.provider) {
+			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+			return;
+		}
+
+		let hasConnectedOnce = instance.isConnected;
+		const syncPresence = (states?: Array<{ clientId: number }>) => {
+			const peerCount =
+				states?.length ??
+				Array.from(instance.provider?.awareness?.getStates().values?.() ?? []).length;
+
+			if (peerCount > 1 && !collaborationError) {
+				collaborationIndicator = { kind: 'multi', label: `当前有 ${peerCount} 人在线协作` };
+				return;
+			}
+
+			if (!collaborationError) {
+				collaborationIndicator = null;
+			}
+		};
+
+		const handleStatus = ({ status }: { status: string }) => {
+			if (status === 'connected') {
+				hasConnectedOnce = true;
+				collaborationError = null;
+				syncPresence();
+				return;
+			}
+
+			if (status === 'disconnected' && hasConnectedOnce) {
+				collaborationError = '协作连接已断开';
+				collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+			}
+		};
+
+		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
+			collaborationError = reason || '协作鉴权失败';
+			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+		};
+
+		const handleAwarenessChange = ({ states }: { states: Array<{ clientId: number }> }) => {
+			syncPresence(states);
+		};
+
+		instance.provider.on('status', handleStatus);
+		instance.provider.on('authenticationFailed', handleAuthenticationFailed);
+		instance.provider.on('awarenessChange', handleAwarenessChange);
+		detachCollaborationListeners = () => {
+			instance.provider?.off('status', handleStatus);
+			instance.provider?.off('authenticationFailed', handleAuthenticationFailed);
+			instance.provider?.off('awarenessChange', handleAwarenessChange);
+		};
+
+		if (instance.error) {
+			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+		} else if (instance.isConnected) {
+			syncPresence();
+		}
 	}
 
 	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
@@ -265,7 +370,7 @@
 
 	// Load document content when ID becomes available
 	$effect(() => {
-		if (documentId) {
+		if (documentId && !authSignal.loading) {
 			isLoading = true;
 			const loadContent = async () => {
 				try {
@@ -299,8 +404,39 @@
 					hasUnsavedChanges = false;
 					lastSaved = null;
 					console.log('[Load] Title loaded:', title);
+					isLoading = false;
+
+					void (async () => {
+						try {
+							const collaborationInstance = await initializeCollaboration(documentId);
+							collaboration = collaborationInstance;
+							collaborationError = collaborationInstance.error;
+							collaborationIndicator = collaborationInstance.error
+								? { kind: 'single', label: '协作连接已断开，当前为单人模式' }
+								: null;
+							attachCollaborationListeners(collaborationInstance);
+						} catch (collaborationInitError) {
+							console.error(
+								'[Collaboration] Failed to initialize realtime collaboration:',
+								collaborationInitError
+							);
+							collaboration = null;
+							collaborationError =
+								collaborationInitError instanceof Error
+									? collaborationInitError.message
+									: 'Unknown collaboration error';
+							collaborationIndicator = {
+								kind: 'single',
+								label: '协作连接已断开，当前为单人模式'
+							};
+							clearCollaborationListeners();
+						}
+					})();
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
+					collaboration = null;
+					collaborationIndicator = null;
+					clearCollaborationListeners();
 					toast.error(
 						error instanceof Error && error.message.trim() !== ''
 							? error.message
@@ -308,10 +444,19 @@
 					);
 					goto('/workspace');
 				} finally {
-					isLoading = false;
+					if (isLoading) {
+						isLoading = false;
+					}
 				}
 			};
 			loadContent();
+		}
+	});
+
+	onDestroy(() => {
+		clearCollaborationListeners();
+		if (documentId) {
+			yjsProvider.destroyProvider(documentId);
 		}
 	});
 
@@ -386,6 +531,7 @@
 				{myRole}
 				{publicAccess}
 				{publicUrl}
+				{collaborationIndicator}
 				readOnly={false}
 				showEditShortcut={false}
 				{isUpdatingImageTarget}
@@ -413,8 +559,10 @@
 						documentId={documentId!}
 						{content}
 						currentImageTargetLabel={currentImageTargetLabel}
+						{collaboration}
 						{isSaving}
 						{hasUnsavedChanges}
+						hydrateManagedContent={refreshSignedImageSources}
 						onSave={saveContent}
 						onContentChange={handleContentChange}
 					/>

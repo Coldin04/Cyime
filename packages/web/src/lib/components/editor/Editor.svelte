@@ -3,6 +3,7 @@
 	import { fade } from 'svelte/transition';
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import Collaboration from '@tiptap/extension-collaboration';
 	import Link from '@tiptap/extension-link';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
@@ -35,15 +36,18 @@
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
+	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
 		documentId: string;
 		content: JSONContent;
 		currentImageTargetLabel?: string;
+		collaboration?: ProviderInstance | null;
 		readOnly?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
+		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
 	}
 
@@ -51,10 +55,12 @@
 		documentId,
 		content,
 		currentImageTargetLabel = '',
+		collaboration = null,
 		readOnly = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
+		hydrateManagedContent,
 		onSave
 	}: Props = $props();
 
@@ -69,6 +75,8 @@
 	let editorRevision = $state(0);
 	let uploadingImageCount = $state(0);
 	let isImageInsertDialogOpen = $state(false);
+	let hasSeededCollaborationContent = false;
+	let hasHydratedManagedImages = false;
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -160,6 +168,10 @@
 
 	function serializeDoc(value: JSONContent): string {
 		return JSON.stringify(normalizeDoc(value));
+	}
+
+	function hasMeaningfulContent(value: JSONContent): boolean {
+		return serializeDoc(value) !== serializeDoc(EMPTY_DOC);
 	}
 
 	function isSupportedImageFile(file: File): boolean {
@@ -400,38 +412,50 @@
 		}
 
 		lastSyncedContent = serializeDoc(content);
+		const extensions: any[] = [
+			StarterKit.configure({
+				heading: {
+					levels: [...headingLevels]
+				},
+				link: false,
+				...(collaboration?.doc ? { undoRedo: false } : {})
+			}),
+			CyImage.configure({
+				inline: false,
+				allowBase64: true
+			}),
+			Link.configure({
+				openOnClick: false,
+				autolink: true,
+				defaultProtocol: 'https'
+			}),
+			Table.configure({
+				resizable: true,
+				HTMLAttributes: {
+					class: 'cw-editor-table'
+				}
+			}),
+			TableRow,
+			TableHeader,
+			TableCell,
+			Placeholder.configure({
+				placeholder: m.editor_placeholder()
+			})
+		];
+
+		if (collaboration?.doc) {
+			extensions.push(
+				Collaboration.configure({
+					document: collaboration.doc
+				})
+			);
+		}
+
 		editor = new Editor({
 			element: editorElement,
 			editable: !readOnly,
-			extensions: [
-				StarterKit.configure({
-					heading: {
-						levels: [...headingLevels]
-					}
-				}),
-				CyImage.configure({
-					inline: false,
-					allowBase64: true
-				}),
-				Link.configure({
-					openOnClick: false,
-					autolink: true,
-					defaultProtocol: 'https'
-				}),
-				Table.configure({
-					resizable: true,
-					HTMLAttributes: {
-						class: 'cw-editor-table'
-					}
-				}),
-				TableRow,
-				TableHeader,
-				TableCell,
-				Placeholder.configure({
-					placeholder: m.editor_placeholder()
-				})
-			],
-			content: toTiptapContent(content),
+			extensions,
+			content: collaboration?.doc ? undefined : toTiptapContent(content),
 			editorProps: {
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				handleDOMEvents: {
@@ -528,14 +552,59 @@
 			}
 		});
 
+		const reconcileCollaborationContent = async () => {
+			if (!editor || !collaboration?.doc) {
+				return;
+			}
+
+			if (!hasSeededCollaborationContent) {
+				hasSeededCollaborationContent = true;
+				const currentDoc = normalizeDoc(editor.getJSON());
+				if (!hasMeaningfulContent(currentDoc) && hasMeaningfulContent(content)) {
+					lastSyncedContent = serializeDoc(content);
+					editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
+				}
+			}
+
+			if (hasHydratedManagedImages || !hydrateManagedContent) {
+				return;
+			}
+
+			hasHydratedManagedImages = true;
+			const currentDoc = normalizeDoc(editor.getJSON());
+			const hydrated = await hydrateManagedContent(currentDoc);
+			if (serializeDoc(hydrated) === serializeDoc(currentDoc)) {
+				return;
+			}
+
+			lastSyncedContent = serializeDoc(hydrated);
+			editor.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
+		};
+
+		const handleSynced = ({ state }: { state: boolean }) => {
+			if (state) {
+				void reconcileCollaborationContent();
+			}
+		};
+
+		if (collaboration?.provider) {
+			collaboration.provider.on('synced', handleSynced);
+			if (collaboration.provider.synced) {
+				void reconcileCollaborationContent();
+			}
+		} else if (collaboration?.doc) {
+			void reconcileCollaborationContent();
+		}
+
 		return () => {
+			collaboration?.provider?.off('synced', handleSynced);
 			editor?.destroy();
 			editor = null;
 		};
 	});
 
 	$effect(() => {
-		if (!editor) {
+		if (!editor || collaboration?.doc) {
 			return;
 		}
 

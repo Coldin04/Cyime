@@ -1,3 +1,5 @@
+import { browser } from '$app/environment';
+import { resolveApiUrl } from '$lib/config/api';
 import { writable } from 'svelte/store';
 
 interface RealtimeConfig {
@@ -18,14 +20,25 @@ function createRealtimeStore() {
 	});
 
 	async function loadConfig() {
+		if (!browser) {
+			set({
+				config: null,
+				loading: false,
+				error: null
+			});
+			return;
+		}
+
 		try {
-			update(state => ({ ...state, loading: true, error: null }));
-			
-			const response = await fetch('/api/v1/config');
+			update((state) => ({ ...state, loading: true, error: null }));
+
+			const response = await fetch(resolveApiUrl('/api/v1/config'), {
+				credentials: 'include'
+			});
 			if (!response.ok) {
 				throw new Error(`Failed to fetch realtime config: ${response.statusText}`);
 			}
-			
+
 			const config: RealtimeConfig = await response.json();
 			set({
 				config,
@@ -43,8 +56,15 @@ function createRealtimeStore() {
 		}
 	}
 
-	// Load config on initialization
-	loadConfig();
+	if (browser) {
+		void loadConfig();
+	} else {
+		set({
+			config: null,
+			loading: false,
+			error: null
+		});
+	}
 
 	return {
 		subscribe,

@@ -24,6 +24,13 @@ interface UserACL {
 	canManageMembers: boolean;
 }
 
+interface RealtimeContext {
+	userId: string;
+	token: string;
+	documentId: string;
+	acl: UserACL;
+}
+
 function verifyJWT(token: string): TokenPayload | null {
 	try {
 		return jwt.verify(token, JWT_SECRET) as TokenPayload;
@@ -114,9 +121,7 @@ const server = new Server({
 
 	// 认证 - 从 WebSocket URL 或 token 字段提取 JWT
 	async onAuthenticate(data: any) {
-		const token =
-			(data?.token as string | undefined) ||
-			extractTokenFromUrl(data?.connection?.request?.url);
+		const token = (data?.token as string | undefined) || extractTokenFromUrl(data?.request?.url);
 
 		if (!token) {
 			throw new Error('No authentication token provided');
@@ -127,46 +132,42 @@ const server = new Server({
 			throw new Error('Invalid or expired token');
 		}
 
-		return {
-			userId: payload.sub,
-			token
-		};
-	},
-
-	// 连接时 - ACL 校验
-	async onConnect(data: any) {
-		const connection = data.connection;
-		const socketData = connection?.socket?.data ?? data?.socket?.data ?? {};
-		const documentId = normalizeDocumentId(connection?.name);
-		const userId = socketData.userId;
-		const token = socketData.token;
-
-		if (!userId || !token) {
-			throw new Error('Missing user context');
+		const documentId = normalizeDocumentId(data?.documentName);
+		if (!documentId) {
+			throw new Error('Missing document ID');
 		}
 
 		const acl = await getUserACL(documentId, token);
 		if (!acl?.canRead) {
-			throw new Error('No read permission for this document');
+			const error = new Error('No read permission for this document') as Error & {
+				reason?: string;
+			};
+			error.reason = 'permission-denied';
+			throw error;
 		}
 
-		connection.socket.data = {
-			...socketData,
-			userId,
+		data.connectionConfig.readOnly = !acl.canEdit;
+
+		return {
+			userId: payload.sub,
 			token,
 			documentId,
 			acl
 		};
+	},
 
-		console.log(`[DOC:${documentId}] User ${userId} connected with role: ${acl.myRole}`);
+	// 连接建立前，认证上下文尚未写入；这里只保留轻量日志。
+	async onConnect(data: any) {
+		const documentId = normalizeDocumentId(data?.documentName);
+		console.log(`[DOC:${documentId}] Incoming connection ${data?.socketId ?? 'unknown-socket'}`);
 	},
 
 	// 加载文档 - 从 Go API 拉 Yjs state
 	async onLoadDocument(data: any) {
-		const connection = data.connection;
 		const document = data.document as Y.Doc;
-		const documentId = normalizeDocumentId(connection?.socket?.data?.documentId || connection?.name);
-		const token = connection?.socket?.data?.token as string | undefined;
+		const context = data.context as RealtimeContext | undefined;
+		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
+		const token = context?.token;
 
 		if (!documentId || !token) {
 			console.warn('Missing context for loading document');
@@ -184,12 +185,12 @@ const server = new Server({
 
 	// 保存文档 - 节流保存到 Go API
 	async onStoreDocument(data: any) {
-		const connection = data.connection;
 		const document = data.document as Y.Doc;
-		const documentId = normalizeDocumentId(connection?.socket?.data?.documentId || connection?.name);
-		const userId = connection?.socket?.data?.userId as string | undefined;
-		const token = connection?.socket?.data?.token as string | undefined;
-		const acl = connection?.socket?.data?.acl as UserACL | undefined;
+		const context = data.context as RealtimeContext | undefined;
+		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
+		const userId = context?.userId;
+		const token = context?.token;
+		const acl = context?.acl;
 
 		if (!acl?.canEdit) {
 			console.warn(
@@ -210,9 +211,9 @@ const server = new Server({
 	},
 
 	async onDisconnect(data: any) {
-		const connection = data.connection;
-		const documentId = normalizeDocumentId(connection?.socket?.data?.documentId || connection?.name);
-		const userId = connection?.socket?.data?.userId as string | undefined;
+		const context = data.context as RealtimeContext | undefined;
+		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
+		const userId = context?.userId;
 
 		if (documentId && userId) {
 			console.log(`[DOC:${documentId}] User ${userId} disconnected`);
