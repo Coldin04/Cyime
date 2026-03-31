@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { HocuspocusProvider } from '@hocuspocus/provider';
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import type { Awareness } from 'y-protocols/awareness';
 import type {
 	onAuthenticationFailedParameters,
@@ -45,8 +45,14 @@ class YjsProviderManager {
 
 		try {
 			const ydoc = new Y.Doc();
-			const provider = new HocuspocusProvider({
+			const websocketProvider = new HocuspocusProviderWebsocket({
 				url: this.buildWebSocketUrl(config.wsUrl),
+				maxAttempts: 2,
+				delay: 800,
+				factor: 1.5
+			});
+			const provider = new HocuspocusProvider({
+				websocketProvider,
 				name: `doc:${docId}`,
 				document: ydoc,
 				token: config.token,
@@ -162,6 +168,11 @@ class YjsProviderManager {
 		}
 
 		return url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+	}
+
+	stopReconnects(documentId: string): void {
+		const instance = this.instances.get(documentId);
+		instance?.provider?.configuration.websocketProvider.disconnect();
 	}
 
 	getProvider(documentId: string): ProviderInstance | undefined {

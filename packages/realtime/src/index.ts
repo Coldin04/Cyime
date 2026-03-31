@@ -3,6 +3,8 @@ import * as Y from 'yjs';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { WebSocketServer, WebSocket } from 'ws';
 
 dotenv.config();
 
@@ -29,7 +31,14 @@ interface RealtimeContext {
 	token: string;
 	documentId: string;
 	acl: UserACL;
+	socketId?: string;
 }
+
+const collaborationSockets = new Map<string, Set<string>>();
+const documentPresence = new Map<string, Map<string, number>>();
+const presenceSubscribers = new Map<string, Set<WebSocket>>();
+const presenceClientMeta = new WeakMap<WebSocket, { token: string; userId: string; documentId?: string }>();
+const presenceWebSocketServer = new WebSocketServer({ noServer: true });
 
 function verifyJWT(token: string): TokenPayload | null {
 	try {
@@ -114,10 +123,127 @@ function normalizeDocumentId(rawName?: string): string {
 	return rawName.startsWith('doc:') ? rawName.slice(4) : rawName;
 }
 
+function setCORSHeaders(request: IncomingMessage, response: ServerResponse) {
+	const origin = request.headers.origin;
+	response.setHeader('Access-Control-Allow-Origin', origin ?? '*');
+	response.setHeader('Vary', 'Origin');
+	response.setHeader('Access-Control-Allow-Credentials', 'true');
+	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+	response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+}
+
+function addCollaborationSocket(documentId: string, socketId: string) {
+	let members = collaborationSockets.get(documentId);
+	if (!members) {
+		members = new Set<string>();
+		collaborationSockets.set(documentId, members);
+	}
+	members.add(socketId);
+}
+
+function removeCollaborationSocket(documentId: string, socketId: string) {
+	const members = collaborationSockets.get(documentId);
+	if (!members) {
+		return;
+	}
+	members.delete(socketId);
+	if (members.size === 0) {
+		collaborationSockets.delete(documentId);
+	}
+}
+
+function getCollaborationSocketCount(documentId: string): number {
+	return collaborationSockets.get(documentId)?.size ?? 0;
+}
+
+function addDocumentPresence(documentId: string, userId: string) {
+	let users = documentPresence.get(documentId);
+	if (!users) {
+		users = new Map<string, number>();
+		documentPresence.set(documentId, users);
+	}
+
+	users.set(userId, (users.get(userId) ?? 0) + 1);
+}
+
+function removeDocumentPresence(documentId: string, userId: string) {
+	const users = documentPresence.get(documentId);
+	if (!users) {
+		return;
+	}
+
+	const nextCount = (users.get(userId) ?? 0) - 1;
+	if (nextCount > 0) {
+		users.set(userId, nextCount);
+		return;
+	}
+
+	users.delete(userId);
+	if (users.size === 0) {
+		documentPresence.delete(documentId);
+	}
+}
+
+function getDocumentPresenceCount(documentId: string): number {
+	return documentPresence.get(documentId)?.size ?? 0;
+}
+
+function broadcastPresence(documentId: string) {
+	const subscribers = presenceSubscribers.get(documentId);
+	if (!subscribers || subscribers.size === 0) {
+		return;
+	}
+
+	const payload = JSON.stringify({
+		type: 'presence',
+		documentId,
+		connectedCount: getDocumentPresenceCount(documentId)
+	});
+
+	for (const subscriber of subscribers) {
+		if (subscriber.readyState === WebSocket.OPEN) {
+			subscriber.send(payload);
+		}
+	}
+}
+
+function removePresenceSubscriber(socket: WebSocket) {
+	const meta = presenceClientMeta.get(socket);
+	if (!meta?.documentId) {
+		return;
+	}
+
+	removeDocumentPresence(meta.documentId, meta.userId);
+	broadcastPresence(meta.documentId);
+
+	const subscribers = presenceSubscribers.get(meta.documentId);
+	if (!subscribers) {
+		return;
+	}
+
+	subscribers.delete(socket);
+	if (subscribers.size === 0) {
+		presenceSubscribers.delete(meta.documentId);
+	}
+}
+
 const server = new Server({
 	port: PORT,
 	address: '0.0.0.0',
 	timeout: 30000,
+	async onUpgrade(data: any) {
+		const request = data.request as IncomingMessage;
+		const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+		if (requestURL.pathname !== '/api/v1/realtime/presence/ws') {
+			return;
+		}
+
+		presenceWebSocketServer.handleUpgrade(data.request, data.socket, data.head, (ws: WebSocket) => {
+			presenceWebSocketServer.emit('connection', ws, data.request);
+		});
+
+		throw null;
+	},
 
 	// 认证 - 从 WebSocket URL 或 token 字段提取 JWT
 	async onAuthenticate(data: any) {
@@ -152,7 +278,8 @@ const server = new Server({
 			userId: payload.sub,
 			token,
 			documentId,
-			acl
+			acl,
+			socketId: data?.socketId
 		};
 	},
 
@@ -160,6 +287,22 @@ const server = new Server({
 	async onConnect(data: any) {
 		const documentId = normalizeDocumentId(data?.documentName);
 		console.log(`[DOC:${documentId}] Incoming connection ${data?.socketId ?? 'unknown-socket'}`);
+	},
+
+	async connected(data: any) {
+		const context = data.context as RealtimeContext | undefined;
+		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
+		const socketId = context?.socketId || data?.socketId;
+
+		if (documentId && socketId) {
+			addCollaborationSocket(documentId, socketId);
+		}
+
+		if (documentId && context?.userId) {
+			console.log(
+				`[DOC:${documentId}] User ${context.userId} connected with role: ${context.acl.myRole} (${getCollaborationSocketCount(documentId)} collab sockets)`
+			);
+		}
 	},
 
 	// 加载文档 - 从 Go API 拉 Yjs state
@@ -214,11 +357,120 @@ const server = new Server({
 		const context = data.context as RealtimeContext | undefined;
 		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
 		const userId = context?.userId;
+		const socketId = context?.socketId || data?.socketId;
+
+		if (documentId && socketId) {
+			removeCollaborationSocket(documentId, socketId);
+		}
 
 		if (documentId && userId) {
-			console.log(`[DOC:${documentId}] User ${userId} disconnected`);
+			console.log(`[DOC:${documentId}] User ${userId} disconnected (${getCollaborationSocketCount(documentId)} collab sockets)`);
 		}
+	},
+
+	async onRequest(data: any) {
+		const request = data.request as IncomingMessage;
+		const response = data.response as ServerResponse;
+		const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+
+		setCORSHeaders(request, response);
+
+		if (request.method === 'OPTIONS') {
+			response.writeHead(204);
+			response.end();
+			throw null;
+		}
+
+		if (requestURL.pathname !== '/api/v1/realtime/presence') {
+			return;
+		}
+
+		const documentId = normalizeDocumentId(requestURL.searchParams.get('documentId') ?? '');
+		if (!documentId) {
+			response.writeHead(400, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'documentId is required' }));
+			throw null;
+		}
+
+		const authHeader = request.headers.authorization ?? '';
+		const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+		const payload = token ? verifyJWT(token) : null;
+		if (!payload?.sub) {
+			response.writeHead(401, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Unauthorized' }));
+			throw null;
+		}
+
+		const acl = await getUserACL(documentId, token);
+		if (!acl?.canRead) {
+			response.writeHead(403, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Forbidden' }));
+			throw null;
+		}
+
+		response.writeHead(200, { 'Content-Type': 'application/json' });
+		response.end(
+			JSON.stringify({
+				documentId,
+				connectedCount: getDocumentPresenceCount(documentId),
+				hasCollaboration: getCollaborationSocketCount(documentId) > 0
+			})
+		);
+		throw null;
 	}
+});
+
+presenceWebSocketServer.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+	const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+	const token = requestURL.searchParams.get('token')?.trim() ?? '';
+	const payload = token ? verifyJWT(token) : null;
+
+	if (!payload?.sub) {
+		socket.close(4401, 'unauthorized');
+		return;
+	}
+
+	presenceClientMeta.set(socket, { token, userId: payload.sub });
+
+	socket.on('message', async (raw: Buffer) => {
+		try {
+			const message = JSON.parse(raw.toString()) as { type?: string; documentId?: string };
+			if (message.type !== 'subscribe' || !message.documentId) {
+				return;
+			}
+
+			const meta = presenceClientMeta.get(socket);
+			if (!meta?.token) {
+				socket.close(4401, 'unauthorized');
+				return;
+			}
+
+			const documentId = normalizeDocumentId(message.documentId);
+			const acl = await getUserACL(documentId, meta.token);
+			if (!acl?.canRead) {
+				socket.close(4403, 'forbidden');
+				return;
+			}
+
+			removePresenceSubscriber(socket);
+
+			let subscribers = presenceSubscribers.get(documentId);
+			if (!subscribers) {
+				subscribers = new Set<WebSocket>();
+				presenceSubscribers.set(documentId, subscribers);
+			}
+			subscribers.add(socket);
+			presenceClientMeta.set(socket, { ...meta, documentId });
+			addDocumentPresence(documentId, meta.userId);
+			broadcastPresence(documentId);
+		} catch (error) {
+			console.error('[Presence] Failed to handle message:', error);
+		}
+	});
+
+	socket.on('close', () => {
+		removePresenceSubscriber(socket);
+	});
 });
 
 server

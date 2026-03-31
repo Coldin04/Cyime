@@ -18,7 +18,7 @@
 	import { realtimeConfig } from '$lib/stores/realtime';
 	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
 	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
-	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
+	import { getDocumentDetails, listDocumentMembers, updateDocumentImageTarget } from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
 		getDocumentImageTargetLabel,
@@ -48,8 +48,18 @@
 	let isLoading = $state(true);
 	let collaboration = $state<ProviderInstance | null>(null);
 	let collaborationError = $state<string | null>(null);
-	let collaborationIndicator = $state<{ kind: 'single' | 'multi'; label: string } | null>(null);
+	let collaborationIndicator = $state<
+		{ kind: 'offline' | 'single' | 'multi'; label: string } | null
+	>(null);
 	let detachCollaborationListeners: (() => void) | null = null;
+	let presenceCount = $state(0);
+	let isSharedDocument = $state(false);
+	let presenceSocket: WebSocket | null = null;
+	let presenceConnected = $state(false);
+	let hasAttemptedPresence = $state(false);
+	let presenceReconnectTimer: number | null = null;
+	let isInitializingCollaboration = $state(false);
+	let lastCollaborationAttemptAt = $state(0);
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
@@ -205,6 +215,9 @@
 		if (isLoading) return;
 		hasUnsavedChanges = true;
 		content = newContent;
+		if (documentId && isSharedDocument && !presenceSocket && presenceReconnectTimer === null) {
+			void connectPresenceSocket(documentId);
+		}
 	}
 
 	function handleTitleChange(newTitle: string) {
@@ -220,7 +233,46 @@
 		publicUrl = nextPublicURL;
 	}
 
-	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+	function updateCollaborationIndicator() {
+		if (!isSharedDocument) {
+			collaborationIndicator = { kind: 'single', label: '当前为个人文档，未启用协作' };
+			return;
+		}
+
+		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
+			collaborationIndicator = { kind: 'offline', label: '协作连接已断开，当前为单人模式' };
+			return;
+		}
+
+		if (presenceCount > 1) {
+			collaborationIndicator = { kind: 'multi', label: `当前有 ${presenceCount} 人在线协作` };
+			return;
+		}
+
+		collaborationIndicator = { kind: 'single', label: '当前仅你在线编辑' };
+	}
+
+	function clearPresenceReconnect() {
+		if (presenceReconnectTimer !== null) {
+			window.clearTimeout(presenceReconnectTimer);
+			presenceReconnectTimer = null;
+		}
+	}
+
+	function schedulePresenceReconnect(nextDocumentId: string) {
+		if (!browser || !isSharedDocument || presenceReconnectTimer !== null) {
+			return;
+		}
+
+		presenceReconnectTimer = window.setTimeout(() => {
+			presenceReconnectTimer = null;
+			if (!presenceSocket && documentId === nextDocumentId) {
+				void connectPresenceSocket(nextDocumentId);
+			}
+		}, 5000);
+	}
+
+	async function resolveRealtimeWsUrl(): Promise<string> {
 		if (!authSignal.token) {
 			throw new Error('Missing access token');
 		}
@@ -234,11 +286,133 @@
 			throw new Error('Realtime WebSocket URL is not configured');
 		}
 
+		return wsUrl;
+	}
+
+	function buildRealtimePresenceURL(wsUrl: string, nextDocumentId: string): string {
+		const normalized =
+			wsUrl.startsWith('ws://') || wsUrl.startsWith('wss://')
+				? wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+				: wsUrl;
+		const url = new URL(normalized, window.location.origin);
+		url.pathname = url.pathname.replace(/\/ws$/, '/presence');
+		url.search = '';
+		url.searchParams.set('documentId', nextDocumentId);
+		return url.toString();
+	}
+
+	function buildRealtimePresenceWSURL(wsUrl: string, nextDocumentId: string, token: string): string {
+		const url = new URL(wsUrl, window.location.origin);
+		url.pathname = url.pathname.replace(/\/ws$/, '/presence/ws');
+		url.search = '';
+		url.searchParams.set('documentId', nextDocumentId);
+		url.searchParams.set('token', token);
+		return url.toString();
+	}
+
+	async function fetchCollaborationPresence(nextDocumentId: string): Promise<number> {
+		const wsUrl = await resolveRealtimeWsUrl();
+		const response = await fetch(buildRealtimePresenceURL(wsUrl, nextDocumentId), {
+			headers: {
+				Authorization: `Bearer ${authSignal.token}`
+			},
+			credentials: 'include'
+		});
+		if (!response.ok) {
+			throw new Error(`Failed to fetch collaboration presence: ${response.status}`);
+		}
+
+		const payload = (await response.json()) as { connectedCount?: number };
+		return typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
+	}
+
+	function clearPresenceSocket() {
+		clearPresenceReconnect();
+		if (!presenceSocket) {
+			return;
+		}
+		presenceSocket.onopen = null;
+		presenceSocket.onmessage = null;
+		presenceSocket.onerror = null;
+		presenceSocket.onclose = null;
+		presenceSocket.close();
+		presenceSocket = null;
+	}
+
+	async function connectPresenceSocket(nextDocumentId: string) {
+		if (!browser || !isSharedDocument || presenceSocket) {
+			return;
+		}
+
+		const token = authSignal.token;
+		if (!token) {
+			return;
+		}
+
+		hasAttemptedPresence = true;
+		const wsUrl = await resolveRealtimeWsUrl();
+		const socket = new WebSocket(buildRealtimePresenceWSURL(wsUrl, nextDocumentId, token));
+		presenceSocket = socket;
+
+		socket.onopen = () => {
+			presenceConnected = true;
+			collaborationError = null;
+			updateCollaborationIndicator();
+			socket.send(JSON.stringify({ type: 'subscribe', documentId: nextDocumentId }));
+		};
+
+		socket.onmessage = (event) => {
+			try {
+				const payload = JSON.parse(event.data as string) as {
+					type?: string;
+					connectedCount?: number;
+				};
+				if (payload.type !== 'presence') {
+					return;
+				}
+
+				presenceCount = typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
+				collaborationError = null;
+				updateCollaborationIndicator();
+				if (presenceCount >= 2) {
+					void startCollaboration(nextDocumentId, 'presence');
+				}
+			} catch (error) {
+				console.error('[Presence] Failed to parse payload:', error);
+			}
+		};
+
+		socket.onerror = () => {
+			presenceConnected = false;
+			collaborationError = 'presence-disconnected';
+			updateCollaborationIndicator();
+		};
+
+		socket.onclose = () => {
+			if (presenceSocket === socket) {
+				presenceSocket = null;
+			}
+			presenceConnected = false;
+			if (isSharedDocument) {
+				collaborationError = 'presence-disconnected';
+				updateCollaborationIndicator();
+				schedulePresenceReconnect(nextDocumentId);
+			}
+		};
+	}
+
+	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+		const wsUrl = await resolveRealtimeWsUrl();
+		const token = authSignal.token;
+		if (!token) {
+			throw new Error('Missing access token');
+		}
+
 		const instance = await yjsProvider.createProvider({
 			wsUrl,
 			documentId: nextDocumentId,
 			userId: authSignal.user?.id ?? 'unknown',
-			token: authSignal.token
+			token
 		});
 
 		if (instance.error) {
@@ -246,6 +420,55 @@
 		}
 
 		return instance;
+	}
+
+	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
+		if (!isSharedDocument || (presenceCount < 2 && reason !== 'editing')) {
+			return;
+		}
+
+		const now = Date.now();
+		if (
+			isInitializingCollaboration ||
+			(collaboration && !collaborationError) ||
+			(now - lastCollaborationAttemptAt < 10000 && reason !== 'presence')
+		) {
+			return;
+		}
+
+		if (collaborationError && collaboration) {
+			yjsProvider.destroyProvider(nextDocumentId);
+			collaboration = null;
+			clearCollaborationListeners();
+		}
+
+		isInitializingCollaboration = true;
+		lastCollaborationAttemptAt = now;
+		try {
+			const collaborationInstance = await initializeCollaboration(nextDocumentId);
+			if (collaborationInstance.error || !collaborationInstance.provider) {
+				collaboration = null;
+				collaborationError = collaborationInstance.error || '协作连接失败';
+				updateCollaborationIndicator();
+				yjsProvider.destroyProvider(nextDocumentId);
+				return;
+			}
+
+			collaboration = collaborationInstance;
+			collaborationError = null;
+			attachCollaborationListeners(collaborationInstance);
+		} catch (collaborationInitError) {
+			console.error('[Collaboration] Failed to initialize realtime collaboration:', collaborationInitError);
+			collaboration = null;
+			collaborationError =
+				collaborationInitError instanceof Error
+					? collaborationInitError.message
+					: 'Unknown collaboration error';
+			updateCollaborationIndicator();
+			clearCollaborationListeners();
+		} finally {
+			isInitializingCollaboration = false;
+		}
 	}
 
 	function clearCollaborationListeners() {
@@ -257,43 +480,38 @@
 		clearCollaborationListeners();
 
 		if (!instance.provider) {
-			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+			collaborationError = '协作连接已断开';
+			updateCollaborationIndicator();
 			return;
 		}
 
-		let hasConnectedOnce = instance.isConnected;
 		const syncPresence = (states?: Array<{ clientId: number }>) => {
 			const peerCount =
 				states?.length ??
 				Array.from(instance.provider?.awareness?.getStates().values?.() ?? []).length;
-
-			if (peerCount > 1 && !collaborationError) {
-				collaborationIndicator = { kind: 'multi', label: `当前有 ${peerCount} 人在线协作` };
-				return;
-			}
-
-			if (!collaborationError) {
-				collaborationIndicator = null;
-			}
+			presenceCount = Math.max(peerCount, 1);
+			updateCollaborationIndicator();
 		};
 
 		const handleStatus = ({ status }: { status: string }) => {
 			if (status === 'connected') {
-				hasConnectedOnce = true;
 				collaborationError = null;
 				syncPresence();
 				return;
 			}
 
-			if (status === 'disconnected' && hasConnectedOnce) {
+			if (status === 'disconnected') {
 				collaborationError = '协作连接已断开';
-				collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+				updateCollaborationIndicator();
 			}
 		};
 
 		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
 			collaborationError = reason || '协作鉴权失败';
-			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+			updateCollaborationIndicator();
+			if (documentId) {
+				yjsProvider.stopReconnects(documentId);
+			}
 		};
 
 		const handleAwarenessChange = ({ states }: { states: Array<{ clientId: number }> }) => {
@@ -310,9 +528,12 @@
 		};
 
 		if (instance.error) {
-			collaborationIndicator = { kind: 'single', label: '协作连接已断开，当前为单人模式' };
+			collaborationError = instance.error;
+			updateCollaborationIndicator();
 		} else if (instance.isConnected) {
 			syncPresence();
+		} else {
+			updateCollaborationIndicator();
 		}
 	}
 
@@ -376,12 +597,16 @@
 				try {
 					console.log('[Load] Loading document for ID:', documentId);
 					// Load document details (for title) and content in parallel
-					const [details, data, configs] = await Promise.all([
+					const [details, data, configs, members] = await Promise.all([
 						getDocumentDetails(documentId),
 						getDocumentContent(documentId),
 						getImageBedConfigs().catch((error) => {
 							console.error('[Load] Failed to load image bed configs:', error);
 							return [] as ImageBedConfig[];
+						}),
+						listDocumentMembers(documentId).catch((error) => {
+							console.error('[Load] Failed to load document members:', error);
+							return null;
 						})
 					]);
 
@@ -401,41 +626,51 @@
 					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
+					isSharedDocument =
+						(members?.members.length ?? 0) > 1 ||
+						(details.publicAccess ?? 'private') !== 'private' ||
+						(details.myRole ?? 'owner') !== 'owner';
 					hasUnsavedChanges = false;
 					lastSaved = null;
+					presenceCount = 0;
+					presenceConnected = false;
+					hasAttemptedPresence = false;
+					collaborationError = null;
+					clearPresenceSocket();
+					clearCollaborationListeners();
+					if (documentId) {
+						yjsProvider.destroyProvider(documentId);
+					}
+					collaboration = null;
+					updateCollaborationIndicator();
 					console.log('[Load] Title loaded:', title);
 					isLoading = false;
 
 					void (async () => {
 						try {
-							const collaborationInstance = await initializeCollaboration(documentId);
-							collaboration = collaborationInstance;
-							collaborationError = collaborationInstance.error;
-							collaborationIndicator = collaborationInstance.error
-								? { kind: 'single', label: '协作连接已断开，当前为单人模式' }
-								: null;
-							attachCollaborationListeners(collaborationInstance);
-						} catch (collaborationInitError) {
-							console.error(
-								'[Collaboration] Failed to initialize realtime collaboration:',
-								collaborationInitError
-							);
-							collaboration = null;
-							collaborationError =
-								collaborationInitError instanceof Error
-									? collaborationInitError.message
-									: 'Unknown collaboration error';
-							collaborationIndicator = {
-								kind: 'single',
-								label: '协作连接已断开，当前为单人模式'
-							};
-							clearCollaborationListeners();
+							presenceCount = isSharedDocument ? await fetchCollaborationPresence(documentId) : 0;
+							updateCollaborationIndicator();
+							if (isSharedDocument) {
+								await connectPresenceSocket(documentId);
+							}
+							if (presenceCount >= 2) {
+								await startCollaboration(documentId, 'presence');
+							}
+						} catch (presenceError) {
+							console.error('[Collaboration] Failed to fetch presence:', presenceError);
+							presenceCount = 0;
+							presenceConnected = false;
+							hasAttemptedPresence = isSharedDocument;
+							collaborationError = isSharedDocument ? 'presence-disconnected' : null;
+							updateCollaborationIndicator();
 						}
 					})();
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
 					collaboration = null;
 					collaborationIndicator = null;
+					isSharedDocument = false;
+					clearPresenceSocket();
 					clearCollaborationListeners();
 					toast.error(
 						error instanceof Error && error.message.trim() !== ''
@@ -454,6 +689,7 @@
 	});
 
 	onDestroy(() => {
+		clearPresenceSocket();
 		clearCollaborationListeners();
 		if (documentId) {
 			yjsProvider.destroyProvider(documentId);
@@ -488,6 +724,7 @@
 			window.clearInterval(timer);
 		};
 	});
+
 
 	onMount(() => {
 		const handleKeydown = (event: KeyboardEvent) => {

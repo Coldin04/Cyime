@@ -15,6 +15,7 @@
 	import X from '~icons/ph/x';
 	import User from '~icons/ph/user';
 	import UsersThree from '~icons/ph/users-three';
+	import WarningCircle from '~icons/ph/warning-circle';
 
 let {
 	documentId,
@@ -48,7 +49,7 @@ let {
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
 	publicAccess?: 'private' | 'authenticated' | 'public' | string;
 	publicUrl?: string;
-	collaborationIndicator?: { kind: 'single' | 'multi'; label: string } | null;
+	collaborationIndicator?: { kind: 'offline' | 'single' | 'multi'; label: string } | null;
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -203,16 +204,20 @@ $effect(() => {
 				{#if collaborationIndicator}
 					<div class="group relative flex items-center">
 						<div
-							class={`grid h-5 w-5 place-content-center rounded-full ${
-								collaborationIndicator.kind === 'multi'
-									? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-									: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+							class={`grid h-5 w-5 place-content-center ${
+								collaborationIndicator.kind === 'offline'
+									? 'text-amber-500 dark:text-amber-300'
+									: collaborationIndicator.kind === 'multi'
+										? 'text-emerald-600 dark:text-emerald-400'
+										: 'text-zinc-400 dark:text-zinc-500'
 							}`}
 							title={collaborationIndicator.label}
 							aria-label={collaborationIndicator.label}
 						>
 							{#if collaborationIndicator.kind === 'multi'}
 								<UsersThree class="h-3.5 w-3.5" />
+							{:else if collaborationIndicator.kind === 'offline'}
+								<WarningCircle class="h-3.5 w-3.5" />
 							{:else}
 								<User class="h-3.5 w-3.5" />
 							{/if}
