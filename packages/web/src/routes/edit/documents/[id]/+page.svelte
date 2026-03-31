@@ -49,7 +49,7 @@
 	let collaboration = $state<ProviderInstance | null>(null);
 	let collaborationError = $state<string | null>(null);
 	let collaborationIndicator = $state<
-		{ kind: 'offline' | 'single' | 'multi'; label: string } | null
+		{ kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string } | null
 	>(null);
 	let detachCollaborationListeners: (() => void) | null = null;
 	let presenceCount = $state(0);
@@ -60,6 +60,7 @@
 	let presenceReconnectTimer: number | null = null;
 	let isInitializingCollaboration = $state(false);
 	let lastCollaborationAttemptAt = $state(0);
+	let isYjsConnected = $state(false);
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
@@ -239,13 +240,21 @@
 			return;
 		}
 
-		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
-			collaborationIndicator = { kind: 'offline', label: '协作连接已断开，当前为单人模式' };
+		if (presenceCount > 1) {
+			if (isYjsConnected) {
+				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
+				return;
+			}
+
+			collaborationIndicator = {
+				kind: 'multi-pending',
+				label: `检测到 ${presenceCount} 个会话在线，但协作连接尚未建立`
+			};
 			return;
 		}
 
-		if (presenceCount > 1) {
-			collaborationIndicator = { kind: 'multi', label: `当前有 ${presenceCount} 人在线协作` };
+		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
+			collaborationIndicator = { kind: 'single-offline', label: '协作连接已断开，当前为单人模式' };
 			return;
 		}
 
@@ -351,12 +360,14 @@
 
 		hasAttemptedPresence = true;
 		const wsUrl = await resolveRealtimeWsUrl();
+		console.log(`[Presence] Opening presence socket for ${nextDocumentId}`);
 		const socket = new WebSocket(buildRealtimePresenceWSURL(wsUrl, nextDocumentId, token));
 		presenceSocket = socket;
 
 		socket.onopen = () => {
 			presenceConnected = true;
 			collaborationError = null;
+			console.log(`[Presence] Connected for ${nextDocumentId}`);
 			updateCollaborationIndicator();
 			socket.send(JSON.stringify({ type: 'subscribe', documentId: nextDocumentId }));
 		};
@@ -373,8 +384,10 @@
 
 				presenceCount = typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
 				collaborationError = null;
+				console.log(`[Presence] ${nextDocumentId} has ${presenceCount} active session(s)`);
 				updateCollaborationIndicator();
 				if (presenceCount >= 2) {
+					console.log(`[Collaboration] Presence threshold reached for ${nextDocumentId}, starting Yjs`);
 					void startCollaboration(nextDocumentId, 'presence');
 				}
 			} catch (error) {
@@ -385,6 +398,7 @@
 		socket.onerror = () => {
 			presenceConnected = false;
 			collaborationError = 'presence-disconnected';
+			console.warn(`[Presence] Socket error for ${nextDocumentId}`);
 			updateCollaborationIndicator();
 		};
 
@@ -395,6 +409,7 @@
 			presenceConnected = false;
 			if (isSharedDocument) {
 				collaborationError = 'presence-disconnected';
+				console.warn(`[Presence] Socket closed for ${nextDocumentId}`);
 				updateCollaborationIndicator();
 				schedulePresenceReconnect(nextDocumentId);
 			}
@@ -424,6 +439,9 @@
 
 	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
 		if (!isSharedDocument || (presenceCount < 2 && reason !== 'editing')) {
+			console.log(
+				`[Collaboration] Start skipped for ${nextDocumentId}: shared=${isSharedDocument}, presenceCount=${presenceCount}, reason=${reason}`
+			);
 			return;
 		}
 
@@ -433,6 +451,9 @@
 			(collaboration && !collaborationError) ||
 			(now - lastCollaborationAttemptAt < 10000 && reason !== 'presence')
 		) {
+			console.log(
+				`[Collaboration] Start skipped for ${nextDocumentId}: initializing=${isInitializingCollaboration}, existing=${Boolean(collaboration && !collaborationError)}, recent=${now - lastCollaborationAttemptAt < 10000 && reason !== 'presence'}`
+			);
 			return;
 		}
 
@@ -445,10 +466,15 @@
 		isInitializingCollaboration = true;
 		lastCollaborationAttemptAt = now;
 		try {
+			console.log(`[Collaboration] Starting Yjs for ${nextDocumentId} via ${reason}`);
 			const collaborationInstance = await initializeCollaboration(nextDocumentId);
 			if (collaborationInstance.error || !collaborationInstance.provider) {
 				collaboration = null;
 				collaborationError = collaborationInstance.error || '协作连接失败';
+				isYjsConnected = false;
+				console.warn(
+					`[Collaboration] Yjs unavailable for ${nextDocumentId}: ${collaborationError}`
+				);
 				updateCollaborationIndicator();
 				yjsProvider.destroyProvider(nextDocumentId);
 				return;
@@ -456,6 +482,7 @@
 
 			collaboration = collaborationInstance;
 			collaborationError = null;
+			console.log(`[Collaboration] Yjs provider ready for ${nextDocumentId}`);
 			attachCollaborationListeners(collaborationInstance);
 		} catch (collaborationInitError) {
 			console.error('[Collaboration] Failed to initialize realtime collaboration:', collaborationInitError);
@@ -464,6 +491,7 @@
 				collaborationInitError instanceof Error
 					? collaborationInitError.message
 					: 'Unknown collaboration error';
+			isYjsConnected = false;
 			updateCollaborationIndicator();
 			clearCollaborationListeners();
 		} finally {
@@ -481,6 +509,7 @@
 
 		if (!instance.provider) {
 			collaborationError = '协作连接已断开';
+			isYjsConnected = false;
 			updateCollaborationIndicator();
 			return;
 		}
@@ -496,18 +525,24 @@
 		const handleStatus = ({ status }: { status: string }) => {
 			if (status === 'connected') {
 				collaborationError = null;
+				isYjsConnected = true;
+				console.log(`[Yjs] Connected for ${documentId}`);
 				syncPresence();
 				return;
 			}
 
 			if (status === 'disconnected') {
 				collaborationError = '协作连接已断开';
+				isYjsConnected = false;
+				console.warn(`[Yjs] Disconnected for ${documentId}`);
 				updateCollaborationIndicator();
 			}
 		};
 
 		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
 			collaborationError = reason || '协作鉴权失败';
+			isYjsConnected = false;
+			console.warn(`[Yjs] Authentication failed for ${documentId}: ${collaborationError}`);
 			updateCollaborationIndicator();
 			if (documentId) {
 				yjsProvider.stopReconnects(documentId);
@@ -529,10 +564,13 @@
 
 		if (instance.error) {
 			collaborationError = instance.error;
+			isYjsConnected = false;
 			updateCollaborationIndicator();
 		} else if (instance.isConnected) {
+			isYjsConnected = true;
 			syncPresence();
 		} else {
+			isYjsConnected = false;
 			updateCollaborationIndicator();
 		}
 	}
@@ -636,6 +674,7 @@
 					presenceConnected = false;
 					hasAttemptedPresence = false;
 					collaborationError = null;
+					isYjsConnected = false;
 					clearPresenceSocket();
 					clearCollaborationListeners();
 					if (documentId) {
@@ -662,6 +701,7 @@
 							presenceConnected = false;
 							hasAttemptedPresence = isSharedDocument;
 							collaborationError = isSharedDocument ? 'presence-disconnected' : null;
+							isYjsConnected = false;
 							updateCollaborationIndicator();
 						}
 					})();
@@ -670,6 +710,7 @@
 					collaboration = null;
 					collaborationIndicator = null;
 					isSharedDocument = false;
+					isYjsConnected = false;
 					clearPresenceSocket();
 					clearCollaborationListeners();
 					toast.error(
@@ -792,17 +833,19 @@
 						<p>{m.edit_document_editor_under_construction()}</p>
 					</div>
 				{:else}
-					<Editor
-						documentId={documentId!}
-						{content}
-						currentImageTargetLabel={currentImageTargetLabel}
-						{collaboration}
-						{isSaving}
-						{hasUnsavedChanges}
-						hydrateManagedContent={refreshSignedImageSources}
-						onSave={saveContent}
-						onContentChange={handleContentChange}
-					/>
+					{#key collaboration?.doc ? `collab:${documentId}` : `local:${documentId}`}
+						<Editor
+							documentId={documentId!}
+							{content}
+							currentImageTargetLabel={currentImageTargetLabel}
+							{collaboration}
+							{isSaving}
+							{hasUnsavedChanges}
+							hydrateManagedContent={refreshSignedImageSources}
+							onSave={saveContent}
+							onContentChange={handleContentChange}
+						/>
+					{/key}
 				{/if}
 			{:else}
 				<div class="prose dark:prose-invert">

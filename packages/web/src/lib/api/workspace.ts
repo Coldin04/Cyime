@@ -413,6 +413,13 @@ export async function leaveSharedDocument(documentId: string): Promise<{ success
 export async function listDocumentMembers(documentId: string): Promise<ShareDocumentResponse> {
 	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`);
 
+	if (response.status === 404) {
+		return {
+			documentId,
+			members: []
+		};
+	}
+
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to fetch document members');

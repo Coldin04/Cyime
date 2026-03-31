@@ -4,6 +4,7 @@
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
 	import Collaboration from '@tiptap/extension-collaboration';
+	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
@@ -34,6 +35,7 @@
 	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
+	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
 	import type { ProviderInstance } from '$lib/utils/yjsProvider';
@@ -89,6 +91,59 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
+	const collaborationCursorPalette = [
+		'#0f766e',
+		'#0f766e',
+		'#2563eb',
+		'#9333ea',
+		'#ea580c',
+		'#dc2626',
+		'#ca8a04',
+		'#1d4ed8',
+		'#be123c',
+		'#0891b2'
+	] as const;
+
+	function hashString(value: string): number {
+		let hash = 0;
+		for (let index = 0; index < value.length; index += 1) {
+			hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+		}
+		return hash;
+	}
+
+	function getCollaborationUser() {
+		const authState = $auth;
+		const id = authState.user?.id ?? collaboration?.provider?.awareness?.clientID?.toString() ?? 'unknown';
+		const name =
+			authState.user?.displayName?.trim() ||
+			authState.user?.email?.trim() ||
+			`协作者 ${id.slice(0, 6)}`;
+		const color = collaborationCursorPalette[hashString(id) % collaborationCursorPalette.length];
+
+		return { id, name, color };
+	}
+
+	function renderCollaborationCursor(user: { name?: string; color?: string }) {
+		const cursor = document.createElement('span');
+		cursor.classList.add('collaboration-cursor__caret');
+		cursor.style.setProperty('--user-color', user.color ?? '#0f766e');
+
+		const label = document.createElement('span');
+		label.classList.add('collaboration-cursor__label', 'cw-cursor-label');
+
+		const dot = document.createElement('span');
+		dot.classList.add('cw-cursor-dot');
+		dot.style.backgroundColor = user.color ?? '#0f766e';
+
+		const text = document.createElement('span');
+		text.classList.add('cw-cursor-name');
+		text.textContent = user.name || '协作者';
+
+		label.append(dot, text);
+		cursor.append(label);
+		return cursor;
+	}
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -412,6 +467,7 @@
 		}
 
 		lastSyncedContent = serializeDoc(content);
+		const collaborationUser = getCollaborationUser();
 		const extensions: any[] = [
 			StarterKit.configure({
 				heading: {
@@ -444,9 +500,15 @@
 		];
 
 		if (collaboration?.doc) {
+			collaboration.provider?.setAwarenessField('user', collaborationUser);
 			extensions.push(
 				Collaboration.configure({
 					document: collaboration.doc
+				}),
+				CollaborationCursor.configure({
+					provider: collaboration.provider,
+					user: collaborationUser,
+					render: renderCollaborationCursor
 				})
 			);
 		}

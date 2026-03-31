@@ -49,7 +49,9 @@ let {
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
 	publicAccess?: 'private' | 'authenticated' | 'public' | string;
 	publicUrl?: string;
-	collaborationIndicator?: { kind: 'offline' | 'single' | 'multi'; label: string } | null;
+	collaborationIndicator?:
+		| { kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string }
+		| null;
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -205,7 +207,8 @@ $effect(() => {
 					<div class="group relative flex items-center">
 						<div
 							class={`grid h-5 w-5 place-content-center ${
-								collaborationIndicator.kind === 'offline'
+								collaborationIndicator.kind === 'single-offline' ||
+								collaborationIndicator.kind === 'multi-pending'
 									? 'text-amber-500 dark:text-amber-300'
 									: collaborationIndicator.kind === 'multi'
 										? 'text-emerald-600 dark:text-emerald-400'
@@ -214,9 +217,9 @@ $effect(() => {
 							title={collaborationIndicator.label}
 							aria-label={collaborationIndicator.label}
 						>
-							{#if collaborationIndicator.kind === 'multi'}
+							{#if collaborationIndicator.kind === 'multi' || collaborationIndicator.kind === 'multi-pending'}
 								<UsersThree class="h-3.5 w-3.5" />
-							{:else if collaborationIndicator.kind === 'offline'}
+							{:else if collaborationIndicator.kind === 'single-offline'}
 								<WarningCircle class="h-3.5 w-3.5" />
 							{:else}
 								<User class="h-3.5 w-3.5" />

@@ -31,6 +31,7 @@ class YjsProviderManager {
 		const docId = config.documentId;
 
 		if (this.instances.has(docId)) {
+			console.log(`[Yjs] Reusing cached provider for document ${docId}`);
 			return this.instances.get(docId)!;
 		}
 
@@ -47,8 +48,11 @@ class YjsProviderManager {
 			const ydoc = new Y.Doc();
 			const websocketProvider = new HocuspocusProviderWebsocket({
 				url: this.buildWebSocketUrl(config.wsUrl),
+				autoConnect: false,
 				maxAttempts: 2,
-				delay: 800,
+				initialDelay: 0,
+				delay: 1000,
+				minDelay: 1000,
 				factor: 1.5
 			});
 			const provider = new HocuspocusProvider({
@@ -85,9 +89,18 @@ class YjsProviderManager {
 			provider.setAwarenessField('user', {
 				id: config.userId
 			});
+			provider.attach();
+			console.log(`[Yjs] Provider attached for document ${docId}`);
 
 			this.instances.set(docId, instance);
-			await provider.connect();
+			console.log(`[Yjs] Creating provider for document ${docId}`);
+			console.log(`[Yjs] Opening websocket for document ${docId}`);
+			void websocketProvider.connect().catch((error: unknown) => {
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				instance.error = errorMsg;
+				instance.isConnected = false;
+				console.error(`[Yjs] Websocket connect failed for ${docId}: ${errorMsg}`);
+			});
 			await this.waitForConnection(provider, this.CONNECTION_TIMEOUT);
 
 			console.log(`[Yjs] Provider created for document ${docId}`);
@@ -122,16 +135,19 @@ class YjsProviderManager {
 
 	private async waitForConnection(provider: HocuspocusProvider, timeout: number): Promise<void> {
 		if (provider.configuration.websocketProvider.status === 'connected') {
+			console.log(`[Yjs] Websocket already connected for ${provider.configuration.name}`);
 			return;
 		}
 
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				cleanup();
+				console.warn(`[Yjs] Websocket timed out for ${provider.configuration.name}`);
 				reject(new Error('WebSocket connection timeout'));
 			}, timeout);
 
 			const handleStatus = ({ status }: { status: string }) => {
+				console.log(`[Yjs] Status for ${provider.configuration.name}: ${status}`);
 				if (status === 'connected') {
 					cleanup();
 					resolve();
@@ -140,6 +156,7 @@ class YjsProviderManager {
 
 			const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
 				cleanup();
+				console.warn(`[Yjs] Authentication rejected for ${provider.configuration.name}: ${reason}`);
 				reject(new Error(reason || 'Authentication failed'));
 			};
 
