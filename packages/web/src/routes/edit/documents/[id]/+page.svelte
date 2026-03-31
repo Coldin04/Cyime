@@ -24,8 +24,8 @@
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
-let title = $state('');
-let manualExcerpt = $state('');
+	let title = $state('');
+	let manualExcerpt = $state('');
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -272,6 +272,11 @@ let manualExcerpt = $state('');
 						})
 					]);
 
+					if (details.myRole === 'viewer') {
+						await goto(`/view/documents/${documentId}`);
+						return;
+					}
+
 					const loadedContent = data.contentJson ?? EMPTY_DOC;
 					imageBedConfigs = configs;
 					content = await refreshSignedImageSources(loadedContent);
@@ -367,6 +372,8 @@ let manualExcerpt = $state('');
 				{documentType}
 				{preferredImageTargetId}
 				{availableImageTargets}
+				readOnly={false}
+				showEditShortcut={false}
 				{isUpdatingImageTarget}
 				{isSaving}
 				{lastSaved}

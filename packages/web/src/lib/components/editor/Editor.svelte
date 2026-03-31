@@ -17,6 +17,7 @@
 	import ListBullets from '~icons/ph/list-bullets';
 	import ListNumbers from '~icons/ph/list-numbers';
 	import FloppyDisk from '~icons/ph/floppy-disk';
+	import Eye from '~icons/ph/eye';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
 	import Quotes from '~icons/ph/quotes';
@@ -39,6 +40,7 @@
 		documentId: string;
 		content: JSONContent;
 		currentImageTargetLabel?: string;
+		readOnly?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
@@ -49,6 +51,7 @@
 		documentId,
 		content,
 		currentImageTargetLabel = '',
+		readOnly = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
@@ -399,6 +402,7 @@
 		lastSyncedContent = serializeDoc(content);
 		editor = new Editor({
 			element: editorElement,
+			editable: !readOnly,
 			extensions: [
 				StarterKit.configure({
 					heading: {
@@ -432,6 +436,9 @@
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				handleDOMEvents: {
 					paste: (_view, event) => {
+						if (readOnly) {
+							return false;
+						}
 						const clipboardEvent = event as ClipboardEvent;
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
@@ -508,6 +515,9 @@
 				}
 			},
 			onUpdate: ({ editor }) => {
+				if (readOnly) {
+					return;
+				}
 				const nextContent = editor.getJSON();
 				lastSyncedContent = serializeDoc(nextContent);
 				onContentChange?.(nextContent);
@@ -773,21 +783,30 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div class="overflow-visible">
-			<div
-				class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
-			>
-			<button
-				type="button"
-				title={m.editor_toolbar_save_with_shortcut()}
-				aria-label={m.editor_toolbar_save_with_shortcut()}
-				disabled={isSaving || !hasUnsavedChanges}
-				onclick={() => onSave?.()}
+	{#if !readOnly}
+		<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+			<div class="overflow-visible">
+				<div
+					class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
+				>
+				<button
+					type="button"
+					title={m.editor_toolbar_save_with_shortcut()}
+					aria-label={m.editor_toolbar_save_with_shortcut()}
+					disabled={isSaving || !hasUnsavedChanges}
+					onclick={() => onSave?.()}
+					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+				>
+					<FloppyDisk class="h-4 w-4" />
+				</button>
+			<a
+				href={`/view/documents/${documentId}`}
+				title={m.editor_toolbar_open_reader_mode()}
+				aria-label={m.editor_toolbar_open_reader_mode()}
 				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
-				<FloppyDisk class="h-4 w-4" />
-			</button>
+				<Eye class="h-4 w-4" />
+			</a>
 			<button
 				type="button"
 				title={m.editor_toolbar_undo_with_shortcut()}
@@ -992,22 +1011,25 @@
 						instance.chain().focus().deleteTable().run();
 					})}
 				/>
+				</div>
 			</div>
 		</div>
-	</div>
+	{/if}
 
 	<div class="h-full w-full overflow-y-auto">
 		<div bind:this={editorElement} class="h-full w-full"></div>
 	</div>
 </div>
 
-<ImageInsertDialog
-	bind:open={isImageInsertDialogOpen}
-	accept={imageUploadAccept}
-	isUploading={uploadingImageCount > 0}
-	currentTargetLabel={currentImageTargetLabel}
-	onFilesSelected={(files) => {
-		void uploadAndInsertImages(files, 'picker');
-	}}
-	onInsertLink={async (src) => insertExternalImage(src)}
-/>
+{#if !readOnly}
+	<ImageInsertDialog
+		bind:open={isImageInsertDialogOpen}
+		accept={imageUploadAccept}
+		isUploading={uploadingImageCount > 0}
+		currentTargetLabel={currentImageTargetLabel}
+		onFilesSelected={(files) => {
+			void uploadAndInsertImages(files, 'picker');
+		}}
+		onInsertLink={async (src) => insertExternalImage(src)}
+	/>
+{/if}

@@ -69,7 +69,11 @@
 	}
 
 	function openDocument() {
-		goto(`/edit/documents/${doc.documentId}`);
+		const targetRoute =
+			doc.myRole === 'viewer'
+				? `/view/documents/${doc.documentId}`
+				: `/edit/documents/${doc.documentId}`;
+		goto(targetRoute);
 	}
 
 	function handleClick() {

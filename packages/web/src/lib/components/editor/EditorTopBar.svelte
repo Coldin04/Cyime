@@ -10,6 +10,7 @@
 	import Home from '~icons/ph/house';
 	import Search from '~icons/ph/magnifying-glass';
 	import FileText from '~icons/ph/file-text';
+	import PencilSimple from '~icons/ph/pencil-simple';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
 
@@ -20,6 +21,9 @@ let {
 	documentType = 'rich_text',
 	preferredImageTargetId,
 	availableImageTargets,
+	readOnly = false,
+	showEditShortcut = false,
+	editHref = '',
 	isUpdatingImageTarget = false,
 	isSaving,
 	lastSaved,
@@ -34,6 +38,9 @@ let {
 	documentType?: string;
 	preferredImageTargetId: string;
 	availableImageTargets: DocumentImageTargetOption[];
+	readOnly?: boolean;
+	showEditShortcut?: boolean;
+	editHref?: string;
 	isUpdatingImageTarget?: boolean;
 	isSaving: boolean;
 	lastSaved: Date | null;
@@ -66,6 +73,7 @@ $effect(() => {
 });
 
 	async function startEditingTitle() {
+		if (readOnly) return;
 		editingTitle = title;
 		isEditingTitle = true;
 		// Focus the input after render
@@ -157,22 +165,30 @@ $effect(() => {
 					</button>
 				</div>
 			{:else}
-				<button
-					onclick={startEditingTitle}
-					class="group flex min-w-0 items-center"
-					title={m.editor_topbar_edit_title_tooltip()}
-				>
-					<h1
-						class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
-						title={title}
-					>
+				{#if readOnly}
+					<h1 class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 dark:text-zinc-100" title={title}>
 						{title}
 					</h1>
-				</button>
+				{:else}
+					<button
+						onclick={startEditingTitle}
+						class="group flex min-w-0 items-center"
+						title={m.editor_topbar_edit_title_tooltip()}
+					>
+						<h1
+							class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
+							title={title}
+						>
+							{title}
+						</h1>
+					</button>
+				{/if}
 			{/if}
 
 			<div class="px-2 py-0 text-left leading-3">
-				{#if isSaving}
+				{#if readOnly}
+					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_read_only()}</span>
+				{:else if isSaving}
 					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_saving()}</span>
 				{:else if hasUnsavedChanges}
 					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_unsaved()}</span>
@@ -189,24 +205,36 @@ $effect(() => {
 
 	<!-- Right Controls -->
 	<div class="flex items-center gap-4 pr-4">
-		<EditorDocumentSettingsDialog
-			{documentId}
-			documentTitle={title}
-			documentManualExcerpt={excerpt}
-			{documentType}
-			currentTargetId={preferredImageTargetId}
-			options={availableImageTargets}
-			isUpdating={isUpdatingImageTarget}
-			onSelect={(targetId) => onImageTargetChange?.(targetId)}
-			onTitleChange={(nextTitle) => {
-				title = nextTitle;
-				onTitleChange?.(nextTitle);
-			}}
-			onManualExcerptChange={(nextExcerpt) => {
-				excerpt = nextExcerpt;
-				onManualExcerptChange?.(nextExcerpt);
-			}}
-		/>
+		{#if !readOnly}
+			<EditorDocumentSettingsDialog
+				{documentId}
+				documentTitle={title}
+				documentManualExcerpt={excerpt}
+				{documentType}
+				currentTargetId={preferredImageTargetId}
+				options={availableImageTargets}
+				isUpdating={isUpdatingImageTarget}
+				onSelect={(targetId) => onImageTargetChange?.(targetId)}
+				onTitleChange={(nextTitle) => {
+					title = nextTitle;
+					onTitleChange?.(nextTitle);
+				}}
+				onManualExcerptChange={(nextExcerpt) => {
+					excerpt = nextExcerpt;
+					onManualExcerptChange?.(nextExcerpt);
+				}}
+			/>
+		{/if}
+		{#if showEditShortcut && editHref}
+			<a
+				href={editHref}
+				class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+				title={m.editor_topbar_open_editor()}
+				aria-label={m.editor_topbar_open_editor()}
+			>
+				<PencilSimple class="h-5 w-5" />
+			</a>
+		{/if}
 		<button
 			class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 			title={m.common_search_placeholder()}

@@ -5,6 +5,7 @@ export type FileItem = {
 	type: 'folder' | 'document';
 	documentType?: 'rich_text' | 'table' | string;
 	preferredImageTargetId?: 'managed-r2' | string;
+	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string | null;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;

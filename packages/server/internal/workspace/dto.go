@@ -19,6 +19,7 @@ type FileItem struct {
 	Type                   string      `json:"type"` // "folder" | "document"
 	DocumentType           *string     `json:"documentType,omitempty"`
 	PreferredImageTargetID *string     `json:"preferredImageTargetId,omitempty"`
+	MyRole                 *string     `json:"myRole,omitempty"`
 	Name                   string      `json:"name"`
 	Description            *string     `json:"description,omitempty"`
 	ParentID               *uuid.UUID  `json:"parentId,omitempty"`

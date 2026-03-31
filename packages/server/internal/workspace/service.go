@@ -444,7 +444,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		}
 
 		for _, m := range documents {
-			items = append(items, documentToFileItem(m))
+			items = append(items, documentToFileItem(m, ""))
 		}
 
 	} else {
@@ -485,7 +485,7 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 			documentQuery.Order(sortBy + " " + order).Limit(remainingLimit).Offset(max(0, offset-len(folders))).Find(&documents)
 
 			for _, m := range documents {
-				items = append(items, documentToFileItem(m))
+				items = append(items, documentToFileItem(m, ""))
 			}
 		}
 	}
@@ -872,15 +872,20 @@ func folderToFileItem(folder models.Folder) FileItem {
 }
 
 // documentToFileItem converts a Document model to FileItem DTO
-func documentToFileItem(document models.Document) FileItem {
+func documentToFileItem(document models.Document, role string) FileItem {
 	preferredImageTargetID := resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID)
 	excerpt := resolveDocumentListExcerpt(document.Excerpt, document.ManualExcerpt)
 	manualExcerpt := document.ManualExcerpt
+	var myRole *string
+	if strings.TrimSpace(role) != "" {
+		myRole = &role
+	}
 	return FileItem{
 		ID:                     document.ID,
 		Type:                   "document",
 		DocumentType:           &document.DocumentType,
 		PreferredImageTargetID: &preferredImageTargetID,
+		MyRole:                 myRole,
 		Name:                   document.Title,
 		Title:                  &document.Title,
 		Excerpt:                &excerpt,
@@ -939,12 +944,12 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 		item := folderToFileItem(folder)
 		return &item, nil
 	} else if fileType == "document" {
-		document, err := acl.CanReadDocument(database.DB, userID, fileID)
+		document, role, err := acl.AuthorizeDocumentAction(database.DB, userID, fileID, acl.ActionRead)
 		if err != nil {
 			return nil, ErrFileNotFound
 		}
 
-		item := documentToFileItem(*document)
+		item := documentToFileItem(*document, role)
 		return &item, nil
 	}
 
