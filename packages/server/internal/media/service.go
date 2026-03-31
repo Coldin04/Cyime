@@ -191,6 +191,11 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 	if asset.OwnerUserID == userID {
 		return asset, nil
 	}
+	if asset.DocumentID != nil {
+		if _, err := acl.CanReadDocument(database.DB, userID, *asset.DocumentID); err == nil {
+			return asset, nil
+		}
+	}
 
 	var count int64
 	if err := database.DB.

@@ -30,6 +30,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.DocumentBody{},
 		&models.DocumentAssetRef{},
 		&models.DocumentPermission{},
+		&models.DocumentImageTargetPreference{},
 		&models.DocumentInvite{},
 		&models.Notification{},
 	); err != nil {
@@ -345,6 +346,61 @@ func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
 
 	if err := UpdateDocumentImageTarget(attackerID, docID, config.ID.String()); err == nil {
 		t.Fatal("expected cross-user image target update to fail")
+	}
+}
+
+func TestUpdateDocumentImageTarget_AllowsSharedEditorToSetPersonalPreference(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	ownerConfig := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       ownerID,
+		Name:         "owner bed",
+		ProviderType: "see",
+		APIToken:     stringPtr("owner-token"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&ownerConfig).Error; err != nil {
+		t.Fatalf("create owner config: %v", err)
+	}
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("preferred_image_target_id", ownerConfig.ID.String()).Error; err != nil {
+		t.Fatalf("set owner preferred target: %v", err)
+	}
+
+	editorConfig := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       editorID,
+		Name:         "editor bed",
+		ProviderType: "see",
+		APIToken:     stringPtr("editor-token"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&editorConfig).Error; err != nil {
+		t.Fatalf("create editor config: %v", err)
+	}
+
+	if err := UpdateDocumentImageTarget(editorID, docID, editorConfig.ID.String()); err != nil {
+		t.Fatalf("expected shared editor to set personal image target: %v", err)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load document: %v", err)
+	}
+	if doc.PreferredImageTargetID != ownerConfig.ID.String() {
+		t.Fatalf("expected document default target unchanged, got %s", doc.PreferredImageTargetID)
+	}
+
+	var preference models.DocumentImageTargetPreference
+	if err := db.Where("document_id = ? AND user_id = ?", docID, editorID).First(&preference).Error; err != nil {
+		t.Fatalf("load personal image target preference: %v", err)
+	}
+	if preference.TargetID != editorConfig.ID.String() {
+		t.Fatalf("expected personal target %s, got %s", editorConfig.ID, preference.TargetID)
 	}
 }
 

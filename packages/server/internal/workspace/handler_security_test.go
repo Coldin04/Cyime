@@ -20,9 +20,12 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 		return c.Next()
 	})
 	app.Get("/files/:id", GetFileHandler)
+	app.Get("/public/documents/:id", GetPublicDocumentHandler)
 	app.Get("/shared/summary", SharedDocumentSummaryHandler)
 	app.Get("/shared/documents", ListSharedDocumentsHandler)
 	app.Get("/documents/:id/shares", ListDocumentMembersHandler)
+	app.Put("/documents/:id/excerpt", UpdateDocumentExcerptHandler)
+	app.Put("/documents/:id/public-access", UpdateDocumentPublicAccessHandler)
 	app.Post("/documents/:id/shares", ShareDocumentHandler)
 	app.Post("/documents/:id/invites", InviteDocumentByEmailHandler)
 	app.Delete("/documents/:id/shares/me", LeaveSharedDocumentHandler)
@@ -186,6 +189,32 @@ func TestListSharedDocumentsHandler_ReturnsSharedDocs(t *testing.T) {
 	}
 }
 
+func TestGetFileHandler_SharedViewerReturnsViewerRole(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	app := newWorkspaceTestApp(viewerID)
+	req := httptest.NewRequest(http.MethodGet, "/files/"+docID.String()+"?type=document", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload FileItem
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.MyRole == nil || *payload.MyRole != "viewer" {
+		t.Fatalf("expected myRole=viewer, got %+v", payload.MyRole)
+	}
+}
+
 func TestSharedDocumentSummaryHandler_ReturnsHasSharedDocuments(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
@@ -209,6 +238,68 @@ func TestSharedDocumentSummaryHandler_ReturnsHasSharedDocuments(t *testing.T) {
 	}
 	if !payload.HasSharedDocuments {
 		t.Fatal("expected hasSharedDocuments=true")
+	}
+}
+
+func TestGetPublicDocumentHandler_AuthenticatedAccessRequiresLogin(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	signedInReaderID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "auth-public-doc")
+	seedVerifiedUser(t, db, signedInReaderID, signedInReaderID.String()+"@example.com")
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("public_access", PublicAccessAuthenticated).Error; err != nil {
+		t.Fatalf("set public access: %v", err)
+	}
+
+	anonymousApp := fiber.New()
+	anonymousApp.Get("/public/documents/:id", GetPublicDocumentHandler)
+	anonymousReq := httptest.NewRequest(http.MethodGet, "/public/documents/"+docID.String(), nil)
+	anonymousResp, err := anonymousApp.Test(anonymousReq, -1)
+	if err != nil {
+		t.Fatalf("anonymous request failed: %v", err)
+	}
+	if anonymousResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected anonymous 401, got %d", anonymousResp.StatusCode)
+	}
+
+	signedInApp := newWorkspaceTestApp(signedInReaderID)
+	signedInReq := httptest.NewRequest(http.MethodGet, "/public/documents/"+docID.String(), nil)
+	signedInResp, err := signedInApp.Test(signedInReq, -1)
+	if err != nil {
+		t.Fatalf("signed-in request failed: %v", err)
+	}
+	if signedInResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected signed-in 200, got %d", signedInResp.StatusCode)
+	}
+}
+
+func TestDocumentSettingsACL_EditorCannotUpdateExcerptOrPublicAccess(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "acl-doc")
+	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
+
+	app := newWorkspaceTestApp(editorID)
+
+	excerptReq := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/excerpt", bytes.NewBufferString(`{"excerpt":"manual"}`))
+	excerptReq.Header.Set("Content-Type", "application/json")
+	excerptResp, err := app.Test(excerptReq, -1)
+	if err != nil {
+		t.Fatalf("excerpt request failed: %v", err)
+	}
+	if excerptResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected excerpt update 404, got %d", excerptResp.StatusCode)
+	}
+
+	publicReq := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/public-access", bytes.NewBufferString(`{"publicAccess":"public"}`))
+	publicReq.Header.Set("Content-Type", "application/json")
+	publicResp, err := app.Test(publicReq, -1)
+	if err != nil {
+		t.Fatalf("public-access request failed: %v", err)
+	}
+	if publicResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected public-access update 404, got %d", publicResp.StatusCode)
 	}
 }
 

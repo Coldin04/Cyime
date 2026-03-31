@@ -52,6 +52,57 @@ func TestUploadDocumentImage_UsesManagedR2ForLegacyDocuments(t *testing.T) {
 	}
 }
 
+func TestUploadDocumentImage_FallsBackToManagedR2WhenSharedTargetBelongsToAnotherUser(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	if err := db.Create(&models.User{ID: ownerID}).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := db.Create(&models.User{ID: editorID}).Error; err != nil {
+		t.Fatalf("create editor: %v", err)
+	}
+
+	ownerConfig := models.UserImageBedConfig{
+		ID:           uuid.New(),
+		UserID:       ownerID,
+		Name:         "owner bed",
+		ProviderType: "see",
+		APIToken:     mustEncryptToken(t, "owner-token"),
+		IsEnabled:    true,
+	}
+	if err := db.Create(&ownerConfig).Error; err != nil {
+		t.Fatalf("create owner config: %v", err)
+	}
+	docID := seedOwnedDocumentWithImageTarget(t, db, ownerID, ownerConfig.ID.String())
+	seedDocumentPermission(t, db, docID, editorID, ownerID, "editor")
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+	t.Cleanup(func() { storageProvider = nil })
+
+	header := makeFileHeader(t, "file", "shared.png", []byte("managed-fallback"))
+	result, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
+		DocumentID: docID,
+		UserID:     editorID,
+		FileHeader: header,
+	})
+	if err != nil {
+		t.Fatalf("upload document image: %v", err)
+	}
+
+	if result.TargetID != documentImageTargetManagedR2 {
+		t.Fatalf("expected managed-r2 fallback target, got %s", result.TargetID)
+	}
+	if result.Mode != documentImageModeManagedAsset {
+		t.Fatalf("expected managed asset mode, got %s", result.Mode)
+	}
+	if result.AssetID == nil {
+		t.Fatalf("expected managed fallback to return asset id")
+	}
+}
+
 func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 	db := setupMediaTestDB(t)
 	userID := uuid.New()

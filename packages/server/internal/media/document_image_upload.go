@@ -476,16 +476,29 @@ func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error
 		return "", ErrDocumentNotAccessible
 	}
 
-	switch strings.TrimSpace(document.PreferredImageTargetID) {
-	case "":
+	targetID := strings.TrimSpace(document.PreferredImageTargetID)
+
+	var preference models.DocumentImageTargetPreference
+	if err := database.DB.
+		Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, userID).
+		First(&preference).Error; err == nil {
+		targetID = strings.TrimSpace(preference.TargetID)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	switch targetID {
+	case "", documentImageTargetManagedR2:
 		return documentImageTargetManagedR2, nil
-	case documentImageTargetManagedR2:
-		return document.PreferredImageTargetID, nil
 	default:
-		if _, err := uuid.Parse(strings.TrimSpace(document.PreferredImageTargetID)); err != nil {
-			return "", newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
+		configID, err := uuid.Parse(targetID)
+		if err != nil {
+			return documentImageTargetManagedR2, nil
 		}
-		return strings.TrimSpace(document.PreferredImageTargetID), nil
+		if _, err := getUserImageBedConfig(userID, configID); err != nil {
+			return documentImageTargetManagedR2, nil
+		}
+		return targetID, nil
 	}
 }
 

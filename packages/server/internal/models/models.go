@@ -236,6 +236,25 @@ type DocumentPermission struct {
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
+func (p *DocumentImageTargetPreference) BeforeCreate(tx *gorm.DB) (err error) {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+	return
+}
+
+// DocumentImageTargetPreference stores per-user image upload target for one document.
+type DocumentImageTargetPreference struct {
+	ID         uuid.UUID      `gorm:"type:uuid;primary_key"`
+	DocumentID uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:idx_document_user_image_target"`
+	UserID     uuid.UUID      `gorm:"type:uuid;not null;index;uniqueIndex:idx_document_user_image_target"`
+	TargetID   string         `gorm:"type:varchar(100);not null;default:'managed-r2'"`
+	CreatedAt  time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt  time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate will set a UUID rather than relying on the database to generate it.
 func (i *DocumentInvite) BeforeCreate(tx *gorm.DB) (err error) {
 	if i.ID == uuid.Nil {
 		i.ID = uuid.New()

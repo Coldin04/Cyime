@@ -63,6 +63,41 @@ func resolveDocumentPreferredImageTargetID(value string) string {
 	return LegacyPreferredImageTargetID
 }
 
+func resolveUsableImageTargetForUser(userID uuid.UUID, preferredImageTargetID string) (string, error) {
+	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
+	if normalized == "" || normalized == DefaultPreferredImageTargetID {
+		return DefaultPreferredImageTargetID, nil
+	}
+
+	var count int64
+	if err := database.DB.Model(&models.UserImageBedConfig{}).
+		Where("id = ? AND user_id = ? AND deleted_at IS NULL AND is_enabled = ?", normalized, userID, true).
+		Count(&count).Error; err != nil {
+		return "", err
+	}
+	if count == 0 {
+		return DefaultPreferredImageTargetID, nil
+	}
+	return normalized, nil
+}
+
+func resolveEffectiveDocumentImageTargetID(userID uuid.UUID, document models.Document) (string, error) {
+	candidate := document.PreferredImageTargetID
+
+	var preference models.DocumentImageTargetPreference
+	if err := database.DB.
+		Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", document.ID, userID).
+		First(&preference).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+	} else {
+		candidate = preference.TargetID
+	}
+
+	return resolveUsableImageTargetForUser(userID, candidate)
+}
+
 func resolveDocumentListExcerpt(autoExcerpt, manualExcerpt string) string {
 	trimmed := strings.TrimSpace(manualExcerpt)
 	if trimmed != "" {
@@ -973,6 +1008,11 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 		}
 
 		item := documentToFileItem(*document, role)
+		effectiveTargetID, resolveErr := resolveEffectiveDocumentImageTargetID(userID, *document)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		item.PreferredImageTargetID = &effectiveTargetID
 		return &item, nil
 	}
 
@@ -1159,7 +1199,7 @@ func UpdateDocumentManualExcerpt(userID uuid.UUID, documentID uuid.UUID, manualE
 }
 
 func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {
-	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionEdit)
 	if err != nil {
 		return ErrDocumentNotFoundOrUnauthorized
 	}
@@ -1181,11 +1221,31 @@ func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferred
 		}
 	}
 
-	if resolveDocumentPreferredImageTargetID(document.PreferredImageTargetID) == normalized {
-		return nil
+	var preference models.DocumentImageTargetPreference
+	preferenceErr := database.DB.Unscoped().
+		Where("document_id = ? AND user_id = ?", document.ID, userID).
+		First(&preference).Error
+	switch {
+	case preferenceErr == nil:
+		return database.DB.Unscoped().Model(&models.DocumentImageTargetPreference{}).
+			Where("id = ?", preference.ID).
+			Updates(map[string]any{
+				"target_id":   normalized,
+				"deleted_at":  nil,
+				"updated_at":  time.Now(),
+				"document_id": document.ID,
+				"user_id":     userID,
+			}).Error
+	case errors.Is(preferenceErr, gorm.ErrRecordNotFound):
+		return database.DB.Create(&models.DocumentImageTargetPreference{
+			ID:         uuid.New(),
+			DocumentID: document.ID,
+			UserID:     userID,
+			TargetID:   normalized,
+		}).Error
+	default:
+		return preferenceErr
 	}
-
-	return database.DB.Model(document).Update("preferred_image_target_id", normalized).Error
 }
 
 // UpdateFolderName updates the name of a folder
