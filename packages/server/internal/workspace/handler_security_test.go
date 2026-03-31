@@ -31,6 +31,7 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 	app.Post("/notifications/:id/read", MarkNotificationReadHandler)
 	app.Post("/document-invites/:id/accept", AcceptDocumentInviteHandler)
 	app.Post("/document-invites/:id/decline", DeclineDocumentInviteHandler)
+	app.Delete("/trash", PermanentDeleteHandler)
 	app.Delete("/files/:id", DeleteFileHandler)
 	app.Post("/files/batch-delete", BatchDeleteHandler)
 	app.Post("/files/batch-move", BatchMoveHandler)
@@ -219,6 +220,48 @@ func TestLeaveSharedDocumentHandler_RemovesOnlySelfPermission(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestPermanentDeleteHandler_EmptyBodyClearsTrashWithoutWhereError(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	folderID := seedFolderForWorkspace(t, db, userID, "trash-folder")
+	docID := seedDocumentForWorkspace(t, db, userID, "trash-doc")
+
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("folder_id", folderID).Error; err != nil {
+		t.Fatalf("attach document to folder: %v", err)
+	}
+	if err := db.Delete(&models.Document{}, "id = ?", docID).Error; err != nil {
+		t.Fatalf("soft delete doc: %v", err)
+	}
+	if err := db.Delete(&models.Folder{}, "id = ?", folderID).Error; err != nil {
+		t.Fatalf("soft delete folder: %v", err)
+	}
+
+	app := newWorkspaceTestApp(userID)
+	req := httptest.NewRequest(http.MethodDelete, "/trash", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var docCount int64
+	if err := db.Unscoped().Model(&models.Document{}).Where("id = ?", docID).Count(&docCount).Error; err != nil {
+		t.Fatalf("count doc: %v", err)
+	}
+	if docCount != 0 {
+		t.Fatalf("expected doc removed, count=%d", docCount)
+	}
+	var folderCount int64
+	if err := db.Unscoped().Model(&models.Folder{}).Where("id = ?", folderID).Count(&folderCount).Error; err != nil {
+		t.Fatalf("count folder: %v", err)
+	}
+	if folderCount != 0 {
+		t.Fatalf("expected folder removed, count=%d", folderCount)
 	}
 }
 

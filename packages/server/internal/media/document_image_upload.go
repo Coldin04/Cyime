@@ -114,7 +114,7 @@ type genericImageBedUploader struct {
 
 func (u *genericImageBedUploader) Upload(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 
 	variables, err := buildProviderVariables(u.provider, u.config)
@@ -466,33 +466,14 @@ func parseProviderConfigJSON(raw *string) map[string]string {
 		}
 		return values
 	}
-
-	var legacy map[string]any
-	if err := json.Unmarshal([]byte(*raw), &legacy); err != nil {
-		return map[string]string{}
-	}
-
-	values := map[string]string{}
-	if storage, exists := legacy["storageId"]; exists {
-		stringified := strings.TrimSpace(stringifyAny(storage))
-		stringified = strings.TrimSuffix(stringified, ".0")
-		if stringified != "" {
-			values["storageId"] = stringified
-		}
-	}
-	if strategy, exists := legacy["strategyId"]; exists {
-		stringified := strings.TrimSpace(stringifyAny(strategy))
-		if stringified != "" {
-			values["strategyId"] = stringified
-		}
-	}
-	return values
+	// Legacy flat config payload is intentionally unsupported.
+	return map[string]string{}
 }
 
 func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error) {
 	document, err := acl.CanEditDocument(database.DB, userID, documentID)
 	if err != nil {
-		return "", err
+		return "", ErrDocumentNotAccessible
 	}
 
 	switch strings.TrimSpace(document.PreferredImageTargetID) {
@@ -561,7 +542,7 @@ func stringPtrValue(value *string) string {
 
 func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 
 	targetID, err := getDocumentImageUploadTargetID(req.UserID, req.DocumentID)

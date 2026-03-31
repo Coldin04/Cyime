@@ -21,6 +21,20 @@ const (
 	notificationTypeDocumentInvite = "document_invite"
 )
 
+var ErrInviteRateLimited = errors.New("invite rate limited")
+
+type InviteRateLimitError struct {
+	RemainingSeconds int
+}
+
+func (e *InviteRateLimitError) Error() string {
+	return fmt.Sprintf("邀请过于频繁，请在 %d 秒后重试", e.RemainingSeconds)
+}
+
+func (e *InviteRateLimitError) Unwrap() error {
+	return ErrInviteRateLimited
+}
+
 type notificationInviteData struct {
 	InviteID           uuid.UUID `json:"inviteId"`
 	DocumentID         uuid.UUID `json:"documentId"`
@@ -33,12 +47,12 @@ type notificationInviteData struct {
 func InviteDocumentByEmail(actorUserID, documentID uuid.UUID, email, role string) (*ShareDocumentResponse, error) {
 	normalizedRole := normalizePermissionRole(role)
 	if normalizedRole == "" {
-		return nil, errors.New("无效的共享角色")
+		return nil, ErrInvalidShareRole
 	}
 
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if normalizedEmail == "" {
-		return nil, errors.New("邮箱不能为空")
+		return nil, ErrInviteEmailRequired
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -51,21 +65,21 @@ func InviteDocumentByEmail(actorUserID, documentID uuid.UUID, email, role string
 			return err
 		}
 		if actorRole == acl.RoleCollaborator && normalizedRole == acl.RoleCollaborator {
-			return errors.New("协同者不能授予协同者权限")
+			return ErrCollaboratorGrantRestricted
 		}
 
 		var invitee models.User
 		if err := tx.Where("email = ?", normalizedEmail).First(&invitee).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("目标用户不存在")
+				return ErrTargetUserNotFound
 			}
 			return err
 		}
 		if invitee.ID == actorUserID {
-			return errors.New("不能给自己共享文档")
+			return ErrCannotShareSelf
 		}
 		if err := ensureSharingEnabledForUser(tx, invitee.ID); err != nil {
-			return errors.New("目标用户邮箱未验证")
+			return ErrTargetUserEmailUnverified
 		}
 
 		now := time.Now()
@@ -180,7 +194,7 @@ func MarkNotificationRead(userID, notificationID uuid.UUID) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("通知不存在")
+		return ErrNotificationNotFound
 	}
 	return nil
 }
@@ -202,13 +216,16 @@ func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 		var invite models.DocumentInvite
 		if err := tx.Where("id = ? AND invitee_user_id = ?", inviteID, userID).First(&invite).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("邀请不存在")
+				return ErrInviteNotFound
 			}
 			return err
 		}
 
 		if invite.Status != documentInviteStatusSent {
-			return errors.New("邀请状态无效")
+			return ErrInviteInvalidStatus
+		}
+		if !acl.RoleAllowsAction(invite.Role, acl.ActionRead) {
+			return ErrInviteInvalidRole
 		}
 
 		now := time.Now()
@@ -235,7 +252,7 @@ func DeclineDocumentInvite(userID, inviteID uuid.UUID) error {
 		var invite models.DocumentInvite
 		if err := tx.Where("id = ? AND invitee_user_id = ?", inviteID, userID).First(&invite).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("邀请不存在")
+				return ErrInviteNotFound
 			}
 			return err
 		}
@@ -333,7 +350,7 @@ func upsertDocumentInvite(tx *gorm.DB, documentID, inviterUserID, inviteeUserID 
 			if remainingSeconds < 1 {
 				remainingSeconds = 1
 			}
-			return nil, fmt.Errorf("邀请过于频繁，请在 %d 秒后重试", remainingSeconds)
+			return nil, &InviteRateLimitError{RemainingSeconds: remainingSeconds}
 		}
 		nextResendCount := invite.ResendCount + 1
 		if err := tx.Unscoped().Model(&models.DocumentInvite{}).

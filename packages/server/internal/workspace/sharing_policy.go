@@ -17,7 +17,7 @@ func ensureSharingEnabledForUser(tx *gorm.DB, userID uuid.UUID) error {
 	}
 
 	if !config.IsTrue(os.Getenv("SMTP_ENABLED")) {
-		return errors.New("邮箱邀请功能未启用")
+		return ErrSharingDisabled
 	}
 
 	var user models.User
@@ -28,7 +28,7 @@ func ensureSharingEnabledForUser(tx *gorm.DB, userID uuid.UUID) error {
 		return err
 	}
 	if !user.EmailVerified {
-		return errors.New("邮箱未验证，暂不可使用共享功能")
+		return ErrSharingEmailUnverified
 	}
 	return nil
 }
@@ -36,7 +36,7 @@ func ensureSharingEnabledForUser(tx *gorm.DB, userID uuid.UUID) error {
 func loadShareManagedDocument(tx *gorm.DB, actorUserID, documentID uuid.UUID) (*models.Document, string, error) {
 	document, role, err := acl.CanManageDocumentMembers(tx, actorUserID, documentID)
 	if err != nil {
-		return nil, "", errors.New("文档不存在或无权访问")
+		return nil, "", ErrDocumentNotFoundOrUnauthorized
 	}
 	return document, role, nil
 }

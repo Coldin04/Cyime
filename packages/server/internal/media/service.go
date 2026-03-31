@@ -176,7 +176,7 @@ func GetOwnedAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", assetID, userID).First(&asset)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("资源不存在或无权访问")
+			return nil, ErrAssetNotFoundOrForbidden
 		}
 		return nil, result.Error
 	}
@@ -203,7 +203,7 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 		return nil, err
 	}
 	if count == 0 {
-		return nil, errors.New("资源不存在或无权访问")
+		return nil, ErrAssetNotFoundOrForbidden
 	}
 	return asset, nil
 }
@@ -292,7 +292,7 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 			query = query.Where("status = ?", status)
 		}
 	default:
-		return nil, errors.New("invalid asset status")
+		return nil, ErrInvalidAssetStatus
 	}
 
 	kind := strings.TrimSpace(req.Kind)
@@ -301,7 +301,7 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 	case "image", "video", "file":
 		query = query.Where("kind = ?", kind)
 	default:
-		return nil, errors.New("invalid asset kind")
+		return nil, ErrInvalidAssetKind
 	}
 
 	if q := strings.TrimSpace(req.Query); q != "" {
@@ -388,7 +388,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 	case "image", "video", "file":
 		baseQuery = baseQuery.Where("a.kind = ?", kind)
 	default:
-		return nil, errors.New("invalid asset kind")
+		return nil, ErrInvalidAssetKind
 	}
 
 	if q := strings.TrimSpace(req.Query); q != "" {
@@ -402,7 +402,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 	case "ready", "pending_delete", "failed":
 		baseQuery = baseQuery.Where("a.status = ?", status)
 	default:
-		return nil, errors.New("invalid asset status")
+		return nil, ErrInvalidAssetStatus
 	}
 
 	var total int64
@@ -552,14 +552,14 @@ func getAssetBlobByID(assetID uuid.UUID) (*assetBlobRecord, error) {
 func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAssetResult, error) {
 	log.Printf("[media.upload.service] validating document=%s user=%s", req.DocumentID, req.UserID)
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 	contentType, ok := normalizeAllowedContentType(
 		strings.TrimSpace(req.FileHeader.Header.Get("Content-Type")),
 		req.FileHeader.Filename,
 	)
 	if !ok {
-		return nil, fmt.Errorf("unsupported file type: %s", contentType)
+		return nil, &UnsupportedFileTypeError{ContentType: contentType}
 	}
 	if err := ValidateVisibility(req.Visibility); err != nil {
 		return nil, err
@@ -842,7 +842,11 @@ func normalizeAllowedContentType(contentType string, filename string) (string, b
 }
 
 func ensureEditableDocument(userID, documentID uuid.UUID) (*models.Document, error) {
-	return acl.CanEditDocument(database.DB, userID, documentID)
+	document, err := acl.CanEditDocument(database.DB, userID, documentID)
+	if err != nil {
+		return nil, ErrDocumentNotAccessible
+	}
+	return document, nil
 }
 
 func computeFileHash(fileBytes []byte) string {
@@ -970,10 +974,10 @@ func DeleteOwnedUnusedAsset(ctx context.Context, userID, assetID uuid.UUID) erro
 	_ = ctx
 	asset := &record.Asset
 	if asset.ReferenceCount > 0 {
-		return errors.New("asset is still referenced by documents")
+		return ErrAssetStillReferenced
 	}
 	if asset.Status == "deleted" {
-		return errors.New("asset already deleted")
+		return ErrAssetAlreadyDeleted
 	}
 
 	now := time.Now()
@@ -985,7 +989,7 @@ func DeleteOwnedUnusedAsset(ctx context.Context, userID, assetID uuid.UUID) erro
 			return err
 		}
 		if refCount > 0 {
-			return errors.New("asset is still referenced by documents")
+			return ErrAssetStillReferenced
 		}
 
 		if err := tx.Model(&models.Asset{}).

@@ -305,8 +305,8 @@ func UpdateProfileHandler(c *fiber.Ctx) error {
 
 	user, err := UpdateProfile(userID, req.DisplayName)
 	if err != nil {
-		switch err.Error() {
-		case "displayName is required", "displayName is too long":
+		switch {
+		case errors.Is(err, ErrDisplayNameRequired), errors.Is(err, ErrDisplayNameTooLong):
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -333,14 +333,15 @@ func UploadAvatarHandler(c *fiber.Ctx) error {
 
 	user, err := UpdateAvatarWithUpload(context.Background(), userID, fileHeader)
 	if err != nil {
-		switch err.Error() {
-		case "file is required":
+		var unsupportedAvatar *media.UnsupportedAvatarFileTypeError
+		switch {
+		case errors.Is(err, media.ErrFileRequired):
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		default:
 			if errors.Is(err, media.ErrAvatarFileTooLarge) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 			}
-			if len(err.Error()) >= len("unsupported avatar file type:") && err.Error()[:len("unsupported avatar file type:")] == "unsupported avatar file type:" {
+			if errors.As(err, &unsupportedAvatar) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -367,8 +368,8 @@ func UpdateGitHubAvatarHandler(c *fiber.Ctx) error {
 
 	user, err := UpdateAvatarWithGitHub(context.Background(), userID, req.Username)
 	if err != nil {
-		switch err.Error() {
-		case "github username is required", "invalid github username":
+		switch {
+		case errors.Is(err, ErrGitHubUsernameRequired), errors.Is(err, ErrGitHubUsernameInvalid):
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

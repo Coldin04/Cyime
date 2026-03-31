@@ -538,7 +538,7 @@ func TestDeleteOwnedUnusedAsset_RejectsReferencedAsset(t *testing.T) {
 		t.Fatalf("create ref: %v", err)
 	}
 
-	if err := DeleteOwnedUnusedAsset(context.Background(), userID, asset.ID); err == nil || err.Error() != "asset is still referenced by documents" {
+	if err := DeleteOwnedUnusedAsset(context.Background(), userID, asset.ID); err == nil || !errors.Is(err, ErrAssetStillReferenced) {
 		t.Fatalf("expected referenced asset rejection, got %v", err)
 	}
 }

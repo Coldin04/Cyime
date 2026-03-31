@@ -171,7 +171,7 @@ func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
 		ProviderType: "lsky",
 		BaseURL:      stringPtr(server.URL),
 		APIToken:     mustEncryptToken(t, "test-lsky-token"),
-		ConfigJSON:   stringPtr(`{"storageId":7,"strategyId":"covers"}`),
+		ConfigJSON:   stringPtr(`{"fields":{"storageId":7,"strategyId":"covers"}}`),
 		IsEnabled:    true,
 	}
 	if err := db.Create(&config).Error; err != nil {

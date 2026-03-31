@@ -2,6 +2,7 @@ package content
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -47,8 +48,8 @@ func GetContentHandler(c *fiber.Ctx) error {
 
 	result, err := GetContent(userID, documentID)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问", "文档内容不存在":
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized), errors.Is(err, ErrDocumentContentNotFound):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -101,14 +102,13 @@ func UpdateContentHandler(c *fiber.Ctx) error {
 
 	result, err := UpdateContent(userID, documentID, req.ContentJSON)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问":
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "contentJson must be valid JSON":
-		case "content references invalid assets":
+		case errors.Is(err, ErrInvalidContentJSON), errors.Is(err, ErrInvalidContentAssetReferences):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),

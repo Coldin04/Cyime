@@ -28,6 +28,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.Folder{},
 		&models.Document{},
 		&models.DocumentBody{},
+		&models.DocumentAssetRef{},
 		&models.DocumentPermission{},
 		&models.DocumentInvite{},
 		&models.Notification{},

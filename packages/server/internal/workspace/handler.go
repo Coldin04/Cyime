@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -107,8 +106,8 @@ func GetFileHandler(c *fiber.Ctx) error {
 	// Get file details
 	file, err := GetFile(userID, fileID, fileType)
 	if err != nil {
-		switch err.Error() {
-		case "文件不存在":
+		switch {
+		case errors.Is(err, ErrFileNotFound):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -155,14 +154,16 @@ func CreateFolderHandler(c *fiber.Ctx) error {
 	// Create folder
 	folder, err := CreateFolder(userID, req.Name, req.Description, req.ParentID)
 	if err != nil {
-		// Handle known validation errors
-		if err.Error() == "文件夹名称不能为空" || err.Error() == "文件夹名称不能超过 255 个字符" || err.Error() == "不能使用系统保留的文件夹名称" || err.Error() == "同名文件夹已存在" {
+		if errors.Is(err, ErrFolderNameRequired) ||
+			errors.Is(err, ErrFolderNameTooLong) ||
+			errors.Is(err, ErrReservedFolderName) ||
+			errors.Is(err, ErrDuplicateFolderName) {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
 			})
 		}
-		if err.Error() == "父文件夹不存在" {
+		if errors.Is(err, ErrParentFolderNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -237,8 +238,11 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 		req.PreferredImageTargetID,
 	)
 	if err != nil {
-		// Handle known validation errors
-		if err.Error() == "文档标题不能为空" || err.Error() == "文档标题不能超过 255 个字符" || err.Error() == "同名文档已存在" || err.Error() == "不支持的文档类型" || err.Error() == "不支持的图片上传目标" {
+		if errors.Is(err, ErrDocumentTitleRequired) ||
+			errors.Is(err, ErrDocumentTitleTooLong) ||
+			errors.Is(err, ErrDuplicateDocumentTitle) ||
+			errors.Is(err, ErrUnsupportedDocumentType) ||
+			errors.Is(err, ErrUnsupportedImageTarget) {
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
@@ -250,7 +254,7 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 				Message: err.Error(),
 			})
 		}
-		if err.Error() == "文件夹不存在" {
+		if errors.Is(err, ErrFolderNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -348,16 +352,18 @@ func ShareDocumentHandler(c *fiber.Ctx) error {
 
 	result, err := ShareDocument(userID, documentID, req.UserID, req.Role)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问":
+		if errors.Is(err, ErrDocumentNotFoundOrUnauthorized) || errors.Is(err, ErrTargetUserNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "无效的共享角色", "不能给自己共享文档", "协同者不能授予协同者权限", "目标用户邮箱未验证", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
-			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
-		case "目标用户不存在":
-			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
+		if errors.Is(err, ErrInvalidShareRole) ||
+			errors.Is(err, ErrCannotShareSelf) ||
+			errors.Is(err, ErrCollaboratorGrantRestricted) ||
+			errors.Is(err, ErrTargetUserEmailUnverified) ||
+			errors.Is(err, ErrSharingDisabled) ||
+			errors.Is(err, ErrSharingEmailUnverified) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 	}
 	return c.JSON(result)
 }
@@ -396,19 +402,25 @@ func InviteDocumentByEmailHandler(c *fiber.Ctx) error {
 
 	result, err := InviteDocumentByEmail(userID, documentID, req.Email, req.Role)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问", "邀请不存在":
+		if errors.Is(err, ErrDocumentNotFoundOrUnauthorized) ||
+			errors.Is(err, ErrInviteNotFound) ||
+			errors.Is(err, ErrTargetUserNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "目标用户不存在":
-			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "无效的共享角色", "邮箱不能为空", "不能给自己共享文档", "协同者不能授予协同者权限", "目标用户邮箱未验证", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
-			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
-		default:
-			if strings.HasPrefix(err.Error(), "邀请过于频繁") {
-				return c.Status(fiber.StatusTooManyRequests).JSON(ErrorResponse{Error: "Too Many Requests", Message: err.Error()})
-			}
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
+		if errors.Is(err, ErrInvalidShareRole) ||
+			errors.Is(err, ErrInviteEmailRequired) ||
+			errors.Is(err, ErrCannotShareSelf) ||
+			errors.Is(err, ErrCollaboratorGrantRestricted) ||
+			errors.Is(err, ErrTargetUserEmailUnverified) ||
+			errors.Is(err, ErrSharingDisabled) ||
+			errors.Is(err, ErrSharingEmailUnverified) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		}
+		var rateLimitErr *InviteRateLimitError
+		if errors.As(err, &rateLimitErr) {
+			return c.Status(fiber.StatusTooManyRequests).JSON(ErrorResponse{Error: "Too Many Requests", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 	}
 	return c.JSON(result)
 }
@@ -438,7 +450,7 @@ func ListDocumentMembersHandler(c *fiber.Ctx) error {
 
 	result, err := ListDocumentMembers(userID, documentID)
 	if err != nil {
-		if err.Error() == "文档不存在或无权访问" {
+		if errors.Is(err, ErrDocumentNotFoundOrUnauthorized) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
@@ -478,14 +490,18 @@ func RemoveDocumentMemberHandler(c *fiber.Ctx) error {
 
 	result, err := RemoveDocumentMember(userID, documentID, targetUserID)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问":
+		if errors.Is(err, ErrDocumentNotFoundOrUnauthorized) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "不能移除自己", "不能移除文档所有者", "协同者不能移除协同者", "成员不存在", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
-			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
+		if errors.Is(err, ErrCannotRemoveSelf) ||
+			errors.Is(err, ErrCannotRemoveOwner) ||
+			errors.Is(err, ErrCollaboratorRemoveRestricted) ||
+			errors.Is(err, ErrMemberNotFound) ||
+			errors.Is(err, ErrSharingDisabled) ||
+			errors.Is(err, ErrSharingEmailUnverified) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 	}
 	return c.JSON(result)
 }
@@ -541,7 +557,7 @@ func MarkNotificationReadHandler(c *fiber.Ctx) error {
 	}
 
 	if err := MarkNotificationRead(userID, notificationID); err != nil {
-		if err.Error() == "通知不存在" {
+		if errors.Is(err, ErrNotificationNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
@@ -603,14 +619,16 @@ func AcceptDocumentInviteHandler(c *fiber.Ctx) error {
 	}
 
 	if err := AcceptDocumentInvite(userID, inviteID); err != nil {
-		switch err.Error() {
-		case "邀请不存在":
+		if errors.Is(err, ErrInviteNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "邀请状态无效", "邮箱邀请功能未启用", "邮箱未验证，暂不可使用共享功能":
-			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
+		if errors.Is(err, ErrInviteInvalidStatus) ||
+			errors.Is(err, ErrInviteInvalidRole) ||
+			errors.Is(err, ErrSharingDisabled) ||
+			errors.Is(err, ErrSharingEmailUnverified) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -639,7 +657,7 @@ func DeclineDocumentInviteHandler(c *fiber.Ctx) error {
 	}
 
 	if err := DeclineDocumentInvite(userID, inviteID); err != nil {
-		if err.Error() == "邀请不存在" {
+		if errors.Is(err, ErrInviteNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
@@ -671,14 +689,13 @@ func LeaveSharedDocumentHandler(c *fiber.Ctx) error {
 	}
 
 	if err := LeaveSharedDocument(userID, documentID); err != nil {
-		switch err.Error() {
-		case "文档不存在或无权访问":
+		if errors.Is(err, ErrDocumentNotFoundOrUnauthorized) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
-		case "所有者不能退出自己的文档共享":
-			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 		}
+		if errors.Is(err, ErrOwnerCannotLeaveShared) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -1008,13 +1025,13 @@ func UpdateDocumentTitleHandler(c *fiber.Ctx) error {
 	// Update title
 	err = UpdateDocumentTitle(userID, documentID, req.Title)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在", "文档不存在或无权访问":
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "文档标题不能为空", "文档标题不能超过 255 个字符", "同名文档已存在":
+		case errors.Is(err, ErrDocumentTitleRequired), errors.Is(err, ErrDocumentTitleTooLong), errors.Is(err, ErrDuplicateDocumentTitle):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
@@ -1068,18 +1085,18 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 
 	err = UpdateDocumentImageTarget(userID, documentID, req.PreferredImageTargetID)
 	if err != nil {
-		switch err.Error() {
-		case "不支持的图片上传目标":
+		switch {
+		case errors.Is(err, ErrUnsupportedImageTarget):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
 			})
-		case "文档不存在", "文档不存在或无权访问":
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "图片上传目标不存在":
+		case errors.Is(err, ErrImageTargetNotFound):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Validation Error",
 				Message: err.Error(),
@@ -1148,13 +1165,13 @@ func UpdateFolderNameHandler(c *fiber.Ctx) error {
 	// Update name
 	err = UpdateFolderName(userID, folderID, req.Name)
 	if err != nil {
-		switch err.Error() {
-		case "文件夹不存在":
+		switch {
+		case errors.Is(err, ErrFolderNotFound):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "文件夹名称不能为空", "文件夹名称不能超过 255 个字符", "同名文件夹已存在", "不能使用系统保留的文件夹名称":
+		case errors.Is(err, ErrFolderNameRequired), errors.Is(err, ErrFolderNameTooLong), errors.Is(err, ErrDuplicateFolderName), errors.Is(err, ErrReservedFolderName):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
@@ -1213,13 +1230,8 @@ func MoveDocumentHandler(c *fiber.Ctx) error {
 	// Move the document
 	updatedAt, err := MoveDocument(userID, documentID, req.FolderID)
 	if err != nil {
-		switch err.Error() {
-		case "文档不存在或已被删除":
-			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
-				Error:   "Not Found",
-				Message: err.Error(),
-			})
-		case "目标文件夹不存在或已被删除":
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrDeleted), errors.Is(err, ErrTargetFolderNotFoundOrDeleted):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -1280,18 +1292,13 @@ func MoveFolderHandler(c *fiber.Ctx) error {
 	// Move the folder
 	updatedAt, err := MoveFolder(userID, folderID, req.ParentID)
 	if err != nil {
-		switch err.Error() {
-		case "文件夹不存在或已被删除":
+		switch {
+		case errors.Is(err, ErrFolderNotFoundOrDeleted), errors.Is(err, ErrTargetParentNotFoundOrDeleted):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "目标父文件夹不存在或已被删除":
-			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
-				Error:   "Not Found",
-				Message: err.Error(),
-			})
-		case "不能将文件夹移动到其子文件夹下":
+		case errors.Is(err, ErrFolderMoveCycle):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),

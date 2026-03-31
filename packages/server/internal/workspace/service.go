@@ -71,10 +71,10 @@ func normalizePermissionRole(role string) string {
 func ShareDocument(actorUserID, documentID, targetUserID uuid.UUID, role string) (*ShareDocumentResponse, error) {
 	normalizedRole := normalizePermissionRole(role)
 	if normalizedRole == "" {
-		return nil, errors.New("无效的共享角色")
+		return nil, ErrInvalidShareRole
 	}
 	if actorUserID == targetUserID {
-		return nil, errors.New("不能给自己共享文档")
+		return nil, ErrCannotShareSelf
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -86,18 +86,18 @@ func ShareDocument(actorUserID, documentID, targetUserID uuid.UUID, role string)
 			return err
 		}
 		if actorRole == acl.RoleCollaborator && normalizedRole == acl.RoleCollaborator {
-			return errors.New("协同者不能授予协同者权限")
+			return ErrCollaboratorGrantRestricted
 		}
 
 		var targetUser models.User
 		if err := tx.Select("id", "email_verified").Where("id = ?", targetUserID).First(&targetUser).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("目标用户不存在")
+				return ErrTargetUserNotFound
 			}
 			return err
 		}
 		if !targetUser.EmailVerified {
-			return errors.New("目标用户邮箱未验证")
+			return ErrTargetUserEmailUnverified
 		}
 
 		var permission models.DocumentPermission
@@ -139,7 +139,7 @@ func ShareDocument(actorUserID, documentID, targetUserID uuid.UUID, role string)
 
 func RemoveDocumentMember(actorUserID, documentID, targetUserID uuid.UUID) (*ShareDocumentResponse, error) {
 	if actorUserID == targetUserID {
-		return nil, errors.New("不能移除自己")
+		return nil, ErrCannotRemoveSelf
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -151,18 +151,18 @@ func RemoveDocumentMember(actorUserID, documentID, targetUserID uuid.UUID) (*Sha
 			return err
 		}
 		if document.OwnerUserID == targetUserID {
-			return errors.New("不能移除文档所有者")
+			return ErrCannotRemoveOwner
 		}
 
 		var targetPermission models.DocumentPermission
 		if err := tx.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, targetUserID).First(&targetPermission).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("成员不存在")
+				return ErrMemberNotFound
 			}
 			return err
 		}
 		if actorRole == acl.RoleCollaborator && targetPermission.Role == acl.RoleCollaborator {
-			return errors.New("协同者不能移除协同者")
+			return ErrCollaboratorRemoveRestricted
 		}
 
 		return tx.Where("document_id = ? AND user_id = ?", documentID, targetUserID).Delete(&models.DocumentPermission{}).Error
@@ -176,23 +176,20 @@ func RemoveDocumentMember(actorUserID, documentID, targetUserID uuid.UUID) (*Sha
 
 func LeaveSharedDocument(userID, documentID uuid.UUID) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
-		var document models.Document
-		if err := tx.Where("id = ? AND deleted_at IS NULL", documentID).First(&document).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("文档不存在或无权访问")
-			}
-			return err
+		document, role, err := acl.AuthorizeDocumentAction(tx, userID, documentID, acl.ActionRead)
+		if err != nil {
+			return ErrDocumentNotFoundOrUnauthorized
 		}
-		if document.OwnerUserID == userID {
-			return errors.New("所有者不能退出自己的文档共享")
+		if role == acl.RoleOwner || document.OwnerUserID == userID {
+			return ErrOwnerCannotLeaveShared
 		}
 
-		result := tx.Where("document_id = ? AND user_id = ?", documentID, userID).Delete(&models.DocumentPermission{})
+		result := tx.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, userID).Delete(&models.DocumentPermission{})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			return errors.New("文档不存在或无权访问")
+			return ErrDocumentNotFoundOrUnauthorized
 		}
 		return nil
 	})
@@ -266,7 +263,8 @@ func ListSharedDocuments(userID uuid.UUID, limit, offset int) (*SharedDocumentLi
 	query := database.DB.
 		Table("document_permissions AS perms").
 		Joins("JOIN documents AS d ON d.id = perms.document_id AND d.deleted_at IS NULL").
-		Where("perms.user_id = ? AND perms.deleted_at IS NULL", userID)
+		Where("perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+		Where("perms.role IN ?", acl.AllowedRolesForAction(acl.ActionRead))
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -470,19 +468,19 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 func CreateFolder(userID uuid.UUID, name string, description *string, parentID *uuid.UUID) (*models.Folder, error) {
 	// Validate name is not empty
 	if strings.TrimSpace(name) == "" {
-		return nil, errors.New("文件夹名称不能为空")
+		return nil, ErrFolderNameRequired
 	}
 
 	// Validate name length
 	if len(name) > 255 {
-		return nil, errors.New("文件夹名称不能超过 255 个字符")
+		return nil, ErrFolderNameTooLong
 	}
 
 	// Validate not a reserved name
 	lowerName := strings.ToLower(strings.TrimSpace(name))
 	for _, reserved := range ReservedFolderNames {
 		if lowerName == strings.ToLower(reserved) {
-			return nil, errors.New("不能使用系统保留的文件夹名称")
+			return nil, ErrReservedFolderName
 		}
 	}
 
@@ -492,7 +490,7 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 		result := database.DB.Where("id = ? AND owner_user_id = ?", parentID, userID).First(&parent)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("父文件夹不存在")
+				return nil, ErrParentFolderNotFound
 			}
 			return nil, result.Error
 		}
@@ -501,14 +499,14 @@ func CreateFolder(userID uuid.UUID, name string, description *string, parentID *
 		var existing models.Folder
 		result = database.DB.Where("owner_user_id = ? AND parent_id = ? AND name = ? AND deleted_at IS NULL", userID, parentID, name).First(&existing)
 		if result.Error == nil {
-			return nil, errors.New("同名文件夹已存在")
+			return nil, ErrDuplicateFolderName
 		}
 	} else {
 		// Validate no duplicate name in root
 		var existing models.Folder
 		result := database.DB.Where("owner_user_id = ? AND parent_id IS NULL AND name = ? AND deleted_at IS NULL", userID, name).First(&existing)
 		if result.Error == nil {
-			return nil, errors.New("同名文件夹已存在")
+			return nil, ErrDuplicateFolderName
 		}
 	}
 
@@ -536,19 +534,19 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 		documentType = "rich_text"
 	}
 	if documentType != "rich_text" && documentType != "table" {
-		return nil, errors.New("不支持的文档类型")
+		return nil, ErrUnsupportedDocumentType
 	}
 	if preferredImageTargetID == "" {
 		preferredImageTargetID = DefaultPreferredImageTargetID
 	}
 	preferredImageTargetID = normalizePreferredImageTargetID(preferredImageTargetID)
 	if preferredImageTargetID == "" {
-		return nil, errors.New("不支持的图片上传目标")
+		return nil, ErrUnsupportedImageTarget
 	}
 
 	// Validate title length
 	if len(title) > 255 {
-		return nil, errors.New("文档标题不能超过 255 个字符")
+		return nil, ErrDocumentTitleTooLong
 	}
 
 	// Validate folder exists if provided
@@ -557,7 +555,7 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 		result := database.DB.Where("id = ? AND owner_user_id = ?", folderID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("文件夹不存在")
+				return nil, ErrFolderNotFound
 			}
 			return nil, result.Error
 		}
@@ -591,7 +589,7 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 		result := query.First(&existing)
 		if result.Error == nil {
 			// A record was found, so it's a duplicate
-			return nil, errors.New("同名文档已存在")
+			return nil, ErrDuplicateDocumentTitle
 		}
 		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// A real database error occurred
@@ -897,7 +895,7 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 		result := database.DB.Where("id = ? AND owner_user_id = ?", fileID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("文件不存在")
+				return nil, ErrFileNotFound
 			}
 			return nil, result.Error
 		}
@@ -907,7 +905,7 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 	} else if fileType == "document" {
 		document, err := acl.CanReadDocument(database.DB, userID, fileID)
 		if err != nil {
-			return nil, errors.New("文件不存在")
+			return nil, ErrFileNotFound
 		}
 
 		item := documentToFileItem(*document)
@@ -923,15 +921,15 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 
 	// Validate title length
 	if len(trimmedTitle) == 0 {
-		return errors.New("文档标题不能为空")
+		return ErrDocumentTitleRequired
 	}
 	if len(trimmedTitle) > 255 {
-		return errors.New("文档标题不能超过 255 个字符")
+		return ErrDocumentTitleTooLong
 	}
 
 	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionEdit)
 	if err != nil {
-		return errors.New("文档不存在或无权访问")
+		return ErrDocumentNotFoundOrUnauthorized
 	}
 
 	// Same title is treated as a no-op.
@@ -952,7 +950,7 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 		return err
 	}
 	if conflictCount > 0 {
-		return errors.New("同名文档已存在")
+		return ErrDuplicateDocumentTitle
 	}
 
 	// Update the title
@@ -962,12 +960,12 @@ func UpdateDocumentTitle(userID uuid.UUID, documentID uuid.UUID, title string) e
 func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferredImageTargetID string) error {
 	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
 	if err != nil {
-		return errors.New("文档不存在或无权访问")
+		return ErrDocumentNotFoundOrUnauthorized
 	}
 
 	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
 	if normalized == "" {
-		return errors.New("不支持的图片上传目标")
+		return ErrUnsupportedImageTarget
 	}
 	if normalized != DefaultPreferredImageTargetID {
 		var config models.UserImageBedConfig
@@ -976,7 +974,7 @@ func UpdateDocumentImageTarget(userID uuid.UUID, documentID uuid.UUID, preferred
 			First(&config)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return errors.New("图片上传目标不存在")
+				return ErrImageTargetNotFound
 			}
 			return result.Error
 		}
@@ -995,16 +993,16 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 
 	// Validate name length
 	if len(trimmedName) == 0 {
-		return errors.New("文件夹名称不能为空")
+		return ErrFolderNameRequired
 	}
 	if len(trimmedName) > 255 {
-		return errors.New("文件夹名称不能超过 255 个字符")
+		return ErrFolderNameTooLong
 	}
 
 	lowerName := strings.ToLower(trimmedName)
 	for _, reserved := range ReservedFolderNames {
 		if lowerName == strings.ToLower(reserved) {
-			return errors.New("不能使用系统保留的文件夹名称")
+			return ErrReservedFolderName
 		}
 	}
 
@@ -1013,7 +1011,7 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 	result := database.DB.Where("id = ? AND owner_user_id = ?", folderID, userID).First(&folder)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return errors.New("文件夹不存在")
+			return ErrFolderNotFound
 		}
 		return result.Error
 	}
@@ -1035,7 +1033,7 @@ func UpdateFolderName(userID uuid.UUID, folderID uuid.UUID, name string) error {
 		return err
 	}
 	if conflictCount > 0 {
-		return errors.New("同名文件夹已存在")
+		return ErrDuplicateFolderName
 	}
 
 	// Update the name
@@ -1047,7 +1045,7 @@ func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (
 	// Move keeps owner-only semantics in V1: shared members can edit, but cannot reorganize owner tree.
 	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionOwnerOnly)
 	if err != nil {
-		return nil, errors.New("文档不存在或已被删除")
+		return nil, ErrDocumentNotFoundOrDeleted
 	}
 
 	// 2. Validate target folder if provided
@@ -1056,7 +1054,7 @@ func MoveDocument(userID uuid.UUID, documentID uuid.UUID, folderID *uuid.UUID) (
 		result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("目标文件夹不存在或已被删除")
+				return nil, ErrTargetFolderNotFoundOrDeleted
 			}
 			return nil, result.Error
 		}
@@ -1103,7 +1101,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", folderID, userID).First(&folder)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文件夹不存在或已被删除")
+			return nil, ErrFolderNotFoundOrDeleted
 		}
 		return nil, result.Error
 	}
@@ -1120,7 +1118,7 @@ func MoveFolder(userID uuid.UUID, folderID uuid.UUID, parentID *uuid.UUID) (*tim
 		result = database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", parentID, userID).First(&parentFolder)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				return nil, errors.New("目标父文件夹不存在或已被删除")
+				return nil, ErrTargetParentNotFoundOrDeleted
 			}
 			return nil, result.Error
 		}
@@ -1173,7 +1171,7 @@ func checkCircularDependency(db *gorm.DB, userID uuid.UUID, sourceFolderID, targ
 	// Traverse up the parent chain
 	for currentID != nil {
 		if *currentID == *sourceFolderID {
-			return errors.New("不能将文件夹移动到其子文件夹下")
+			return ErrFolderMoveCycle
 		}
 
 		// Get the parent folder
@@ -1506,7 +1504,9 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 		// If no items are specified, empty the entire trash for the user
 		if len(itemsToDelete) == 0 {
 			var folders []models.Folder
-			tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&folders)
+			if err := tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&folders).Error; err != nil {
+				return err
+			}
 			for _, f := range folders {
 				if err := permanentDeleteFolderRecursive(tx, userID, f.ID); err != nil {
 					return err
@@ -1515,13 +1515,17 @@ func PermanentDeleteItems(userID uuid.UUID, itemsToDelete []ItemToRestore) (*Per
 			}
 
 			var documents []models.Document
-			tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&documents)
+			if err := tx.Unscoped().Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).Find(&documents).Error; err != nil {
+				return err
+			}
 			for _, document := range documents {
 				if err := content.PermanentDeleteContentByDocumentID(tx, userID, document.ID); err != nil {
 					return err
 				}
 			}
-			result := tx.Unscoped().Delete(&documents)
+			result := tx.Unscoped().
+				Where("owner_user_id = ? AND deleted_at IS NOT NULL", userID).
+				Delete(&models.Document{})
 			if result.Error != nil {
 				return result.Error
 			}

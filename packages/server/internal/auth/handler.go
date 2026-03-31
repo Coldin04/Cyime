@@ -79,9 +79,7 @@ func getAPIBaseURL() string {
 		if port == "" {
 			port = "8080"
 		}
-		if strings.HasPrefix(port, ":") {
-			port = port[1:]
-		}
+			port = strings.TrimPrefix(port, ":")
 		baseURL = fmt.Sprintf("http://localhost:%s", port)
 	}
 
