@@ -303,6 +303,27 @@ func TestGetPublicDocumentHandler_AuthenticatedAccessRequiresLogin(t *testing.T)
 	}
 }
 
+func TestGetPublicDocumentHandler_PublicDocumentAllowsSignedInNonMember(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	otherUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "global-public-doc")
+	seedVerifiedUser(t, db, otherUserID, otherUserID.String()+"@example.com")
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("public_access", PublicAccessGlobal).Error; err != nil {
+		t.Fatalf("set public access: %v", err)
+	}
+
+	app := newWorkspaceTestApp(otherUserID)
+	req := httptest.NewRequest(http.MethodGet, "/public/documents/"+docID.String(), nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestDocumentSettingsACL_EditorCannotUpdateExcerptOrPublicAccess(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()

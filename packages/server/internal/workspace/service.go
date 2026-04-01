@@ -1117,6 +1117,12 @@ func GetFile(userID uuid.UUID, fileID uuid.UUID, fileType string) (*FileItem, er
 }
 
 func GetPublicDocument(fileID uuid.UUID, userID *uuid.UUID) (*FileItem, error) {
+	if userID != nil && *userID != uuid.Nil {
+		if item, err := GetFile(*userID, fileID, "document"); err == nil {
+			return item, nil
+		}
+	}
+
 	var document models.Document
 	if err := database.DB.
 		Where("id = ? AND deleted_at IS NULL", fileID).
@@ -1185,6 +1191,20 @@ func stripImageAttrs(node any) {
 }
 
 func GetPublicDocumentContent(documentID uuid.UUID, userID *uuid.UUID) (*DocumentPublicContentResponse, error) {
+	if userID != nil && *userID != uuid.Nil {
+		if content, err := content.GetContent(*userID, documentID); err == nil {
+			return &DocumentPublicContentResponse{
+				ID:             content.ID,
+				DocumentID:     content.DocumentID,
+				ContentJSON:    content.ContentJSON,
+				PlainText:      content.PlainText,
+				ContentVersion: content.ContentVersion,
+				CreatedAt:      content.CreatedAt,
+				UpdatedAt:      content.UpdatedAt,
+			}, nil
+		}
+	}
+
 	var document models.Document
 	if err := database.DB.
 		Select("id", "public_access").

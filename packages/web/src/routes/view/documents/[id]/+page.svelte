@@ -7,12 +7,8 @@
 	import { auth } from '$lib/stores/auth';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import {
-		getDocumentContent,
-		getPublicDocumentContent,
-		resolveAssetReadURLs
-	} from '$lib/api/editor';
-	import { getDocumentDetails, getPublicDocumentDetails } from '$lib/api/workspace';
+	import { getPublicDocumentContent, resolveAssetReadURLs } from '$lib/api/editor';
+	import { getPublicDocumentDetails } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -115,6 +111,23 @@
 	const documentId = $derived(pageSignal.params?.id);
 	const canOpenEditor = $derived(myRole !== 'viewer');
 
+	async function loadViewDocument(nextDocumentId: string) {
+		const [details, data] = await Promise.all([
+			getPublicDocumentDetails(nextDocumentId),
+			getPublicDocumentContent(nextDocumentId)
+		]);
+
+		title = details.title ?? '';
+		manualExcerpt = details.manualExcerpt ?? '';
+		myRole = details.myRole ?? 'viewer';
+		documentType = details.documentType ?? 'rich_text';
+		preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
+		content =
+			myRole !== 'viewer'
+				? await refreshSignedImageSources(data.contentJson ?? EMPTY_DOC)
+				: data.contentJson ?? EMPTY_DOC;
+	}
+
 	$effect(() => {
 		if (!documentId || $auth.loading) {
 			return;
@@ -124,39 +137,10 @@
 		const loadContent = async () => {
 			try {
 				requireSignIn = false;
-				if ($auth.token) {
-					const [details, data] = await Promise.all([
-						getDocumentDetails(documentId),
-						getDocumentContent(documentId)
-					]);
-
-					title = details.title ?? '';
-					manualExcerpt = details.manualExcerpt ?? '';
-					myRole = details.myRole ?? 'owner';
-					documentType = details.documentType ?? 'rich_text';
-					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
-					content = await refreshSignedImageSources(data.contentJson ?? EMPTY_DOC);
-					return;
-				}
-
-				const [details, data] = await Promise.all([
-					getPublicDocumentDetails(documentId),
-					getPublicDocumentContent(documentId)
-				]);
-
-				title = details.title ?? '';
-				manualExcerpt = details.manualExcerpt ?? '';
-				myRole = 'viewer';
-				documentType = details.documentType ?? 'rich_text';
-				preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
-				content = data.contentJson ?? EMPTY_DOC;
+				await loadViewDocument(documentId);
 			} catch (error) {
 				console.error('[View] Failed to load document:', error);
-				if (
-					!$auth.token &&
-					error instanceof Error &&
-					(error as Error & { status?: number }).status === 401
-				) {
+				if (error instanceof Error && (error as Error & { status?: number }).status === 401) {
 					requireSignIn = true;
 					return;
 				}
