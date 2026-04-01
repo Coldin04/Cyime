@@ -106,6 +106,8 @@ func main() {
 	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
 	workspaceRoutes.Post("/document-invites/:id/accept", workspace.AcceptDocumentInviteHandler)
 	workspaceRoutes.Post("/document-invites/:id/decline", workspace.DeclineDocumentInviteHandler)
+	workspaceRoutes.Get("/documents/:id/presence", workspace.GetDocumentPresenceHandler)
+	workspaceRoutes.Put("/documents/:id/presence", workspace.HeartbeatDocumentPresenceHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document

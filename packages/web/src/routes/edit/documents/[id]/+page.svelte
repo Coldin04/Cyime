@@ -15,10 +15,11 @@
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
 	import { auth } from '$lib/stores/auth';
+	import { resolveApiUrl } from '$lib/config/api';
 	import { realtimeConfig } from '$lib/stores/realtime';
 	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
 	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
-	import { getDocumentDetails, listDocumentMembers, updateDocumentImageTarget } from '$lib/api/workspace';
+	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
 		getDocumentImageTargetLabel,
@@ -53,11 +54,10 @@
 	>(null);
 	let detachCollaborationListeners: (() => void) | null = null;
 	let presenceCount = $state(0);
-	let isSharedDocument = $state(false);
-	let presenceSocket: WebSocket | null = null;
 	let presenceConnected = $state(false);
 	let hasAttemptedPresence = $state(false);
-	let presenceReconnectTimer: number | null = null;
+	let presenceSessionId = $state('');
+	let presenceHeartbeatTimer: number | null = null;
 	let isInitializingCollaboration = $state(false);
 	let lastCollaborationAttemptAt = $state(0);
 	let isYjsConnected = $state(false);
@@ -216,8 +216,11 @@
 		if (isLoading) return;
 		hasUnsavedChanges = true;
 		content = newContent;
-		if (documentId && isSharedDocument && !presenceSocket && presenceReconnectTimer === null) {
+		if (documentId) {
 			void connectPresenceSocket(documentId);
+			if (!collaboration) {
+				void startCollaboration(documentId, 'editing');
+			}
 		}
 	}
 
@@ -235,11 +238,6 @@
 	}
 
 	function updateCollaborationIndicator() {
-		if (!isSharedDocument) {
-			collaborationIndicator = { kind: 'single', label: '当前为个人文档，未启用协作' };
-			return;
-		}
-
 		if (presenceCount > 1) {
 			if (isYjsConnected) {
 				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
@@ -261,24 +259,12 @@
 		collaborationIndicator = { kind: 'single', label: '当前仅你在线编辑' };
 	}
 
-	function clearPresenceReconnect() {
-		if (presenceReconnectTimer !== null) {
-			window.clearTimeout(presenceReconnectTimer);
-			presenceReconnectTimer = null;
+	function ensurePresenceSessionId() {
+		if (presenceSessionId !== '') {
+			return presenceSessionId;
 		}
-	}
-
-	function schedulePresenceReconnect(nextDocumentId: string) {
-		if (!browser || !isSharedDocument || presenceReconnectTimer !== null) {
-			return;
-		}
-
-		presenceReconnectTimer = window.setTimeout(() => {
-			presenceReconnectTimer = null;
-			if (!presenceSocket && documentId === nextDocumentId) {
-				void connectPresenceSocket(nextDocumentId);
-			}
-		}, 5000);
+		presenceSessionId = crypto.randomUUID();
+		return presenceSessionId;
 	}
 
 	async function resolveRealtimeWsUrl(): Promise<string> {
@@ -298,30 +284,15 @@
 		return wsUrl;
 	}
 
-	function buildRealtimePresenceURL(wsUrl: string, nextDocumentId: string): string {
-		const normalized =
-			wsUrl.startsWith('ws://') || wsUrl.startsWith('wss://')
-				? wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
-				: wsUrl;
-		const url = new URL(normalized, window.location.origin);
-		url.pathname = url.pathname.replace(/\/ws$/, '/presence');
+	function buildRealtimePresenceURL(nextDocumentId: string): string {
+		const url = new URL(resolveApiUrl('/api/v1/workspace/documents/_/presence'), window.location.origin);
+		url.pathname = url.pathname.replace('/_', `/${nextDocumentId}`);
 		url.search = '';
-		url.searchParams.set('documentId', nextDocumentId);
-		return url.toString();
-	}
-
-	function buildRealtimePresenceWSURL(wsUrl: string, nextDocumentId: string, token: string): string {
-		const url = new URL(wsUrl, window.location.origin);
-		url.pathname = url.pathname.replace(/\/ws$/, '/presence/ws');
-		url.search = '';
-		url.searchParams.set('documentId', nextDocumentId);
-		url.searchParams.set('token', token);
 		return url.toString();
 	}
 
 	async function fetchCollaborationPresence(nextDocumentId: string): Promise<number> {
-		const wsUrl = await resolveRealtimeWsUrl();
-		const response = await fetch(buildRealtimePresenceURL(wsUrl, nextDocumentId), {
+		const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
 			headers: {
 				Authorization: `Bearer ${authSignal.token}`
 			},
@@ -336,20 +307,14 @@
 	}
 
 	function clearPresenceSocket() {
-		clearPresenceReconnect();
-		if (!presenceSocket) {
-			return;
+		if (presenceHeartbeatTimer !== null) {
+			window.clearInterval(presenceHeartbeatTimer);
+			presenceHeartbeatTimer = null;
 		}
-		presenceSocket.onopen = null;
-		presenceSocket.onmessage = null;
-		presenceSocket.onerror = null;
-		presenceSocket.onclose = null;
-		presenceSocket.close();
-		presenceSocket = null;
 	}
 
 	async function connectPresenceSocket(nextDocumentId: string) {
-		if (!browser || !isSharedDocument || presenceSocket) {
+		if (!browser || presenceHeartbeatTimer !== null) {
 			return;
 		}
 
@@ -359,61 +324,40 @@
 		}
 
 		hasAttemptedPresence = true;
-		const wsUrl = await resolveRealtimeWsUrl();
-		console.log(`[Presence] Opening presence socket for ${nextDocumentId}`);
-		const socket = new WebSocket(buildRealtimePresenceWSURL(wsUrl, nextDocumentId, token));
-		presenceSocket = socket;
-
-		socket.onopen = () => {
-			presenceConnected = true;
-			collaborationError = null;
-			console.log(`[Presence] Connected for ${nextDocumentId}`);
-			updateCollaborationIndicator();
-			socket.send(JSON.stringify({ type: 'subscribe', documentId: nextDocumentId }));
-		};
-
-		socket.onmessage = (event) => {
+		const sessionId = ensurePresenceSessionId();
+		const heartbeat = async () => {
 			try {
-				const payload = JSON.parse(event.data as string) as {
-					type?: string;
-					connectedCount?: number;
-				};
-				if (payload.type !== 'presence') {
-					return;
+				const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
+					method: 'PUT',
+					headers: {
+						Authorization: `Bearer ${token}`,
+						'Content-Type': 'application/json',
+						'X-Presence-Session-Id': sessionId
+					},
+					credentials: 'include',
+					body: JSON.stringify({ sessionId })
+				});
+				if (!response.ok) {
+					throw new Error(`Presence heartbeat failed: ${response.status}`);
 				}
-
+				const payload = (await response.json()) as { connectedCount?: number };
 				presenceCount = typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
-				collaborationError = null;
+				presenceConnected = true;
+				collaborationError = isYjsConnected ? null : collaborationError;
 				console.log(`[Presence] ${nextDocumentId} has ${presenceCount} active session(s)`);
 				updateCollaborationIndicator();
-				if (presenceCount >= 2) {
-					console.log(`[Collaboration] Presence threshold reached for ${nextDocumentId}, starting Yjs`);
-					void startCollaboration(nextDocumentId, 'presence');
-				}
 			} catch (error) {
-				console.error('[Presence] Failed to parse payload:', error);
-			}
-		};
-
-		socket.onerror = () => {
-			presenceConnected = false;
-			collaborationError = 'presence-disconnected';
-			console.warn(`[Presence] Socket error for ${nextDocumentId}`);
-			updateCollaborationIndicator();
-		};
-
-		socket.onclose = () => {
-			if (presenceSocket === socket) {
-				presenceSocket = null;
-			}
-			presenceConnected = false;
-			if (isSharedDocument) {
-				collaborationError = 'presence-disconnected';
-				console.warn(`[Presence] Socket closed for ${nextDocumentId}`);
+				presenceConnected = false;
+				console.warn(`[Presence] Heartbeat failed for ${nextDocumentId}:`, error);
 				updateCollaborationIndicator();
-				schedulePresenceReconnect(nextDocumentId);
 			}
 		};
+
+		console.log(`[Presence] Starting backend heartbeat for ${nextDocumentId}`);
+		await heartbeat();
+		presenceHeartbeatTimer = window.setInterval(() => {
+			void heartbeat();
+		}, 5000);
 	}
 
 	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
@@ -438,13 +382,6 @@
 	}
 
 	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
-		if (!isSharedDocument || (presenceCount < 2 && reason !== 'editing')) {
-			console.log(
-				`[Collaboration] Start skipped for ${nextDocumentId}: shared=${isSharedDocument}, presenceCount=${presenceCount}, reason=${reason}`
-			);
-			return;
-		}
-
 		const now = Date.now();
 		if (
 			isInitializingCollaboration ||
@@ -635,16 +572,12 @@
 				try {
 					console.log('[Load] Loading document for ID:', documentId);
 					// Load document details (for title) and content in parallel
-					const [details, data, configs, members] = await Promise.all([
+					const [details, data, configs] = await Promise.all([
 						getDocumentDetails(documentId),
 						getDocumentContent(documentId),
 						getImageBedConfigs().catch((error) => {
 							console.error('[Load] Failed to load image bed configs:', error);
 							return [] as ImageBedConfig[];
-						}),
-						listDocumentMembers(documentId).catch((error) => {
-							console.error('[Load] Failed to load document members:', error);
-							return null;
 						})
 					]);
 
@@ -664,10 +597,6 @@
 					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
-					isSharedDocument =
-						(members?.members.length ?? 0) > 1 ||
-						(details.publicAccess ?? 'private') !== 'private' ||
-						(details.myRole ?? 'owner') !== 'owner';
 					hasUnsavedChanges = false;
 					lastSaved = null;
 					presenceCount = 0;
@@ -687,20 +616,16 @@
 
 					void (async () => {
 						try {
-							presenceCount = isSharedDocument ? await fetchCollaborationPresence(documentId) : 0;
+							presenceCount = await fetchCollaborationPresence(documentId);
 							updateCollaborationIndicator();
-							if (isSharedDocument) {
-								await connectPresenceSocket(documentId);
-							}
-							if (presenceCount >= 2) {
-								await startCollaboration(documentId, 'presence');
-							}
+							await connectPresenceSocket(documentId);
+							await startCollaboration(documentId, 'presence');
 						} catch (presenceError) {
 							console.error('[Collaboration] Failed to fetch presence:', presenceError);
 							presenceCount = 0;
 							presenceConnected = false;
-							hasAttemptedPresence = isSharedDocument;
-							collaborationError = isSharedDocument ? 'presence-disconnected' : null;
+							hasAttemptedPresence = true;
+							collaborationError = 'presence-disconnected';
 							isYjsConnected = false;
 							updateCollaborationIndicator();
 						}
@@ -709,7 +634,6 @@
 					console.error('[Load] Failed to load document:', error);
 					collaboration = null;
 					collaborationIndicator = null;
-					isSharedDocument = false;
 					isYjsConnected = false;
 					clearPresenceSocket();
 					clearCollaborationListeners();
