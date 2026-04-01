@@ -91,17 +91,18 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
-	const collaborationCursorPalette = [
-		'#0f766e',
-		'#0f766e',
+	const LOCAL_CURSOR_COLOR = '#16a34a';
+	const remoteCursorPalette = [
 		'#2563eb',
 		'#9333ea',
 		'#ea580c',
 		'#dc2626',
-		'#ca8a04',
 		'#1d4ed8',
 		'#be123c',
-		'#0891b2'
+		'#0891b2',
+		'#7c3aed',
+		'#c2410c',
+		'#b91c1c'
 	] as const;
 
 	function hashString(value: string): number {
@@ -119,22 +120,33 @@
 			authState.user?.displayName?.trim() ||
 			authState.user?.email?.trim() ||
 			`协作者 ${id.slice(0, 6)}`;
-		const color = collaborationCursorPalette[hashString(id) % collaborationCursorPalette.length];
+		const color = LOCAL_CURSOR_COLOR;
 
 		return { id, name, color };
 	}
 
-	function renderCollaborationCursor(user: { name?: string; color?: string }) {
+	function getRemoteCursorColor(userId: string) {
+		return remoteCursorPalette[hashString(userId) % remoteCursorPalette.length];
+	}
+
+	function renderCollaborationCursor(
+		user: { id?: string; name?: string; color?: string },
+		localUserId: string
+	) {
 		const cursor = document.createElement('span');
 		cursor.classList.add('collaboration-cursor__caret');
-		cursor.style.setProperty('--user-color', user.color ?? '#0f766e');
+		const isLocal = user.id === localUserId;
+		const effectiveColor = isLocal
+			? LOCAL_CURSOR_COLOR
+			: getRemoteCursorColor(user.id ?? user.name ?? 'remote-user');
+		cursor.style.setProperty('--user-color', effectiveColor);
 
 		const label = document.createElement('span');
 		label.classList.add('collaboration-cursor__label', 'cw-cursor-label');
 
 		const dot = document.createElement('span');
 		dot.classList.add('cw-cursor-dot');
-		dot.style.backgroundColor = user.color ?? '#0f766e';
+		dot.style.backgroundColor = effectiveColor;
 
 		const text = document.createElement('span');
 		text.classList.add('cw-cursor-name');
@@ -508,7 +520,7 @@
 				CollaborationCursor.configure({
 					provider: collaboration.provider,
 					user: collaborationUser,
-					render: renderCollaborationCursor
+					render: (user) => renderCollaborationCursor(user, collaborationUser.id)
 				})
 			);
 		}
@@ -596,8 +608,7 @@
 					}
 				},
 				attributes: {
-					class:
-						'tiptap min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'
+					class: `tiptap ${collaboration?.doc ? 'cw-collab-mode' : ''} min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%}`
 				}
 			},
 			onUpdate: ({ editor }) => {

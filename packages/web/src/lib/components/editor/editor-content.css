@@ -39,6 +39,10 @@
 	outline: none;
 }
 
+.tiptap.cw-collab-mode {
+	caret-color: #16a34a;
+}
+
 .tiptap p.is-editor-empty:first-child::before {
 	color: rgb(161 161 170);
 	content: attr(data-placeholder);
@@ -236,9 +240,9 @@
 }
 
 .tiptap .collaboration-cursor__caret {
-	border-left: 3px solid var(--user-color);
+	border-left: 1px solid var(--user-color);
 	border-right: 0;
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--user-color) 50%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--user-color) 35%, transparent);
 	height: 1.1em;
 	margin-left: -1px;
 	margin-right: 0;
