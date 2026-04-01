@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "node --loader ts-node/esm src/index.ts",
+    "dev": "node --experimental-strip-types src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },

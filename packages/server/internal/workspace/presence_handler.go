@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	presenceTTL              = 50 * time.Second
+	presenceTTL              = 40 * time.Second
 	presenceDefaultSessionID = "default-session"
 )
 
@@ -34,7 +34,7 @@ var (
 	presenceMu        sync.Mutex
 	presenceStore     = map[uuid.UUID]map[string]presenceEntry{}
 	presenceAuthMu    sync.Mutex
-	presenceAuthTTL   = 50 * time.Second
+	presenceAuthTTL   = 40 * time.Second
 	presenceAuthCache = map[uuid.UUID]map[uuid.UUID]time.Time{}
 )
 

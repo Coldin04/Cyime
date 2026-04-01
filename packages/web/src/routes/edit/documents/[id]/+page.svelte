@@ -177,6 +177,10 @@
 		return cloned;
 	}
 
+	function serializeComparableContent(input: JSONContent): string {
+		return JSON.stringify(normalizeManagedImagesForSave(input));
+	}
+
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
 	let pageSignal = $state(get(page));
@@ -221,6 +225,9 @@
 
 	function handleContentChange(newContent: JSONContent) {
 		if (isLoading) return;
+		if (serializeComparableContent(content) === serializeComparableContent(newContent)) {
+			return;
+		}
 		hasUnsavedChanges = true;
 		content = newContent;
 		if (documentId) {
