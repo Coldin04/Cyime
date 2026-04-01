@@ -102,6 +102,19 @@ func readPresence(documentID uuid.UUID) (int, int) {
 	return countPresenceLocked(documentID)
 }
 
+func cleanupPresenceAuthLocked(now time.Time) {
+	for documentID, users := range presenceAuthCache {
+		for userID, expiry := range users {
+			if now.After(expiry) {
+				delete(users, userID)
+			}
+		}
+		if len(users) == 0 {
+			delete(presenceAuthCache, documentID)
+		}
+	}
+}
+
 func canReadDocumentForPresence(userID, documentID uuid.UUID) error {
 	now := time.Now()
 
@@ -118,6 +131,7 @@ func canReadDocumentForPresence(userID, documentID uuid.UUID) error {
 	}
 
 	presenceAuthMu.Lock()
+	cleanupPresenceAuthLocked(now)
 	documentCache = presenceAuthCache[documentID]
 	if documentCache == nil {
 		documentCache = map[uuid.UUID]time.Time{}

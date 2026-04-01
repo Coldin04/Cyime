@@ -133,13 +133,13 @@ $effect(() => {
 	function roleLabel(role: string) {
 		switch (role) {
 			case 'owner':
-				return '所有者';
+				return m.workspace_shared_role_owner();
 			case 'collaborator':
-				return '协同者';
+				return m.workspace_shared_role_collaborator();
 			case 'editor':
-				return '编辑者';
+				return m.workspace_shared_role_editor();
 			default:
-				return '查看者';
+				return m.workspace_shared_role_viewer();
 		}
 	}
 

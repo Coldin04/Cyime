@@ -3,7 +3,6 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { get } from 'svelte/store';
 	import { auth } from '$lib/stores/auth';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
@@ -106,9 +105,7 @@
 		return cloned;
 	}
 
-	let pageSignal = $state(get(page));
-	page.subscribe((p) => (pageSignal = p));
-	const documentId = $derived(pageSignal.params?.id);
+	const documentId = $derived($page.params?.id);
 	const canOpenEditor = $derived(myRole !== 'viewer');
 
 	async function loadViewDocument(nextDocumentId: string) {

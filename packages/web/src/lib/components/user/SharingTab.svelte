@@ -7,9 +7,10 @@
 	} from '$lib/api/workspace';
 	import OutgoingSharedDocumentListItem from '$lib/components/user/OutgoingSharedDocumentListItem.svelte';
 	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
-	import DocumentListItemSkeleton from '$lib/components/workspace/DocumentListItemSkeleton.svelte';
+	import SharedDocumentListItemSkeleton from '$lib/components/workspace/SharedDocumentListItemSkeleton.svelte';
 	import { portal } from '$lib/actions/portal';
 	import { toast } from 'svelte-sonner';
+	import * as m from '$paraglide/messages';
 	import X from '~icons/ph/x';
 	import Copy from '~icons/ph/copy-simple';
 
@@ -41,7 +42,7 @@
 			hasMore = data.hasMore;
 			offset = data.items.length;
 		} catch (error) {
-			loadError = error instanceof Error ? error.message : '加载共享管理失败';
+			loadError = error instanceof Error ? error.message : m.user_sharing_error_load_failed();
 			items = [];
 			hasMore = false;
 			offset = 0;
@@ -59,7 +60,7 @@
 			hasMore = data.hasMore;
 			offset += data.items.length;
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '加载更多失败');
+			toast.error(error instanceof Error ? error.message : m.user_sharing_error_load_more_failed());
 		} finally {
 			isLoadingMore = false;
 		}
@@ -100,9 +101,9 @@
 			setTimeout(() => {
 				copiedPublicURL = false;
 			}, 1200);
-			toast.success('链接已复制');
+			toast.success(m.user_sharing_toast_link_copied());
 		} catch {
-			toast.error('复制链接失败');
+			toast.error(m.user_sharing_toast_copy_failed());
 		}
 	}
 
@@ -128,9 +129,9 @@
 				publicAccessDoc = updatedItem;
 			}
 
-			toast.success(response.publicAccess === 'private' ? '已关闭公开访问' : '公开访问已更新');
+			toast.success(response.publicAccess === 'private' ? m.user_sharing_toast_public_access_disabled() : m.user_sharing_toast_public_access_updated());
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : '更新公开访问失败');
+			toast.error(error instanceof Error ? error.message : m.user_sharing_toast_public_access_update_failed());
 		} finally {
 			isSavingPublicAccess = false;
 		}
@@ -139,29 +140,29 @@
 	function publicAccessLabel(access: string) {
 		switch (access) {
 			case 'public':
-				return '所有人可访问';
+				return m.user_sharing_public_access_desc_public();
 			case 'authenticated':
-				return '登录用户可访问';
+				return m.user_sharing_public_access_desc_authenticated();
 			default:
-				return '仅私有';
+				return m.user_sharing_public_access_desc_private();
 		}
 	}
 </script>
 
 <section class="space-y-6">
 	<div>
-		<h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">共享出去的文档</h2>
+		<h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.user_sharing_section_title()}</h2>
 		<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-			这里集中管理你共享给他人的文档，以及开启了公开访问的文档。
+			{m.user_sharing_section_description()}
 		</p>
 	</div>
 
 	<div class="border-t border-zinc-200 dark:border-zinc-700">
 		{#if isLoading}
 			<div>
-				<DocumentListItemSkeleton />
-				<DocumentListItemSkeleton />
-				<DocumentListItemSkeleton />
+				<SharedDocumentListItemSkeleton />
+				<SharedDocumentListItemSkeleton />
+				<SharedDocumentListItemSkeleton />
 			</div>
 		{:else if loadError}
 			<div class="p-4">
@@ -172,15 +173,15 @@
 						class="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
 						onclick={() => void loadInitial()}
 					>
-						重试
+						{m.user_sharing_retry()}
 					</button>
 				</div>
 			</div>
 		{:else if items.length === 0}
 			<div class="px-6 py-14 text-center">
-				<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">还没有可管理的共享文档</h3>
+				<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.user_sharing_empty_title()}</h3>
 				<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-					当文档共享给他人，或开启了公开访问后，会出现在这里。
+					{m.user_sharing_empty_description()}
 				</p>
 			</div>
 		{:else}
@@ -202,7 +203,7 @@
 						onclick={() => void loadMore()}
 						disabled={isLoadingMore}
 					>
-						{isLoadingMore ? '加载中...' : '加载更多'}
+						{isLoadingMore ? m.user_sharing_loading() : m.user_sharing_load_more()}
 					</button>
 				</div>
 			{/if}
@@ -221,7 +222,7 @@
 			class="w-full max-w-2xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
 			role="dialog"
 			aria-modal="true"
-			aria-label="管理成员"
+			aria-label={m.user_sharing_dialog_manage_members_title()}
 			tabindex="-1"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => {
@@ -232,7 +233,7 @@
 		>
 			<header class="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
 				<div class="min-w-0">
-					<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">管理成员</p>
+					<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.user_sharing_dialog_manage_members_title()}</p>
 					<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{manageMembersDoc.title}</p>
 				</div>
 				<button
@@ -261,7 +262,7 @@
 			class="w-full max-w-xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
 			role="dialog"
 			aria-modal="true"
-			aria-label="公开访问"
+			aria-label={m.user_sharing_dialog_public_access_title()}
 			tabindex="-1"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => {
@@ -272,7 +273,7 @@
 		>
 			<header class="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
 				<div class="min-w-0">
-					<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">公开访问</p>
+					<p class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.user_sharing_dialog_public_access_title()}</p>
 					<p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{publicAccessDoc.title}</p>
 				</div>
 				<button
@@ -286,23 +287,23 @@
 			<div class="space-y-6 p-4">
 				<div class="space-y-2">
 					<label for="sharing-public-access" class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-						访问范围
+						{m.user_sharing_public_access_scope_label()}
 					</label>
 					<select
 						id="sharing-public-access"
 						bind:value={draftPublicAccess}
 						class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
 					>
-						<option value="private">私有</option>
-						<option value="authenticated">登录用户可访问</option>
-						<option value="public">公开</option>
+						<option value="private">{m.user_sharing_public_access_private_option()}</option>
+						<option value="authenticated">{m.user_sharing_public_access_authenticated_option()}</option>
+						<option value="public">{m.user_sharing_public_access_public_option()}</option>
 					</select>
 					<p class="text-xs text-zinc-500 dark:text-zinc-400">{publicAccessLabel(draftPublicAccess)}</p>
 				</div>
 
 				{#if draftPublicAccess !== 'private'}
 					<div class="space-y-2">
-						<p class="text-xs font-medium text-zinc-500 dark:text-zinc-400">公开链接</p>
+						<p class="text-xs font-medium text-zinc-500 dark:text-zinc-400">{m.user_sharing_public_link_label()}</p>
 						<div class="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-700 dark:bg-zinc-900">
 							<div class="min-w-0 flex-1 truncate px-2 text-sm text-zinc-700 dark:text-zinc-200">
 								{resolveAbsolutePublicURL(publicAccessDoc)}
@@ -315,7 +316,7 @@
 										void copyPublicURL(publicAccessDoc);
 									}
 								}}
-								title={copiedPublicURL ? '已复制' : '复制链接'}
+								title={copiedPublicURL ? m.user_sharing_copied_tooltip() : m.user_sharing_copy_link_tooltip()}
 							>
 								<Copy class="h-4 w-4" />
 							</button>
@@ -329,7 +330,7 @@
 						class="rounded-lg px-4 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 						onclick={closePublicAccess}
 					>
-						取消
+						{m.user_sharing_action_cancel()}
 					</button>
 					<button
 						type="button"
@@ -337,7 +338,7 @@
 						onclick={() => void savePublicAccess()}
 						disabled={isSavingPublicAccess}
 					>
-						{isSavingPublicAccess ? '保存中...' : '保存'}
+						{isSavingPublicAccess ? m.user_sharing_saving() : m.user_sharing_action_save()}
 					</button>
 				</div>
 			</div>

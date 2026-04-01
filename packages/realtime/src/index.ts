@@ -131,9 +131,13 @@ function normalizeDocumentId(rawName?: string): string {
 
 function setCORSHeaders(request: IncomingMessage, response: ServerResponse) {
 	const origin = request.headers.origin;
-	response.setHeader('Access-Control-Allow-Origin', origin ?? '*');
+	if (origin) {
+		response.setHeader('Access-Control-Allow-Origin', origin);
+		response.setHeader('Access-Control-Allow-Credentials', 'true');
+	} else {
+		response.setHeader('Access-Control-Allow-Origin', '*');
+	}
 	response.setHeader('Vary', 'Origin');
-	response.setHeader('Access-Control-Allow-Credentials', 'true');
 	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 	response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 }
