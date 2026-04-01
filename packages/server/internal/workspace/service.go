@@ -418,6 +418,107 @@ func GetSharedDocumentSummary(userID uuid.UUID) (*SharedDocumentSummaryResponse,
 	}
 }
 
+func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*OutgoingSharedDocumentListResponse, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	managedQuery := database.DB.
+		Table("documents AS d").
+		Joins("LEFT JOIN document_permissions AS self_perms ON self_perms.document_id = d.id AND self_perms.user_id = ? AND self_perms.deleted_at IS NULL", userID).
+		Where("d.deleted_at IS NULL").
+		Where("(d.owner_user_id = ? OR self_perms.role = ?)", userID, acl.RoleCollaborator).
+		Where(`
+			d.public_access <> ? OR EXISTS (
+				SELECT 1
+				FROM document_permissions AS member_perms
+				WHERE member_perms.document_id = d.id
+					AND member_perms.deleted_at IS NULL
+					AND member_perms.user_id <> d.owner_user_id
+			)
+		`, PublicAccessPrivate)
+
+	var total int64
+	if err := managedQuery.Distinct("d.id").Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	type row struct {
+		DocumentID             uuid.UUID
+		Title                  string
+		Excerpt                string
+		ManualExcerpt          string
+		DocumentType           string
+		PreferredImageTargetID string
+		FolderID               *uuid.UUID
+		OwnerUserID            uuid.UUID
+		MyRole                 string
+		PublicAccess           string
+		SharedMemberCount      int64
+		CreatedAt              time.Time
+		UpdatedAt              time.Time
+	}
+
+	var rows []row
+	if err := managedQuery.
+		Select(
+			"d.id AS document_id",
+			"d.title",
+			"d.excerpt",
+			"d.manual_excerpt",
+			"d.document_type",
+			"d.preferred_image_target_id",
+			"d.folder_id",
+			"d.owner_user_id",
+			"self_perms.role AS my_role",
+			"d.public_access",
+			"(SELECT COUNT(1) FROM document_permissions AS member_perms WHERE member_perms.document_id = d.id AND member_perms.deleted_at IS NULL AND member_perms.user_id <> d.owner_user_id) AS shared_member_count",
+			"d.created_at",
+			"d.updated_at",
+		).
+		Order("d.updated_at desc").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]OutgoingSharedDocumentItem, 0, len(rows))
+	for _, item := range rows {
+		myRole := item.MyRole
+		if item.OwnerUserID == userID {
+			myRole = acl.RoleOwner
+		}
+
+		items = append(items, OutgoingSharedDocumentItem{
+			DocumentID:             item.DocumentID,
+			Title:                  item.Title,
+			Excerpt:                resolveDocumentListExcerpt(item.Excerpt, item.ManualExcerpt),
+			DocumentType:           item.DocumentType,
+			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(item.PreferredImageTargetID),
+			FolderID:               item.FolderID,
+			MyRole:                 myRole,
+			PublicAccess:           normalizePublicAccess(item.PublicAccess),
+			PublicURL:              buildDocumentPublicURL(item.DocumentID),
+			SharedMemberCount:      item.SharedMemberCount,
+			CreatedAt:              item.CreatedAt,
+			UpdatedAt:              item.UpdatedAt,
+		})
+	}
+
+	return &OutgoingSharedDocumentListResponse{
+		Items:   items,
+		HasMore: int64(offset+len(items)) < total,
+		Total:   total,
+	}, nil
+}
+
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
 	// Default values

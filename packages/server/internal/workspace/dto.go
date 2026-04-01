@@ -213,6 +213,27 @@ type SharedDocumentSummaryResponse struct {
 	HasSharedDocuments bool `json:"hasSharedDocuments"`
 }
 
+type OutgoingSharedDocumentItem struct {
+	DocumentID             uuid.UUID  `json:"documentId"`
+	Title                  string     `json:"title"`
+	Excerpt                string     `json:"excerpt"`
+	DocumentType           string     `json:"documentType"`
+	PreferredImageTargetID string     `json:"preferredImageTargetId"`
+	FolderID               *uuid.UUID `json:"folderId,omitempty"`
+	MyRole                 string     `json:"myRole"`
+	PublicAccess           string     `json:"publicAccess"`
+	PublicURL              string     `json:"publicUrl"`
+	SharedMemberCount      int64      `json:"sharedMemberCount"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+}
+
+type OutgoingSharedDocumentListResponse struct {
+	Items   []OutgoingSharedDocumentItem `json:"items"`
+	HasMore bool                         `json:"hasMore"`
+	Total   int64                        `json:"total"`
+}
+
 type NotificationItem struct {
 	ID        uuid.UUID       `json:"id"`
 	UserID    uuid.UUID       `json:"userId"`
@@ -233,7 +254,7 @@ type NotificationListResponse struct {
 
 // DocumentACLResponse represents the ACL information for a document
 type DocumentACLResponse struct {
-	MyRole           string `json:"myRole"`           // "viewer", "editor", "collaborator", "owner"
+	MyRole           string `json:"myRole"` // "viewer", "editor", "collaborator", "owner"
 	CanRead          bool   `json:"canRead"`
 	CanEdit          bool   `json:"canEdit"`
 	CanManageMembers bool   `json:"canManageMembers"`

@@ -6,6 +6,7 @@
 	import SecurityTab from '$lib/components/user/SecurityTab.svelte';
 	import MediaTab from '$lib/components/user/MediaTab.svelte';
 	import ImageBedsTab from '$lib/components/user/ImageBedsTab.svelte';
+	import SharingTab from '$lib/components/user/SharingTab.svelte';
 
 	let tab = $derived($page.params.tab || 'overview');
 
@@ -14,7 +15,8 @@
 		get profile() { return m.user_nav_profile(); },
 		get 'image-beds'() { return m.user_nav_image_beds(); },
 		get security() { return m.user_security_title(); },
-		get media() { return m.user_media_title(); }
+		get media() { return m.user_media_title(); },
+		sharing: '共享管理'
 	};
 
 	const descriptions: Record<string, any> = {
@@ -22,7 +24,8 @@
 		get profile() { return m.user_profile_description(); },
 		get 'image-beds'() { return m.user_image_beds_description(); },
 		get security() { return m.user_security_description(); },
-		get media() { return m.user_media_description(); }
+		get media() { return m.user_media_description(); },
+		sharing: '查看你共享给他人的文档，以及已开启公开访问的文档。'
 	};
 </script>
 
@@ -50,5 +53,7 @@
 		<SecurityTab />
 	{:else if tab === 'media'}
 		<MediaTab />
+	{:else if tab === 'sharing'}
+		<SharingTab />
 	{/if}
 </section>

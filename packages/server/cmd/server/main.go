@@ -85,6 +85,7 @@ func main() {
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
 	workspaceRoutes.Get("/shared/summary", workspace.SharedDocumentSummaryHandler)
 	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
+	workspaceRoutes.Get("/shared/outgoing", workspace.ListOutgoingSharedDocumentsHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 	workspaceRoutes.Post("/documents", workspace.CreateDocumentHandler)

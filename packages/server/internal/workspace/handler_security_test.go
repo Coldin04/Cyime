@@ -23,6 +23,7 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 	app.Get("/public/documents/:id", GetPublicDocumentHandler)
 	app.Get("/shared/summary", SharedDocumentSummaryHandler)
 	app.Get("/shared/documents", ListSharedDocumentsHandler)
+	app.Get("/shared/outgoing", ListOutgoingSharedDocumentsHandler)
 	app.Get("/documents/:id/shares", ListDocumentMembersHandler)
 	app.Put("/documents/:id/excerpt", UpdateDocumentExcerptHandler)
 	app.Put("/documents/:id/public-access", UpdateDocumentPublicAccessHandler)
@@ -186,6 +187,35 @@ func TestListSharedDocumentsHandler_ReturnsSharedDocs(t *testing.T) {
 	}
 	if len(payload.Items) != 1 || payload.Items[0].DocumentID != docID {
 		t.Fatalf("unexpected shared payload: %+v", payload)
+	}
+}
+
+func TestListOutgoingSharedDocumentsHandler_ReturnsManagedDocs(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "viewer")
+
+	app := newWorkspaceTestApp(ownerID)
+	req := httptest.NewRequest(http.MethodGet, "/shared/outgoing", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload OutgoingSharedDocumentListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].DocumentID != docID {
+		t.Fatalf("unexpected outgoing payload: %+v", payload)
+	}
+	if payload.Items[0].SharedMemberCount != 1 {
+		t.Fatalf("expected sharedMemberCount=1, got %+v", payload.Items[0])
 	}
 }
 

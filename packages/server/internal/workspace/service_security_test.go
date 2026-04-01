@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
@@ -536,6 +537,59 @@ func TestListSharedDocuments_ReturnsPermissionedDocs(t *testing.T) {
 	}
 	if result.Items[0].MyRole != "viewer" {
 		t.Fatalf("expected viewer role, got %+v", result.Items[0])
+	}
+}
+
+func TestListOutgoingSharedDocuments_ReturnsManagedSharedAndPublicDocs(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docSharedID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	docPublicID := seedDocumentForWorkspace(t, db, ownerID, "public-doc")
+	docPrivateID := seedDocumentForWorkspace(t, db, ownerID, "private-doc")
+
+	seedWorkspacePermission(t, db, docSharedID, sharedUserID, ownerID, "viewer")
+	if err := db.Model(&models.Document{}).Where("id = ?", docPublicID).Update("public_access", PublicAccessAuthenticated).Error; err != nil {
+		t.Fatalf("set public access: %v", err)
+	}
+	if err := db.Model(&models.Document{}).Where("id = ?", docPublicID).Update("updated_at", time.Now().Add(time.Second)).Error; err != nil {
+		t.Fatalf("touch public doc: %v", err)
+	}
+	if err := db.Model(&models.Document{}).Where("id = ?", docPrivateID).Update("updated_at", time.Now().Add(-time.Second)).Error; err != nil {
+		t.Fatalf("touch private doc: %v", err)
+	}
+
+	result, err := ListOutgoingSharedDocuments(ownerID, 20, 0)
+	if err != nil {
+		t.Fatalf("list outgoing shared documents: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("expected 2 outgoing docs, got %+v", result.Items)
+	}
+
+	foundShared := false
+	foundPublic := false
+	for _, item := range result.Items {
+		switch item.DocumentID {
+		case docSharedID:
+			foundShared = true
+			if item.SharedMemberCount != 1 {
+				t.Fatalf("expected shared member count 1, got %+v", item)
+			}
+			if item.MyRole != acl.RoleOwner {
+				t.Fatalf("expected owner role, got %+v", item)
+			}
+		case docPublicID:
+			foundPublic = true
+			if item.PublicAccess != PublicAccessAuthenticated {
+				t.Fatalf("expected authenticated public access, got %+v", item)
+			}
+		case docPrivateID:
+			t.Fatalf("unexpected private doc in outgoing list: %+v", item)
+		}
+	}
+	if !foundShared || !foundPublic {
+		t.Fatalf("missing expected outgoing docs: %+v", result.Items)
 	}
 }
 

@@ -111,6 +111,27 @@ export type SharedDocumentSummaryResponse = {
 	hasSharedDocuments: boolean;
 };
 
+export type OutgoingSharedDocumentItem = {
+	documentId: string;
+	title: string;
+	excerpt: string;
+	documentType: 'rich_text' | 'table' | string;
+	preferredImageTargetId: 'managed-r2' | string;
+	folderId?: string | null;
+	myRole: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	publicAccess: 'private' | 'authenticated' | 'public' | string;
+	publicUrl: string;
+	sharedMemberCount: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type OutgoingSharedDocumentListResponse = {
+	items: OutgoingSharedDocumentItem[];
+	hasMore: boolean;
+	total: number;
+};
+
 /**
  * Fetches the file list from the workspace
  */
@@ -389,6 +410,28 @@ export async function getSharedDocuments(params: {
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to fetch shared documents');
+	}
+	return response.json();
+}
+
+export async function getOutgoingSharedDocuments(params: {
+	limit?: number;
+	offset?: number;
+}): Promise<OutgoingSharedDocumentListResponse> {
+	const queryParams = new URLSearchParams();
+	if (params.limit !== undefined) {
+		queryParams.set('limit', String(params.limit));
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', String(params.offset));
+	}
+	const query = queryParams.toString();
+	const response = await apiFetch(
+		query ? `/api/v1/workspace/shared/outgoing?${query}` : '/api/v1/workspace/shared/outgoing'
+	);
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch outgoing shared documents');
 	}
 	return response.json();
 }
