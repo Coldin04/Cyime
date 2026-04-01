@@ -279,7 +279,13 @@
 
 	function resolvePublicAccessURL() {
 		const current = publicUrl.trim();
-		return current !== '' ? current : `/view/documents/${documentId}`;
+		const fallbackPath = `/view/documents/${documentId}`;
+		const target = current !== '' ? current : fallbackPath;
+		try {
+			return new URL(target, window.location.origin).toString();
+		} catch {
+			return target;
+		}
 	}
 
 	async function savePublicAccess() {
