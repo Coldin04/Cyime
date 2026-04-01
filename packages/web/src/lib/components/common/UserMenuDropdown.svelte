@@ -151,6 +151,7 @@
 		try {
 			if (action === 'accept') {
 				await acceptDocumentInvite(inviteId);
+				window.dispatchEvent(new CustomEvent('workspace:shared-documents-changed'));
 				toast.success(m.workspace_notification_invite_accepted());
 			} else {
 				await declineDocumentInvite(inviteId);

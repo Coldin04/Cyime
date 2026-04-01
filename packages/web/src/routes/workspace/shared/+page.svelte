@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import CaretLeft from '~icons/ph/caret-left';
 	import UsersThree from '~icons/ph/users-three';
 	import * as m from '$paraglide/messages';
@@ -12,6 +13,7 @@
 	import DocumentListItemSkeleton from '$lib/components/workspace/DocumentListItemSkeleton.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
 	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import X from '~icons/ph/x';
 	import { portal } from '$lib/actions/portal';
 
@@ -25,9 +27,21 @@
 	let offset = $state(0);
 
 	let manageMembersDoc = $state<{ id: string; title: string } | null>(null);
+	let leaveTargetDoc = $state<SharedDocumentItem | null>(null);
 
 	$effect(() => {
 		void loadInitial();
+	});
+
+	onMount(() => {
+		const handleSharedDocumentsChanged = () => {
+			void loadInitial();
+		};
+
+		window.addEventListener('workspace:shared-documents-changed', handleSharedDocumentsChanged);
+		return () => {
+			window.removeEventListener('workspace:shared-documents-changed', handleSharedDocumentsChanged);
+		};
 	});
 
 	async function loadInitial() {
@@ -63,16 +77,28 @@
 		}
 	}
 
-	async function handleLeave(doc: SharedDocumentItem) {
-		const ok = window.confirm(m.workspace_shared_leave_confirm({ title: doc.title }));
-		if (!ok) return;
+	function openLeaveConfirm(doc: SharedDocumentItem) {
+		leaveTargetDoc = doc;
+	}
 
+	function closeLeaveConfirm() {
+		leaveTargetDoc = null;
+	}
+
+	async function confirmLeave() {
+		if (!leaveTargetDoc) {
+			return;
+		}
+
+		const doc = leaveTargetDoc;
 		try {
 			await leaveSharedDocument(doc.documentId);
 			items = items.filter((it) => it.documentId !== doc.documentId);
 			toast.success(m.workspace_shared_leave_success());
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : m.workspace_shared_leave_failed());
+		} finally {
+			leaveTargetDoc = null;
 		}
 	}
 </script>
@@ -152,7 +178,7 @@
 				{#each items as doc (doc.documentId)}
 					<SharedDocumentListItem
 						{doc}
-						onLeave={() => void handleLeave(doc)}
+						onLeave={() => openLeaveConfirm(doc)}
 						onManageMembers={() => (manageMembersDoc = { id: doc.documentId, title: doc.title })}
 					/>
 				{/each}
@@ -213,3 +239,13 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmDialog
+	open={leaveTargetDoc !== null}
+	title={m.common_leave()}
+	message={leaveTargetDoc ? m.workspace_shared_leave_confirm({ title: leaveTargetDoc.title }) : ''}
+	confirmText={m.common_leave()}
+	confirmVariant="danger"
+	onCancel={closeLeaveConfirm}
+	onConfirm={confirmLeave}
+/>

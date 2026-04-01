@@ -403,12 +403,14 @@ func TestInviteDocumentByEmailHandler_CreatesPermissionAndNotification(t *testin
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var permission models.DocumentPermission
-	if err := db.Where("document_id = ? AND user_id = ?", docID, inviteeID).First(&permission).Error; err != nil {
-		t.Fatalf("load permission: %v", err)
+	var permissionCount int64
+	if err := db.Model(&models.DocumentPermission{}).
+		Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", docID, inviteeID).
+		Count(&permissionCount).Error; err != nil {
+		t.Fatalf("count permissions: %v", err)
 	}
-	if permission.Role != "editor" {
-		t.Fatalf("expected editor role, got %s", permission.Role)
+	if permissionCount != 0 {
+		t.Fatalf("expected no active permission before invite acceptance, got %d", permissionCount)
 	}
 
 	var notificationCount int64
@@ -515,6 +517,14 @@ func TestAcceptDocumentInviteHandler_UpdatesInviteStatusAndMarksNotificationRead
 	}
 	if notification.ReadAt == nil {
 		t.Fatalf("expected notification to be marked as read")
+	}
+
+	var permission models.DocumentPermission
+	if err := db.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", docID, inviteeID).First(&permission).Error; err != nil {
+		t.Fatalf("load permission after accept: %v", err)
+	}
+	if permission.Role != "collaborator" {
+		t.Fatalf("expected collaborator role after accept, got %s", permission.Role)
 	}
 
 	// 权限生效校验：接受后可读取该共享文档

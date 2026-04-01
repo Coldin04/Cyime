@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
@@ -54,6 +55,17 @@
 	// Skeleton delay state - only show skeleton if loading takes more than 200ms
 	let showSkeleton = $state(false);
 	let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
+
+	onMount(() => {
+		const handleSharedDocumentsChanged = () => {
+			refreshTrigger++;
+		};
+
+		window.addEventListener('workspace:shared-documents-changed', handleSharedDocumentsChanged);
+		return () => {
+			window.removeEventListener('workspace:shared-documents-changed', handleSharedDocumentsChanged);
+		};
+	});
 
 	$effect(() => {
 		const trigger = refreshTrigger;

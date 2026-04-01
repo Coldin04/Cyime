@@ -99,7 +99,7 @@
 <div
 	role="button"
 	tabindex="0"
-	class="group flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/60"
+	class="group relative isolate flex cursor-pointer items-center justify-between border-b border-zinc-200 px-4 py-3 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/60"
 	onclick={handleClick}
 	onkeydown={handleKeyDown}
 >
@@ -154,7 +154,7 @@
 			{#if showMenu}
 				<div
 					role="menu"
-					class="absolute top-full right-0 z-50 mt-1 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black/5 focus:outline-none dark:bg-zinc-900 dark:ring-zinc-800"
+					class="absolute top-full right-0 z-[80] mt-2 w-52 origin-top-right rounded-xl border border-zinc-200 bg-white py-1.5 shadow-2xl ring-1 ring-black/5 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:ring-zinc-800"
 					onclick={(e) => e.stopPropagation()}
 					onkeydown={(e) => {
 						if (e.key === 'Escape') closeMenu();

@@ -88,10 +88,6 @@ func InviteDocumentByEmail(actorUserID, documentID uuid.UUID, email, role string
 			return err
 		}
 
-		if err := upsertDocumentPermission(tx, documentID, invitee.ID, actorUserID, normalizedRole); err != nil {
-			return err
-		}
-
 		var inviter models.User
 		if err := tx.Select("id", "display_name").Where("id = ?", actorUserID).First(&inviter).Error; err != nil {
 			return err
@@ -226,6 +222,9 @@ func AcceptDocumentInvite(userID, inviteID uuid.UUID) error {
 		}
 		if !acl.RoleAllowsAction(invite.Role, acl.ActionRead) {
 			return ErrInviteInvalidRole
+		}
+		if err := upsertDocumentPermission(tx, invite.DocumentID, userID, invite.InviterUserID, invite.Role); err != nil {
+			return err
 		}
 
 		now := time.Now()
