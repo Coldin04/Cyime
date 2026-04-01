@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	presenceTTL              = 20 * time.Second
+	presenceTTL              = 50 * time.Second
 	presenceDefaultSessionID = "default-session"
 )
 
@@ -31,8 +31,11 @@ type presenceEntry struct {
 }
 
 var (
-	presenceMu    sync.Mutex
-	presenceStore = map[uuid.UUID]map[string]presenceEntry{}
+	presenceMu        sync.Mutex
+	presenceStore     = map[uuid.UUID]map[string]presenceEntry{}
+	presenceAuthMu    sync.Mutex
+	presenceAuthTTL   = 50 * time.Second
+	presenceAuthCache = map[uuid.UUID]map[uuid.UUID]time.Time{}
 )
 
 func normalizeSessionID(raw string) string {
@@ -99,6 +102,32 @@ func readPresence(documentID uuid.UUID) (int, int) {
 	return countPresenceLocked(documentID)
 }
 
+func canReadDocumentForPresence(userID, documentID uuid.UUID) error {
+	now := time.Now()
+
+	presenceAuthMu.Lock()
+	documentCache := presenceAuthCache[documentID]
+	if expiry, ok := documentCache[userID]; ok && now.Before(expiry) {
+		presenceAuthMu.Unlock()
+		return nil
+	}
+	presenceAuthMu.Unlock()
+
+	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
+		return err
+	}
+
+	presenceAuthMu.Lock()
+	documentCache = presenceAuthCache[documentID]
+	if documentCache == nil {
+		documentCache = map[uuid.UUID]time.Time{}
+		presenceAuthCache[documentID] = documentCache
+	}
+	documentCache[userID] = now.Add(presenceAuthTTL)
+	presenceAuthMu.Unlock()
+	return nil
+}
+
 func parseUserAndDocumentID(c *fiber.Ctx) (uuid.UUID, uuid.UUID, error) {
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -128,7 +157,7 @@ func HeartbeatDocumentPresenceHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
+	if err := canReadDocumentForPresence(userID, documentID); err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: ErrDocumentNotFoundOrUnauthorized.Error(),
@@ -160,7 +189,7 @@ func GetDocumentPresenceHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
+	if err := canReadDocumentForPresence(userID, documentID); err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: ErrDocumentNotFoundOrUnauthorized.Error(),

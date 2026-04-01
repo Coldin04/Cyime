@@ -23,27 +23,38 @@ const (
 )
 
 func ResolveDocumentRole(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, string, error) {
-	var document models.Document
-	if err := tx.Where("id = ?", documentID).First(&document).Error; err != nil {
+	type documentRoleRow struct {
+		models.Document
+		PermissionRole *string `gorm:"column:permission_role"`
+	}
+
+	var row documentRoleRow
+	if err := tx.
+		Table("documents").
+		Select("documents.*", "perms.role AS permission_role").
+		Joins(
+			"LEFT JOIN document_permissions AS perms ON perms.document_id = documents.id AND perms.user_id = ? AND perms.deleted_at IS NULL",
+			userID,
+		).
+		Where("documents.id = ? AND documents.deleted_at IS NULL", documentID).
+		Take(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, "", errors.New("文档不存在或无权访问")
 		}
 		return nil, "", err
 	}
 
-	if document.OwnerUserID == userID {
+	if row.OwnerUserID == userID {
+		document := row.Document
 		return &document, RoleOwner, nil
 	}
 
-	var permission models.DocumentPermission
-	if err := tx.Where("document_id = ? AND user_id = ?", documentID, userID).First(&permission).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", errors.New("文档不存在或无权访问")
-		}
-		return nil, "", err
+	if row.PermissionRole == nil || *row.PermissionRole == "" {
+		return nil, "", errors.New("文档不存在或无权访问")
 	}
 
-	return &document, permission.Role, nil
+	document := row.Document
+	return &document, *row.PermissionRole, nil
 }
 
 func AuthorizeDocumentAction(tx *gorm.DB, userID, documentID uuid.UUID, action string) (*models.Document, string, error) {

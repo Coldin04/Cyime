@@ -420,7 +420,7 @@
 		await heartbeat();
 		presenceHeartbeatTimer = window.setInterval(() => {
 			void heartbeat();
-		}, 5000);
+		}, 20000);
 	}
 
 	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {

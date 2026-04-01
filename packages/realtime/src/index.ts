@@ -231,6 +231,8 @@ const server = new Server({
 	port: PORT,
 	address: '0.0.0.0',
 	timeout: 30000,
+	debounce: 60000,
+	maxDebounce: 60000,
 	async onUpgrade(data: any) {
 		const request = data.request as IncomingMessage;
 		const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
