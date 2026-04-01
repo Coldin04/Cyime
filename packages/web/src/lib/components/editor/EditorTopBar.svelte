@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateDocumentTitle } from '$lib/api/workspace';
+	import { updateDocumentTitle, type ShareDocumentMember } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
@@ -10,36 +10,67 @@
 	import Home from '~icons/ph/house';
 	import Search from '~icons/ph/magnifying-glass';
 	import FileText from '~icons/ph/file-text';
+	import PencilSimple from '~icons/ph/pencil-simple';
 	import Check from '~icons/ph/check';
 	import X from '~icons/ph/x';
+	import User from '~icons/ph/user';
+	import UsersThree from '~icons/ph/users-three';
+	import WarningCircle from '~icons/ph/warning-circle';
 
-	let {
-		documentId,
-		initialTitle,
-		documentType = 'rich_text',
-		preferredImageTargetId,
-		availableImageTargets,
-		isUpdatingImageTarget = false,
-		isSaving,
-		lastSaved,
-		hasUnsavedChanges,
-		onTitleChange,
-		onImageTargetChange
-	}: {
-		documentId: string;
-		initialTitle: string;
-		documentType?: string;
-		preferredImageTargetId: string;
-		availableImageTargets: DocumentImageTargetOption[];
-		isUpdatingImageTarget?: boolean;
-		isSaving: boolean;
-		lastSaved: Date | null;
-		hasUnsavedChanges: boolean;
-		onTitleChange?: (title: string) => void;
-		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
-	} = $props();
+let {
+	documentId,
+	initialTitle,
+	initialExcerpt = '',
+	documentType = 'rich_text',
+	preferredImageTargetId,
+	availableImageTargets,
+	myRole = 'owner',
+	publicAccess = 'private',
+	publicUrl = '',
+	collaborationIndicator = null,
+	onlineMembers = [],
+	readOnly = false,
+	showEditShortcut = false,
+	editHref = '',
+	isUpdatingImageTarget = false,
+	isSaving,
+	lastSaved,
+	hasUnsavedChanges,
+	onTitleChange,
+	onManualExcerptChange,
+	onImageTargetChange,
+	onPublicAccessChange
+}: {
+	documentId: string;
+	initialTitle: string;
+	initialExcerpt?: string;
+	documentType?: string;
+	preferredImageTargetId: string;
+	availableImageTargets: DocumentImageTargetOption[];
+	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	publicAccess?: 'private' | 'authenticated' | 'public' | string;
+	publicUrl?: string;
+	collaborationIndicator?:
+		| { kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string }
+		| null;
+	onlineMembers?: ShareDocumentMember[];
+	readOnly?: boolean;
+	showEditShortcut?: boolean;
+	editHref?: string;
+	isUpdatingImageTarget?: boolean;
+	isSaving: boolean;
+	lastSaved: Date | null;
+	hasUnsavedChanges: boolean;
+	onTitleChange?: (title: string) => void;
+	onManualExcerptChange?: (excerpt: string) => void;
+	onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
+	onPublicAccessChange?: (publicAccess: string, publicUrl: string) => void;
+} = $props();
 
-	let title = $state('');
+let title = $state('');
+let excerpt = $state('');
+const canEditDocumentMeta = $derived(myRole === 'owner' || myRole === 'collaborator');
+const canOpenDocumentSettings = $derived(canEditDocumentMeta);
 
 	// Title editing state
 	let isEditingTitle = $state(false);
@@ -49,12 +80,19 @@
 	$effect(() => {
 		// When the initial title from the parent changes (e.g., on new doc load),
 		// update the component's internal title state.
-		if (initialTitle !== title) {
-			title = initialTitle;
-		}
-	});
+	if (initialTitle !== title) {
+		title = initialTitle;
+	}
+});
+
+$effect(() => {
+	if (initialExcerpt !== excerpt) {
+		excerpt = initialExcerpt;
+	}
+});
 
 	async function startEditingTitle() {
+		if (readOnly || !canEditDocumentMeta) return;
 		editingTitle = title;
 		isEditingTitle = true;
 		// Focus the input after render
@@ -89,6 +127,19 @@
 			saveTitle();
 		} else if (e.key === 'Escape') {
 			cancelEditingTitle();
+		}
+	}
+
+	function roleLabel(role: string) {
+		switch (role) {
+			case 'owner':
+				return m.workspace_shared_role_owner();
+			case 'collaborator':
+				return m.workspace_shared_role_collaborator();
+			case 'editor':
+				return m.workspace_shared_role_editor();
+			default:
+				return m.workspace_shared_role_viewer();
 		}
 	}
 
@@ -146,22 +197,72 @@
 					</button>
 				</div>
 			{:else}
-				<button
-					onclick={startEditingTitle}
-					class="group flex min-w-0 items-center"
-					title={m.editor_topbar_edit_title_tooltip()}
-				>
-					<h1
-						class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
-						title={title}
-					>
+				{#if readOnly || !canEditDocumentMeta}
+					<h1 class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 dark:text-zinc-100" title={title}>
 						{title}
 					</h1>
-				</button>
+				{:else}
+					<button
+						onclick={startEditingTitle}
+						class="group flex min-w-0 items-center"
+						title={m.editor_topbar_edit_title_tooltip()}
+					>
+						<h1
+							class="truncate rounded bg-transparent px-2 text-sm text-zinc-900 placeholder-zinc-400 transition-colors group-hover:bg-zinc-100 dark:text-zinc-100 dark:group-hover:bg-zinc-800"
+							title={title}
+						>
+							{title}
+						</h1>
+					</button>
+				{/if}
 			{/if}
 
-			<div class="px-2 py-0 text-left leading-3">
-				{#if isSaving}
+			<div class="flex items-center gap-2 px-2 py-0 text-left leading-3">
+				{#if collaborationIndicator}
+					<div class="group relative flex items-center">
+						<div
+							class={`grid h-5 w-5 place-content-center ${
+								collaborationIndicator.kind === 'single-offline' ||
+								collaborationIndicator.kind === 'multi-pending'
+									? 'text-amber-500 dark:text-amber-300'
+									: collaborationIndicator.kind === 'multi'
+										? 'text-emerald-600 dark:text-emerald-400'
+										: 'text-zinc-400 dark:text-zinc-500'
+							}`}
+							title={collaborationIndicator.label}
+							aria-label={collaborationIndicator.label}
+						>
+							{#if collaborationIndicator.kind === 'multi' || collaborationIndicator.kind === 'multi-pending'}
+								<UsersThree class="h-3.5 w-3.5" />
+							{:else if collaborationIndicator.kind === 'single-offline'}
+								<WarningCircle class="h-3.5 w-3.5" />
+							{:else}
+								<User class="h-3.5 w-3.5" />
+							{/if}
+						</div>
+						<div
+							class="pointer-events-none absolute left-0 top-7 z-40 min-w-52 max-w-xs rounded-md border border-zinc-200 bg-white px-2 py-2 text-[11px] text-zinc-900 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+						>
+							<p class="font-medium">{collaborationIndicator.label}</p>
+							{#if onlineMembers.length > 0}
+								<ul class="mt-2 space-y-1 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+									{#each onlineMembers as member (member.userId)}
+										<li class="flex items-center justify-between gap-3">
+											<span class="truncate">
+												{member.displayName || member.email || member.userId}
+											</span>
+											<span class="shrink-0 text-[10px] opacity-70">{roleLabel(member.role)}</span>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					</div>
+				{/if}
+
+				{#if readOnly}
+					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_read_only()}</span>
+				{:else if isSaving}
 					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_saving()}</span>
 				{:else if hasUnsavedChanges}
 					<span class="text-xs text-zinc-400 py-0">{m.editor_topbar_unsaved()}</span>
@@ -178,19 +279,44 @@
 
 	<!-- Right Controls -->
 	<div class="flex items-center gap-4 pr-4">
-		<EditorDocumentSettingsDialog
-			{documentId}
-			documentTitle={title}
-			{documentType}
-			currentTargetId={preferredImageTargetId}
-			options={availableImageTargets}
-			isUpdating={isUpdatingImageTarget}
-			onSelect={(targetId) => onImageTargetChange?.(targetId)}
-			onTitleChange={(nextTitle) => {
-				title = nextTitle;
-				onTitleChange?.(nextTitle);
-			}}
-		/>
+		{#if !readOnly && canOpenDocumentSettings}
+			<EditorDocumentSettingsDialog
+				{documentId}
+				documentTitle={title}
+				documentManualExcerpt={excerpt}
+				{documentType}
+				currentTargetId={preferredImageTargetId}
+				options={availableImageTargets}
+				canEditBasic={canEditDocumentMeta}
+				canManageMembers={myRole === 'owner' || myRole === 'collaborator'}
+				canEditImageSettings={canEditDocumentMeta}
+				canManagePublic={myRole === 'owner'}
+				{publicAccess}
+				{publicUrl}
+				isUpdating={isUpdatingImageTarget}
+				onSelect={(targetId) => onImageTargetChange?.(targetId)}
+				onTitleChange={(nextTitle) => {
+					title = nextTitle;
+					onTitleChange?.(nextTitle);
+				}}
+				onManualExcerptChange={(nextExcerpt) => {
+					excerpt = nextExcerpt;
+					onManualExcerptChange?.(nextExcerpt);
+				}}
+				onPublicAccessChange={(nextPublicAccess, nextPublicURL) =>
+					onPublicAccessChange?.(nextPublicAccess, nextPublicURL)}
+			/>
+		{/if}
+		{#if showEditShortcut && editHref}
+			<a
+				href={editHref}
+				class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+				title={m.editor_topbar_open_editor()}
+				aria-label={m.editor_topbar_open_editor()}
+			>
+				<PencilSimple class="h-5 w-5" />
+			</a>
+		{/if}
 		<button
 			class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 			title={m.common_search_placeholder()}

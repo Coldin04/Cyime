@@ -30,7 +30,7 @@ func setupMediaTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.UserImageBedConfig{}, &models.Document{}, &models.DocumentPermission{}, &models.BlobObject{}, &models.Asset{}, &models.DocumentAssetRef{}, &models.AssetGCJob{}, &models.BlobGCJob{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.UserImageBedConfig{}, &models.Document{}, &models.DocumentPermission{}, &models.DocumentImageTargetPreference{}, &models.BlobObject{}, &models.Asset{}, &models.DocumentAssetRef{}, &models.AssetGCJob{}, &models.BlobGCJob{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	database.DB = db
@@ -365,6 +365,43 @@ func TestUploadDocumentAsset_AllowsSharedEditorAndUsesOwnerLibrary(t *testing.T)
 	}
 }
 
+func TestResolveAccessibleAssetReadURL_AllowsSharedEditorBeforeAssetRefsSync(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID := seedOwnedDocument(t, db, ownerID)
+	seedDocumentPermission(t, db, docID, editorID, ownerID, "editor")
+
+	blob := seedBlob(t, db, "owner/photo.png", "image/png", 12, "hash-read-url")
+	asset := models.Asset{
+		ID:          uuid.New(),
+		OwnerUserID: ownerID,
+		DocumentID:  &docID,
+		BlobID:      blob.ID,
+		Kind:        "image",
+		Filename:    "photo.png",
+		URL:         blob.URL,
+		Visibility:  "private",
+		Status:      "ready",
+		CreatedBy:   editorID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+
+	readURL, _, err := ResolveAccessibleAssetReadURL(context.Background(), "http://localhost:8080", editorID, asset.ID)
+	if err != nil {
+		t.Fatalf("resolve accessible asset read url for shared editor: %v", err)
+	}
+	if strings.TrimSpace(readURL) == "" {
+		t.Fatal("expected non-empty read url")
+	}
+}
+
 func TestIsUniqueConstraintError(t *testing.T) {
 	if !isUniqueConstraintError(fmt.Errorf("UNIQUE constraint failed: blob_objects.sha256, blob_objects.size"), "blob_objects.sha256", "blob_objects.size") {
 		t.Fatalf("expected sqlite unique constraint to match")
@@ -538,7 +575,7 @@ func TestDeleteOwnedUnusedAsset_RejectsReferencedAsset(t *testing.T) {
 		t.Fatalf("create ref: %v", err)
 	}
 
-	if err := DeleteOwnedUnusedAsset(context.Background(), userID, asset.ID); err == nil || err.Error() != "asset is still referenced by documents" {
+	if err := DeleteOwnedUnusedAsset(context.Background(), userID, asset.ID); err == nil || !errors.Is(err, ErrAssetStillReferenced) {
 		t.Fatalf("expected referenced asset rejection, got %v", err)
 	}
 }

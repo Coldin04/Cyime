@@ -14,7 +14,6 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,7 +176,7 @@ func GetOwnedAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 	result := database.DB.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", assetID, userID).First(&asset)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("资源不存在或无权访问")
+			return nil, ErrAssetNotFoundOrForbidden
 		}
 		return nil, result.Error
 	}
@@ -192,6 +191,11 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 	if asset.OwnerUserID == userID {
 		return asset, nil
 	}
+	if asset.DocumentID != nil {
+		if _, err := acl.CanReadDocument(database.DB, userID, *asset.DocumentID); err == nil {
+			return asset, nil
+		}
+	}
 
 	var count int64
 	if err := database.DB.
@@ -199,12 +203,12 @@ func GetAccessibleAsset(userID, assetID uuid.UUID) (*models.Asset, error) {
 		Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
 		Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
 		Where("refs.asset_id = ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", assetID, "editor_content").
-		Where("d.owner_user_id = ? OR perms.role IN ?", userID, []string{acl.RoleViewer, acl.RoleEditor, acl.RoleOwner}).
+		Where("d.owner_user_id = ? OR perms.role IN ?", userID, acl.AllowedRolesForAction(acl.ActionRead)).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
 	if count == 0 {
-		return nil, errors.New("资源不存在或无权访问")
+		return nil, ErrAssetNotFoundOrForbidden
 	}
 	return asset, nil
 }
@@ -241,7 +245,7 @@ func ResolveAccessibleAssetThumbnailURL(ctx context.Context, baseURL string, use
 	return resolveAssetObjectURL(ctx, baseURL, userID, *asset, blob.ThumbnailObjectKey, blob.ThumbnailMimeType, "/thumbnail")
 }
 
-func resolveAssetObjectURL(ctx context.Context, baseURL string, userID uuid.UUID, asset models.Asset, objectKey string, contentType string, pathSuffix string) (string, time.Time, error) {
+func resolveAssetObjectURL(ctx context.Context, baseURL string, _ uuid.UUID, asset models.Asset, objectKey string, contentType string, pathSuffix string) (string, time.Time, error) {
 	if err := initStorageProvider(); err != nil {
 		return "", time.Time{}, err
 	}
@@ -255,23 +259,16 @@ func resolveAssetObjectURL(ctx context.Context, baseURL string, userID uuid.UUID
 		if err == nil {
 			return presigned.URL, presigned.ExpiresAt, nil
 		}
-		log.Printf("[media.resolve] presign failed provider=%s asset=%s path=%s fallback=token err=%v", storageProvider.ProviderName(), asset.ID, pathSuffix, err)
+		log.Printf("[media.resolve] presign failed provider=%s asset=%s path=%s fallback=protected_api err=%v", storageProvider.ProviderName(), asset.ID, pathSuffix, err)
 	}
 
 	readURL := strings.TrimRight(baseURL, "/") + "/api/v1/media/assets/" + asset.ID.String() + pathSuffix
 	if asset.Visibility == "public" {
 		return readURL, time.Time{}, nil
 	}
-
-	tokenService, err := NewTokenService()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	token, exp, err := tokenService.IssueAssetReadToken(asset.ID, userID)
-	if err != nil {
-		return "", time.Time{}, errors.New("failed to issue media token")
-	}
-	return readURL + "?token=" + url.QueryEscape(token), exp, nil
+	// Fallback path for providers without presign support: serve a stable API URL.
+	// Access control is enforced by JWT middleware + per-request ACL checks in handlers.
+	return readURL, time.Time{}, nil
 }
 
 func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
@@ -300,7 +297,7 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 			query = query.Where("status = ?", status)
 		}
 	default:
-		return nil, errors.New("invalid asset status")
+		return nil, ErrInvalidAssetStatus
 	}
 
 	kind := strings.TrimSpace(req.Kind)
@@ -309,7 +306,7 @@ func ListOwnedAssets(req ListAssetsRequest) (*ListAssetsResult, error) {
 	case "image", "video", "file":
 		query = query.Where("kind = ?", kind)
 	default:
-		return nil, errors.New("invalid asset kind")
+		return nil, ErrInvalidAssetKind
 	}
 
 	if q := strings.TrimSpace(req.Query); q != "" {
@@ -387,7 +384,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 		Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 		Joins("JOIN assets AS a ON a.id = refs.asset_id AND a.deleted_at IS NULL").
 		Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleOwner}, mediaRefTypeEditorContent).
+		Where("perms.user_id = ? AND perms.role IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, acl.AllowedRolesForAction(acl.ActionEdit), mediaRefTypeEditorContent).
 		Where("d.owner_user_id <> ?", req.UserID)
 
 	kind := strings.TrimSpace(req.Kind)
@@ -396,7 +393,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 	case "image", "video", "file":
 		baseQuery = baseQuery.Where("a.kind = ?", kind)
 	default:
-		return nil, errors.New("invalid asset kind")
+		return nil, ErrInvalidAssetKind
 	}
 
 	if q := strings.TrimSpace(req.Query); q != "" {
@@ -410,7 +407,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 	case "ready", "pending_delete", "failed":
 		baseQuery = baseQuery.Where("a.status = ?", status)
 	default:
-		return nil, errors.New("invalid asset status")
+		return nil, ErrInvalidAssetStatus
 	}
 
 	var total int64
@@ -467,7 +464,7 @@ func ListSharedEditableAssets(req ListAssetsRequest) (*ListSharedAssetsResult, e
 			Select("refs.asset_id", "d.id AS document_id", "d.title", "d.updated_at").
 			Joins("JOIN document_permissions AS perms ON perms.document_id = refs.document_id AND perms.deleted_at IS NULL").
 			Joins("JOIN documents AS d ON d.id = refs.document_id AND d.deleted_at IS NULL").
-			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, []string{acl.RoleEditor, acl.RoleOwner}, assetIDs, mediaRefTypeEditorContent).
+			Where("perms.user_id = ? AND perms.role IN ? AND refs.asset_id IN ? AND refs.ref_type = ? AND refs.deleted_at IS NULL", req.UserID, acl.AllowedRolesForAction(acl.ActionEdit), assetIDs, mediaRefTypeEditorContent).
 			Order("d.updated_at desc").
 			Scan(&docRows).Error; err != nil {
 			return nil, err
@@ -560,14 +557,14 @@ func getAssetBlobByID(assetID uuid.UUID) (*assetBlobRecord, error) {
 func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAssetResult, error) {
 	log.Printf("[media.upload.service] validating document=%s user=%s", req.DocumentID, req.UserID)
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 	contentType, ok := normalizeAllowedContentType(
 		strings.TrimSpace(req.FileHeader.Header.Get("Content-Type")),
 		req.FileHeader.Filename,
 	)
 	if !ok {
-		return nil, fmt.Errorf("unsupported file type: %s", contentType)
+		return nil, &UnsupportedFileTypeError{ContentType: contentType}
 	}
 	if err := ValidateVisibility(req.Visibility); err != nil {
 		return nil, err
@@ -850,7 +847,11 @@ func normalizeAllowedContentType(contentType string, filename string) (string, b
 }
 
 func ensureEditableDocument(userID, documentID uuid.UUID) (*models.Document, error) {
-	return acl.CanEditDocument(database.DB, userID, documentID)
+	document, err := acl.CanEditDocument(database.DB, userID, documentID)
+	if err != nil {
+		return nil, ErrDocumentNotAccessible
+	}
+	return document, nil
 }
 
 func computeFileHash(fileBytes []byte) string {
@@ -978,10 +979,10 @@ func DeleteOwnedUnusedAsset(ctx context.Context, userID, assetID uuid.UUID) erro
 	_ = ctx
 	asset := &record.Asset
 	if asset.ReferenceCount > 0 {
-		return errors.New("asset is still referenced by documents")
+		return ErrAssetStillReferenced
 	}
 	if asset.Status == "deleted" {
-		return errors.New("asset already deleted")
+		return ErrAssetAlreadyDeleted
 	}
 
 	now := time.Now()
@@ -993,7 +994,7 @@ func DeleteOwnedUnusedAsset(ctx context.Context, userID, assetID uuid.UUID) erro
 			return err
 		}
 		if refCount > 0 {
-			return errors.New("asset is still referenced by documents")
+			return ErrAssetStillReferenced
 		}
 
 		if err := tx.Model(&models.Asset{}).

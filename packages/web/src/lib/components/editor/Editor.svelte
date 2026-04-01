@@ -3,6 +3,8 @@
 	import { fade } from 'svelte/transition';
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import Collaboration from '@tiptap/extension-collaboration';
+	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
@@ -17,6 +19,7 @@
 	import ListBullets from '~icons/ph/list-bullets';
 	import ListNumbers from '~icons/ph/list-numbers';
 	import FloppyDisk from '~icons/ph/floppy-disk';
+	import Eye from '~icons/ph/eye';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
 	import Quotes from '~icons/ph/quotes';
@@ -32,16 +35,21 @@
 	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
+	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
+	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
 		documentId: string;
 		content: JSONContent;
 		currentImageTargetLabel?: string;
+		collaboration?: ProviderInstance | null;
+		readOnly?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
+		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
 	}
 
@@ -49,9 +57,12 @@
 		documentId,
 		content,
 		currentImageTargetLabel = '',
+		collaboration = null,
+		readOnly = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
+		hydrateManagedContent,
 		onSave
 	}: Props = $props();
 
@@ -66,6 +77,8 @@
 	let editorRevision = $state(0);
 	let uploadingImageCount = $state(0);
 	let isImageInsertDialogOpen = $state(false);
+	let hasSeededCollaborationContent = false;
+	let hasHydratedManagedImages = false;
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -78,6 +91,71 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
+	const LOCAL_CURSOR_COLOR = '#16a34a';
+	const remoteCursorPalette = [
+		'#2563eb',
+		'#9333ea',
+		'#ea580c',
+		'#dc2626',
+		'#1d4ed8',
+		'#be123c',
+		'#0891b2',
+		'#7c3aed',
+		'#c2410c',
+		'#b91c1c'
+	] as const;
+
+	function hashString(value: string): number {
+		let hash = 0;
+		for (let index = 0; index < value.length; index += 1) {
+			hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+		}
+		return hash;
+	}
+
+	function getCollaborationUser() {
+		const authState = $auth;
+		const id = authState.user?.id ?? collaboration?.provider?.awareness?.clientID?.toString() ?? 'unknown';
+		const name =
+			authState.user?.displayName?.trim() ||
+			authState.user?.email?.trim() ||
+			`协作者 ${id.slice(0, 6)}`;
+		const color = LOCAL_CURSOR_COLOR;
+
+		return { id, name, color };
+	}
+
+	function getRemoteCursorColor(userId: string) {
+		return remoteCursorPalette[hashString(userId) % remoteCursorPalette.length];
+	}
+
+	function renderCollaborationCursor(
+		user: { id?: string; name?: string; color?: string },
+		localUserId: string
+	) {
+		const cursor = document.createElement('span');
+		cursor.classList.add('collaboration-cursor__caret');
+		const isLocal = user.id === localUserId;
+		const effectiveColor = isLocal
+			? LOCAL_CURSOR_COLOR
+			: getRemoteCursorColor(user.id ?? user.name ?? 'remote-user');
+		cursor.style.setProperty('--user-color', effectiveColor);
+
+		const label = document.createElement('span');
+		label.classList.add('collaboration-cursor__label', 'cw-cursor-label');
+
+		const dot = document.createElement('span');
+		dot.classList.add('cw-cursor-dot');
+		dot.style.backgroundColor = effectiveColor;
+
+		const text = document.createElement('span');
+		text.classList.add('cw-cursor-name');
+		text.textContent = user.name || '协作者';
+
+		label.append(dot, text);
+		cursor.append(label);
+		return cursor;
+	}
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -157,6 +235,10 @@
 
 	function serializeDoc(value: JSONContent): string {
 		return JSON.stringify(normalizeDoc(value));
+	}
+
+	function hasMeaningfulContent(value: JSONContent): boolean {
+		return serializeDoc(value) !== serializeDoc(EMPTY_DOC);
 	}
 
 	function isSupportedImageFile(file: File): boolean {
@@ -397,41 +479,64 @@
 		}
 
 		lastSyncedContent = serializeDoc(content);
+		const collaborationUser = getCollaborationUser();
+		const extensions: any[] = [
+			StarterKit.configure({
+				heading: {
+					levels: [...headingLevels]
+				},
+				link: false,
+				...(collaboration?.doc ? { undoRedo: false } : {})
+			}),
+			CyImage.configure({
+				inline: false,
+				allowBase64: true
+			}),
+			Link.configure({
+				openOnClick: false,
+				autolink: true,
+				defaultProtocol: 'https'
+			}),
+			Table.configure({
+				resizable: true,
+				HTMLAttributes: {
+					class: 'cw-editor-table'
+				}
+			}),
+			TableRow,
+			TableHeader,
+			TableCell,
+			Placeholder.configure({
+				placeholder: m.editor_placeholder()
+			})
+		];
+
+		if (collaboration?.doc) {
+			collaboration.provider?.setAwarenessField('user', collaborationUser);
+			extensions.push(
+				Collaboration.configure({
+					document: collaboration.doc
+				}),
+				CollaborationCursor.configure({
+					provider: collaboration.provider,
+					user: collaborationUser,
+					render: (user) => renderCollaborationCursor(user, collaborationUser.id)
+				})
+			);
+		}
+
 		editor = new Editor({
 			element: editorElement,
-			extensions: [
-				StarterKit.configure({
-					heading: {
-						levels: [...headingLevels]
-					}
-				}),
-				CyImage.configure({
-					inline: false,
-					allowBase64: true
-				}),
-				Link.configure({
-					openOnClick: false,
-					autolink: true,
-					defaultProtocol: 'https'
-				}),
-				Table.configure({
-					resizable: true,
-					HTMLAttributes: {
-						class: 'cw-editor-table'
-					}
-				}),
-				TableRow,
-				TableHeader,
-				TableCell,
-				Placeholder.configure({
-					placeholder: m.editor_placeholder()
-				})
-			],
-			content: toTiptapContent(content),
+			editable: !readOnly,
+			extensions,
+			content: collaboration?.doc ? undefined : toTiptapContent(content),
 			editorProps: {
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				handleDOMEvents: {
 					paste: (_view, event) => {
+						if (readOnly) {
+							return false;
+						}
 						const clipboardEvent = event as ClipboardEvent;
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
@@ -503,11 +608,13 @@
 					}
 				},
 				attributes: {
-					class:
-						'tiptap min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'
+					class: `tiptap ${collaboration?.doc ? 'cw-collab-mode' : ''} min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%}`
 				}
 			},
 			onUpdate: ({ editor }) => {
+				if (readOnly) {
+					return;
+				}
 				const nextContent = editor.getJSON();
 				lastSyncedContent = serializeDoc(nextContent);
 				onContentChange?.(nextContent);
@@ -518,14 +625,59 @@
 			}
 		});
 
+		const reconcileCollaborationContent = async () => {
+			if (!editor || !collaboration?.doc) {
+				return;
+			}
+
+			if (!hasSeededCollaborationContent) {
+				hasSeededCollaborationContent = true;
+				const currentDoc = normalizeDoc(editor.getJSON());
+				if (!hasMeaningfulContent(currentDoc) && hasMeaningfulContent(content)) {
+					lastSyncedContent = serializeDoc(content);
+					editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
+				}
+			}
+
+			if (hasHydratedManagedImages || !hydrateManagedContent) {
+				return;
+			}
+
+			hasHydratedManagedImages = true;
+			const currentDoc = normalizeDoc(editor.getJSON());
+			const hydrated = await hydrateManagedContent(currentDoc);
+			if (serializeDoc(hydrated) === serializeDoc(currentDoc)) {
+				return;
+			}
+
+			lastSyncedContent = serializeDoc(hydrated);
+			editor.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
+		};
+
+		const handleSynced = ({ state }: { state: boolean }) => {
+			if (state) {
+				void reconcileCollaborationContent();
+			}
+		};
+
+		if (collaboration?.provider) {
+			collaboration.provider.on('synced', handleSynced);
+			if (collaboration.provider.synced) {
+				void reconcileCollaborationContent();
+			}
+		} else if (collaboration?.doc) {
+			void reconcileCollaborationContent();
+		}
+
 		return () => {
+			collaboration?.provider?.off('synced', handleSynced);
 			editor?.destroy();
 			editor = null;
 		};
 	});
 
 	$effect(() => {
-		if (!editor) {
+		if (!editor || collaboration?.doc) {
 			return;
 		}
 
@@ -773,21 +925,30 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div class="overflow-visible">
-			<div
-				class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
-			>
-			<button
-				type="button"
-				title={m.editor_toolbar_save_with_shortcut()}
-				aria-label={m.editor_toolbar_save_with_shortcut()}
-				disabled={isSaving || !hasUnsavedChanges}
-				onclick={() => onSave?.()}
+	{#if !readOnly}
+		<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+			<div class="overflow-visible">
+				<div
+					class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
+				>
+				<button
+					type="button"
+					title={m.editor_toolbar_save_with_shortcut()}
+					aria-label={m.editor_toolbar_save_with_shortcut()}
+					disabled={isSaving || !hasUnsavedChanges}
+					onclick={() => onSave?.()}
+					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+				>
+					<FloppyDisk class="h-4 w-4" />
+				</button>
+			<a
+				href={`/view/documents/${documentId}`}
+				title={m.editor_toolbar_open_reader_mode()}
+				aria-label={m.editor_toolbar_open_reader_mode()}
 				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
-				<FloppyDisk class="h-4 w-4" />
-			</button>
+				<Eye class="h-4 w-4" />
+			</a>
 			<button
 				type="button"
 				title={m.editor_toolbar_undo_with_shortcut()}
@@ -992,22 +1153,25 @@
 						instance.chain().focus().deleteTable().run();
 					})}
 				/>
+				</div>
 			</div>
 		</div>
-	</div>
+	{/if}
 
 	<div class="h-full w-full overflow-y-auto">
 		<div bind:this={editorElement} class="h-full w-full"></div>
 	</div>
 </div>
 
-<ImageInsertDialog
-	bind:open={isImageInsertDialogOpen}
-	accept={imageUploadAccept}
-	isUploading={uploadingImageCount > 0}
-	currentTargetLabel={currentImageTargetLabel}
-	onFilesSelected={(files) => {
-		void uploadAndInsertImages(files, 'picker');
-	}}
-	onInsertLink={async (src) => insertExternalImage(src)}
-/>
+{#if !readOnly}
+	<ImageInsertDialog
+		bind:open={isImageInsertDialogOpen}
+		accept={imageUploadAccept}
+		isUploading={uploadingImageCount > 0}
+		currentTargetLabel={currentImageTargetLabel}
+		onFilesSelected={(files) => {
+			void uploadAndInsertImages(files, 'picker');
+		}}
+		onInsertLink={async (src) => insertExternalImage(src)}
+	/>
+{/if}

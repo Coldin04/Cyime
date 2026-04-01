@@ -1,8 +1,7 @@
 <script lang="ts">
 	import * as m from '$paraglide/messages';
-	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import RouteAuthGuard from '$lib/components/auth/RouteAuthGuard.svelte';
 	import TopBar from '$lib/components/workspace/TopBar.svelte';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { auth } from '$lib/stores/auth';
@@ -11,6 +10,7 @@
 	import ShieldCheck from '~icons/ph/shield-check';
 	import ImagesSquare from '~icons/ph/images-square';
 	import LinkSimple from '~icons/ph/link-simple';
+	import UsersThree from '~icons/ph/users-three';
 	import CaretDown from '~icons/ph/caret-down';
 
 	let { children } = $props();
@@ -20,6 +20,7 @@
 		{ href: '/user', label: m.user_nav_overview(), icon: House },
 		{ href: '/user/profile', label: m.user_nav_profile(), icon: UserCircle },
 		{ href: '/user/security', label: m.user_nav_security(), icon: ShieldCheck },
+		{ href: '/user/sharing', label: m.user_nav_sharing(), icon: UsersThree },
 		{ href: '/user/image-beds', label: m.user_nav_image_beds(), icon: LinkSimple },
 		{ href: '/user/media', label: m.user_nav_media_library(), icon: ImagesSquare }
 	];
@@ -33,19 +34,9 @@
 		$page.url.pathname;
 		mobileNavOpen = false;
 	});
-
-	$effect(() => {
-		if (browser && !$auth.loading && !$auth.token) {
-			goto('/login', { replaceState: true });
-		}
-	});
 </script>
 
-{#if $auth.loading}
-	<div class="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-gray-900">
-		<p class="text-lg text-gray-600 dark:text-gray-300">{m.workspace_loading()}</p>
-	</div>
-{:else if $auth.token}
+<RouteAuthGuard mode="required">
 	<TopBar />
 	<main class="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]">
 		<aside class="rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900 lg:hidden">
@@ -113,4 +104,4 @@
 			{@render children()}
 		</section>
 	</main>
-{/if}
+</RouteAuthGuard>

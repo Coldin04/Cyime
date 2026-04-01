@@ -224,8 +224,8 @@ func ListAssetsHandler(c *fiber.Ctx) error {
 		Offset: c.QueryInt("offset", 0),
 	})
 	if err != nil {
-		switch err.Error() {
-		case "invalid asset status", "invalid asset kind":
+		switch {
+		case errors.Is(err, ErrInvalidAssetStatus), errors.Is(err, ErrInvalidAssetKind):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
@@ -278,8 +278,8 @@ func ListSharedAssetsHandler(c *fiber.Ctx) error {
 		Offset: c.QueryInt("offset", 0),
 	})
 	if err != nil {
-		switch err.Error() {
-		case "invalid asset status", "invalid asset kind":
+		switch {
+		case errors.Is(err, ErrInvalidAssetStatus), errors.Is(err, ErrInvalidAssetKind):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),
@@ -318,6 +318,21 @@ func resolveListThumbnailURL(ctx context.Context, baseURL string, userID uuid.UU
 }
 
 func GetAssetContentHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user id",
+		})
+	}
+
 	assetID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -337,39 +352,13 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 	blob := record.Blob
 
 	if asset.Visibility != "public" {
-		token := c.Query("token")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Missing media token",
-			})
-		}
-
-		tokenService, err := NewTokenService()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
+		// Private media requires document/media ACL check per request.
+		if _, err := GetAccessibleAsset(userID, asset.ID); err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
 				Message: err.Error(),
 			})
 		}
-
-		claims, err := tokenService.VerifyAssetReadToken(token)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Invalid media token: " + err.Error(),
-			})
-		}
-
-		if claims.AssetID != asset.ID {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Media token does not match asset",
-			})
-		}
-
-		// Do not hard-bind user in the read token check.
-		// Token is already short-lived and signed server-side; asset binding is enough here.
 	}
 
 	if err := initStorageProvider(); err != nil {
@@ -406,6 +395,21 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 }
 
 func GetAssetThumbnailHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user id",
+		})
+	}
+
 	assetID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -425,34 +429,11 @@ func GetAssetThumbnailHandler(c *fiber.Ctx) error {
 	blob := record.Blob
 
 	if asset.Visibility != "public" {
-		token := c.Query("token")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Missing media token",
-			})
-		}
-
-		tokenService, err := NewTokenService()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "Internal Server Error",
+		// Private media requires document/media ACL check per request.
+		if _, err := GetAccessibleAsset(userID, asset.ID); err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error:   "Not Found",
 				Message: err.Error(),
-			})
-		}
-
-		claims, err := tokenService.VerifyAssetReadToken(token)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Invalid media token: " + err.Error(),
-			})
-		}
-
-		if claims.AssetID != asset.ID {
-			return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
-				Error:   "Unauthorized",
-				Message: "Media token does not match asset",
 			})
 		}
 	}
@@ -525,7 +506,7 @@ func GetAssetReferencesHandler(c *fiber.Ctx) error {
 
 	result, err := GetOwnedAssetReferences(userID, assetID)
 	if err != nil {
-		if err.Error() == "资源不存在或无权访问" {
+		if errors.Is(err, ErrAssetNotFoundOrForbidden) {
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
@@ -570,13 +551,13 @@ func DeleteAssetHandler(c *fiber.Ctx) error {
 	}
 
 	if err := DeleteOwnedUnusedAsset(context.Background(), userID, assetID); err != nil {
-		switch err.Error() {
-		case "资源不存在或无权访问":
+		switch {
+		case errors.Is(err, ErrAssetNotFoundOrForbidden):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case "asset is still referenced by documents", "asset already deleted":
+		case errors.Is(err, ErrAssetStillReferenced), errors.Is(err, ErrAssetAlreadyDeleted):
 			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
 				Error:   "Conflict",
 				Message: err.Error(),
@@ -597,7 +578,7 @@ func ValidateVisibility(visibility string) error {
 	case "", "private", "public":
 		return nil
 	default:
-		return errors.New("invalid visibility")
+		return ErrInvalidVisibility
 	}
 }
 
@@ -654,14 +635,15 @@ func UploadDocumentAssetHandler(c *fiber.Ctx) error {
 	if err != nil {
 		log.Printf("[media.upload] failed document=%s user=%s filename=%q err=%v", documentID, userID, fileHeader.Filename, err)
 		status := fiber.StatusInternalServerError
-		switch err.Error() {
-		case "文档不存在或无权访问", "file is required", "invalid visibility":
+		switch {
+		case errors.Is(err, ErrDocumentNotAccessible), errors.Is(err, ErrFileRequired), errors.Is(err, ErrInvalidVisibility):
 			status = fiber.StatusBadRequest
 		default:
 			if errors.Is(err, context.Canceled) {
 				status = fiber.StatusRequestTimeout
 			}
-			if len(err.Error()) >= len("unsupported file type:") && err.Error()[:len("unsupported file type:")] == "unsupported file type:" {
+			var unsupported *UnsupportedFileTypeError
+			if errors.As(err, &unsupported) {
 				status = fiber.StatusBadRequest
 			}
 		}
@@ -758,11 +740,12 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		status := fiber.StatusInternalServerError
 		code := "DOCUMENT_IMAGE_UPLOAD_FAILED"
 		var docErr *DocumentImageError
+		var unsupported *UnsupportedFileTypeError
 		switch {
-		case err.Error() == "文档不存在或无权访问":
+		case errors.Is(err, ErrDocumentNotAccessible):
 			status = fiber.StatusForbidden
 			code = "DOCUMENT_IMAGE_FORBIDDEN"
-		case err.Error() == "file is required":
+		case errors.Is(err, ErrFileRequired):
 			status = fiber.StatusBadRequest
 			code = "DOCUMENT_IMAGE_FILE_REQUIRED"
 		case errors.As(err, &docErr):
@@ -780,7 +763,7 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		case errors.Is(err, context.Canceled):
 			status = fiber.StatusRequestTimeout
 			code = "DOCUMENT_IMAGE_UPLOAD_TIMEOUT"
-		case len(err.Error()) >= len("unsupported file type:") && err.Error()[:len("unsupported file type:")] == "unsupported file type:":
+		case errors.As(err, &unsupported):
 			status = fiber.StatusBadRequest
 			code = "DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE"
 		}

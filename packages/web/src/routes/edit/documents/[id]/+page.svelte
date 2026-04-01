@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { JSONContent } from '@tiptap/core';
 	import { browser } from '$app/environment';
 	import { beforeNavigate, goto } from '$app/navigation';
@@ -14,8 +14,17 @@
 		readAutoSaveEnabled,
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
+	import { auth } from '$lib/stores/auth';
+	import { resolveApiUrl } from '$lib/config/api';
+	import { realtimeConfig } from '$lib/stores/realtime';
+	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
 	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
-	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
+	import {
+		getDocumentDetails,
+		listDocumentMembers,
+		updateDocumentImageTarget,
+		type ShareDocumentMember
+	} from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
 		getDocumentImageTargetLabel,
@@ -25,6 +34,10 @@
 	import * as m from '$paraglide/messages';
 
 	let title = $state('');
+	let manualExcerpt = $state('');
+	let myRole = $state<'owner' | 'collaborator' | 'editor' | 'viewer' | string>('owner');
+	let publicAccess = $state<'private' | 'authenticated' | 'public' | string>('private');
+	let publicUrl = $state('');
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -39,6 +52,22 @@
 	let lastSaved = $state<Date | null>(null);
 	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
+	let collaboration = $state<ProviderInstance | null>(null);
+	let collaborationError = $state<string | null>(null);
+	let collaborationIndicator = $state<
+		{ kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string } | null
+	>(null);
+	let detachCollaborationListeners: (() => void) | null = null;
+	let presenceCount = $state(0);
+	let presenceConnected = $state(false);
+	let hasAttemptedPresence = $state(false);
+	let documentMembers = $state<ShareDocumentMember[]>([]);
+	let onlineMembers = $state<ShareDocumentMember[]>([]);
+	let presenceSessionId = $state('');
+	let presenceHeartbeatTimer: number | null = null;
+	let isInitializingCollaboration = $state(false);
+	let lastCollaborationAttemptAt = $state(0);
+	let isYjsConnected = $state(false);
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
@@ -148,10 +177,16 @@
 		return cloned;
 	}
 
+	function serializeComparableContent(input: JSONContent): string {
+		return JSON.stringify(normalizeManagedImagesForSave(input));
+	}
+
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
 	// since this environment is in runes-mode but likely on an older Svelte 5 version.
 	let pageSignal = $state(get(page));
 	page.subscribe((p) => (pageSignal = p));
+	let authSignal = $state(get(auth));
+	auth.subscribe((state) => (authSignal = state));
 	const documentId = $derived(pageSignal.params?.id);
 
 	beforeNavigate((navigation) => {
@@ -190,12 +225,369 @@
 
 	function handleContentChange(newContent: JSONContent) {
 		if (isLoading) return;
+		if (serializeComparableContent(content) === serializeComparableContent(newContent)) {
+			return;
+		}
 		hasUnsavedChanges = true;
 		content = newContent;
+		if (documentId) {
+			void connectPresenceSocket(documentId);
+			if (!collaboration) {
+				void startCollaboration(documentId, 'editing');
+			}
+		}
 	}
 
 	function handleTitleChange(newTitle: string) {
 		title = newTitle;
+	}
+
+	function handleExcerptChange(newExcerpt: string) {
+		manualExcerpt = newExcerpt;
+	}
+
+	function handlePublicAccessChange(nextPublicAccess: string, nextPublicURL: string) {
+		publicAccess = nextPublicAccess;
+		publicUrl = nextPublicURL;
+	}
+
+	function getCurrentUserMember(): ShareDocumentMember | null {
+		const user = authSignal.user;
+		if (!user?.id) {
+			return null;
+		}
+
+		return {
+			userId: user.id,
+			role: myRole,
+			displayName:
+				(typeof user.displayName === 'string' && user.displayName.trim() !== ''
+					? user.displayName.trim()
+					: null) ??
+				(typeof user.email === 'string' && user.email.trim() !== '' ? user.email.trim() : null),
+			email: typeof user.email === 'string' && user.email.trim() !== '' ? user.email.trim() : null
+		};
+	}
+
+	function setOnlineMembersFromUserIds(userIds: string[]) {
+		const seen = new Set<string>();
+		const nextMembers: ShareDocumentMember[] = [];
+		const membersById = new Map(documentMembers.map((member) => [member.userId, member]));
+
+		for (const userId of userIds) {
+			if (!userId || seen.has(userId)) {
+				continue;
+			}
+			seen.add(userId);
+			const matchedMember = membersById.get(userId);
+			if (matchedMember) {
+				nextMembers.push(matchedMember);
+				continue;
+			}
+
+			if (userId === authSignal.user?.id) {
+				const currentUserMember = getCurrentUserMember();
+				if (currentUserMember) {
+					nextMembers.push(currentUserMember);
+					continue;
+				}
+			}
+
+			nextMembers.push({
+				userId,
+				role: 'editor',
+				displayName: userId,
+				email: null
+			});
+		}
+
+		onlineMembers = nextMembers;
+	}
+
+	function resetOnlineMembers() {
+		const currentUserMember = getCurrentUserMember();
+		onlineMembers = currentUserMember ? [currentUserMember] : [];
+	}
+
+	function updateCollaborationIndicator() {
+		if (presenceCount > 1) {
+			if (isYjsConnected) {
+				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
+				return;
+			}
+
+			collaborationIndicator = {
+				kind: 'multi-pending',
+				label: `检测到 ${presenceCount} 个会话在线，但协作连接尚未建立`
+			};
+			return;
+		}
+
+		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
+			collaborationIndicator = { kind: 'single-offline', label: '协作连接已断开，当前为单人模式' };
+			return;
+		}
+
+		collaborationIndicator = { kind: 'single', label: '当前仅你在线编辑' };
+	}
+
+	function ensurePresenceSessionId() {
+		if (presenceSessionId !== '') {
+			return presenceSessionId;
+		}
+		presenceSessionId = crypto.randomUUID();
+		return presenceSessionId;
+	}
+
+	async function resolveRealtimeWsUrl(): Promise<string> {
+		if (!authSignal.token) {
+			throw new Error('Missing access token');
+		}
+
+		let wsUrl = get(realtimeConfig).config?.realtimeWsUrl ?? '';
+		if (!wsUrl) {
+			await realtimeConfig.reload();
+			wsUrl = get(realtimeConfig).config?.realtimeWsUrl ?? '';
+		}
+		if (!wsUrl) {
+			throw new Error('Realtime WebSocket URL is not configured');
+		}
+
+		return wsUrl;
+	}
+
+	function buildRealtimePresenceURL(nextDocumentId: string): string {
+		const url = new URL(resolveApiUrl('/api/v1/workspace/documents/_/presence'), window.location.origin);
+		url.pathname = url.pathname.replace('/_', `/${nextDocumentId}`);
+		url.search = '';
+		return url.toString();
+	}
+
+	async function fetchCollaborationPresence(nextDocumentId: string): Promise<number> {
+		const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
+			headers: {
+				Authorization: `Bearer ${authSignal.token}`
+			},
+			credentials: 'include'
+		});
+		if (!response.ok) {
+			throw new Error(`Failed to fetch collaboration presence: ${response.status}`);
+		}
+
+		const payload = (await response.json()) as { connectedCount?: number };
+		return typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
+	}
+
+	function clearPresenceSocket() {
+		if (presenceHeartbeatTimer !== null) {
+			window.clearInterval(presenceHeartbeatTimer);
+			presenceHeartbeatTimer = null;
+		}
+	}
+
+	async function connectPresenceSocket(nextDocumentId: string) {
+		if (!browser || presenceHeartbeatTimer !== null) {
+			return;
+		}
+
+		const token = authSignal.token;
+		if (!token) {
+			return;
+		}
+
+		hasAttemptedPresence = true;
+		const sessionId = ensurePresenceSessionId();
+		const heartbeat = async () => {
+			try {
+				const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
+					method: 'PUT',
+					headers: {
+						Authorization: `Bearer ${token}`,
+						'Content-Type': 'application/json',
+						'X-Presence-Session-Id': sessionId
+					},
+					credentials: 'include',
+					body: JSON.stringify({ sessionId })
+				});
+				if (!response.ok) {
+					throw new Error(`Presence heartbeat failed: ${response.status}`);
+				}
+				const payload = (await response.json()) as { connectedCount?: number };
+				presenceCount = typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
+				presenceConnected = true;
+				collaborationError = isYjsConnected ? null : collaborationError;
+				updateCollaborationIndicator();
+			} catch (error) {
+				presenceConnected = false;
+				console.warn(`[Presence] Heartbeat failed for ${nextDocumentId}:`, error);
+				updateCollaborationIndicator();
+			}
+		};
+
+		await heartbeat();
+		presenceHeartbeatTimer = window.setInterval(() => {
+			void heartbeat();
+		}, 20000);
+	}
+
+	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+		const wsUrl = await resolveRealtimeWsUrl();
+		const token = authSignal.token;
+		if (!token) {
+			throw new Error('Missing access token');
+		}
+
+		const instance = await yjsProvider.createProvider({
+			wsUrl,
+			documentId: nextDocumentId,
+			userId: authSignal.user?.id ?? 'unknown',
+			token
+		});
+
+		if (instance.error) {
+			console.warn('[Collaboration] Falling back to local Y.js mode:', instance.error);
+		}
+
+		return instance;
+	}
+
+	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
+		const now = Date.now();
+		if (
+			isInitializingCollaboration ||
+			(collaboration && !collaborationError) ||
+			(now - lastCollaborationAttemptAt < 10000 && reason !== 'presence')
+		) {
+			return;
+		}
+
+		if (collaborationError && collaboration) {
+			yjsProvider.destroyProvider(nextDocumentId);
+			collaboration = null;
+			clearCollaborationListeners();
+		}
+
+		isInitializingCollaboration = true;
+		lastCollaborationAttemptAt = now;
+		try {
+			const collaborationInstance = await initializeCollaboration(nextDocumentId);
+			if (collaborationInstance.error || !collaborationInstance.provider) {
+				collaboration = null;
+				collaborationError = collaborationInstance.error || '协作连接失败';
+				isYjsConnected = false;
+				updateCollaborationIndicator();
+				yjsProvider.destroyProvider(nextDocumentId);
+				return;
+			}
+
+			collaboration = collaborationInstance;
+			collaborationError = null;
+			attachCollaborationListeners(collaborationInstance);
+		} catch (collaborationInitError) {
+			console.error('[Collaboration] Failed to initialize realtime collaboration:', collaborationInitError);
+			collaboration = null;
+			collaborationError =
+				collaborationInitError instanceof Error
+					? collaborationInitError.message
+					: 'Unknown collaboration error';
+			isYjsConnected = false;
+			updateCollaborationIndicator();
+			clearCollaborationListeners();
+		} finally {
+			isInitializingCollaboration = false;
+		}
+	}
+
+	function clearCollaborationListeners() {
+		detachCollaborationListeners?.();
+		detachCollaborationListeners = null;
+	}
+
+	function attachCollaborationListeners(instance: ProviderInstance) {
+		clearCollaborationListeners();
+
+		if (!instance.provider) {
+			collaborationError = '协作连接已断开';
+			isYjsConnected = false;
+			updateCollaborationIndicator();
+			return;
+		}
+
+		const syncPresence = (states?: Array<{ clientId: number }>) => {
+			const awarenessStates = Array.from(instance.provider?.awareness?.getStates().values?.() ?? []);
+			const peerCount = states?.length ?? awarenessStates.length;
+			const onlineUserIds = awarenessStates
+				.map((state) => {
+					const userState = (state as { user?: { id?: string } }).user;
+					return typeof userState?.id === 'string' ? userState.id : '';
+				})
+				.filter((value) => value !== '');
+
+			presenceCount = Math.max(peerCount, 1);
+			setOnlineMembersFromUserIds(
+				onlineUserIds.length > 0
+					? onlineUserIds
+					: authSignal.user?.id
+						? [authSignal.user.id]
+						: []
+			);
+			updateCollaborationIndicator();
+		};
+
+		const handleStatus = ({ status }: { status: string }) => {
+			if (status === 'connected') {
+				collaborationError = null;
+				isYjsConnected = true;
+				syncPresence();
+				return;
+			}
+
+			if (status === 'disconnected') {
+				collaborationError = '协作连接已断开';
+				isYjsConnected = false;
+				resetOnlineMembers();
+				console.warn(`[Yjs] Disconnected for ${documentId}`);
+				updateCollaborationIndicator();
+			}
+		};
+
+		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
+			collaborationError = reason || '协作鉴权失败';
+			isYjsConnected = false;
+			resetOnlineMembers();
+			console.warn(`[Yjs] Authentication failed for ${documentId}: ${collaborationError}`);
+			updateCollaborationIndicator();
+			if (documentId) {
+				yjsProvider.stopReconnects(documentId);
+			}
+		};
+
+		const handleAwarenessChange = ({ states }: { states: Array<{ clientId: number }> }) => {
+			syncPresence(states);
+		};
+
+		instance.provider.on('status', handleStatus);
+		instance.provider.on('authenticationFailed', handleAuthenticationFailed);
+		instance.provider.on('awarenessChange', handleAwarenessChange);
+		detachCollaborationListeners = () => {
+			instance.provider?.off('status', handleStatus);
+			instance.provider?.off('authenticationFailed', handleAuthenticationFailed);
+			instance.provider?.off('awarenessChange', handleAwarenessChange);
+		};
+
+		if (instance.error) {
+			collaborationError = instance.error;
+			isYjsConnected = false;
+			resetOnlineMembers();
+			updateCollaborationIndicator();
+		} else if (instance.isConnected) {
+			isYjsConnected = true;
+			syncPresence();
+		} else {
+			isYjsConnected = false;
+			resetOnlineMembers();
+			updateCollaborationIndicator();
+		}
 	}
 
 	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
@@ -252,40 +644,101 @@
 
 	// Load document content when ID becomes available
 	$effect(() => {
-		if (documentId) {
+		if (documentId && !authSignal.loading) {
 			isLoading = true;
 			const loadContent = async () => {
 				try {
 					console.log('[Load] Loading document for ID:', documentId);
 					// Load document details (for title) and content in parallel
-					const [details, data, configs] = await Promise.all([
+					const [details, data, configs, memberResponse] = await Promise.all([
 						getDocumentDetails(documentId),
 						getDocumentContent(documentId),
 						getImageBedConfigs().catch((error) => {
 							console.error('[Load] Failed to load image bed configs:', error);
 							return [] as ImageBedConfig[];
-						})
+						}),
+						listDocumentMembers(documentId).catch(() => ({ documentId, members: [] as ShareDocumentMember[] }))
 					]);
+
+					if (details.myRole === 'viewer') {
+						await goto(`/view/documents/${documentId}`);
+						return;
+					}
 
 					const loadedContent = data.contentJson ?? EMPTY_DOC;
 					imageBedConfigs = configs;
 					content = await refreshSignedImageSources(loadedContent);
 					// Use the title from the API
 					title = details.title ?? '';
+					manualExcerpt = details.manualExcerpt ?? '';
+					myRole = details.myRole ?? 'owner';
+					documentMembers = memberResponse.members;
+					publicAccess = details.publicAccess ?? 'private';
+					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
 					lastSaved = null;
+					presenceCount = 0;
+					presenceConnected = false;
+					hasAttemptedPresence = false;
+					collaborationError = null;
+					isYjsConnected = false;
+					resetOnlineMembers();
+					clearPresenceSocket();
+					clearCollaborationListeners();
+					if (documentId) {
+						yjsProvider.destroyProvider(documentId);
+					}
+					collaboration = null;
+					updateCollaborationIndicator();
 					console.log('[Load] Title loaded:', title);
+					isLoading = false;
+
+					void (async () => {
+						try {
+							presenceCount = await fetchCollaborationPresence(documentId);
+							updateCollaborationIndicator();
+							await connectPresenceSocket(documentId);
+							await startCollaboration(documentId, 'presence');
+						} catch (presenceError) {
+							console.error('[Collaboration] Failed to fetch presence:', presenceError);
+							presenceCount = 0;
+							presenceConnected = false;
+							hasAttemptedPresence = true;
+							collaborationError = 'presence-disconnected';
+							isYjsConnected = false;
+							updateCollaborationIndicator();
+						}
+					})();
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
-					toast.error(m.move_dialog_load_failed());
+					collaboration = null;
+					collaborationIndicator = null;
+					isYjsConnected = false;
+					clearPresenceSocket();
+					clearCollaborationListeners();
+					toast.error(
+						error instanceof Error && error.message.trim() !== ''
+							? error.message
+							: '加载文档失败'
+					);
 					goto('/workspace');
 				} finally {
-					isLoading = false;
+					if (isLoading) {
+						isLoading = false;
+					}
 				}
 			};
 			loadContent();
+		}
+	});
+
+	onDestroy(() => {
+		clearPresenceSocket();
+		clearCollaborationListeners();
+		if (documentId) {
+			yjsProvider.destroyProvider(documentId);
 		}
 	});
 
@@ -317,6 +770,7 @@
 			window.clearInterval(timer);
 		};
 	});
+
 
 	onMount(() => {
 		const handleKeydown = (event: KeyboardEvent) => {
@@ -353,15 +807,26 @@
 			<EditorTopBar
 				{documentId}
 				initialTitle={title}
+				initialExcerpt={manualExcerpt}
 				{documentType}
 				{preferredImageTargetId}
 				{availableImageTargets}
+				{myRole}
+				{publicAccess}
+				{publicUrl}
+				{collaborationIndicator}
+				{onlineMembers}
+				readOnly={false}
+				showEditShortcut={false}
 				{isUpdatingImageTarget}
 				{isSaving}
 				{lastSaved}
 				{hasUnsavedChanges}
 				onTitleChange={handleTitleChange}
+				onManualExcerptChange={handleExcerptChange}
 				onImageTargetChange={handleImageTargetChange}
+				onPublicAccessChange={(nextPublicAccess, nextPublicURL) =>
+					handlePublicAccessChange(nextPublicAccess, nextPublicURL)}
 			/>
 	{/if}
 
@@ -374,15 +839,19 @@
 						<p>{m.edit_document_editor_under_construction()}</p>
 					</div>
 				{:else}
-					<Editor
-						documentId={documentId!}
-						{content}
-						currentImageTargetLabel={currentImageTargetLabel}
-						{isSaving}
-						{hasUnsavedChanges}
-						onSave={saveContent}
-						onContentChange={handleContentChange}
-					/>
+					{#key collaboration?.doc ? `collab:${documentId}` : `local:${documentId}`}
+						<Editor
+							documentId={documentId!}
+							{content}
+							currentImageTargetLabel={currentImageTargetLabel}
+							{collaboration}
+							{isSaving}
+							{hasUnsavedChanges}
+							hydrateManagedContent={refreshSignedImageSources}
+							onSave={saveContent}
+							onContentChange={handleContentChange}
+						/>
+					{/key}
 				{/if}
 			{:else}
 				<div class="prose dark:prose-invert">

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
@@ -46,14 +47,14 @@ type UpdateContentResult struct {
 // GetContent retrieves the current content of a document.
 func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
 	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
-		return nil, err
+		return nil, ErrDocumentNotFoundOrUnauthorized
 	}
 
 	var content models.DocumentBody
 	result := database.DB.Where("document_id = ?", documentID).First(&content)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档内容不存在")
+			return nil, ErrDocumentContentNotFound
 		}
 		return nil, result.Error
 	}
@@ -90,7 +91,7 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
 		document, err := acl.CanEditDocument(tx, userID, documentID)
 		if err != nil {
-			return err
+			return ErrDocumentNotFoundOrUnauthorized
 		}
 
 		now := time.Now()
@@ -175,16 +176,18 @@ func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSON
 		return err
 	}
 
-	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
+	var document models.Document
+	if err := tx.Where("id = ?", documentID).First(&document).Error; err != nil {
+		return err
+	}
+
+	return syncDocumentAssetRefs(tx, document.OwnerUserID, documentID, assetIDs, time.Now())
 }
 
 // DeleteContentByDocumentID soft deletes the content row for a document.
 func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	document, _, err := acl.CanAccessDocumentOwnerOnly(tx, userID, documentID)
+	if err != nil {
 		return nil
 	}
 
@@ -192,16 +195,13 @@ func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error 
 		return err
 	}
 
-	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
+	return removeDocumentAssetRefs(tx, document.OwnerUserID, documentID, time.Now())
 }
 
 // RestoreContentByDocumentID restores the content row for a document.
 func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID)
+	if err != nil {
 		return nil
 	}
 
@@ -225,16 +225,13 @@ func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error
 		return err
 	}
 
-	return syncDocumentAssetRefs(tx, userID, documentID, assetIDs, time.Now())
+	return syncDocumentAssetRefs(tx, document.OwnerUserID, documentID, assetIDs, time.Now())
 }
 
 // PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
 func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
-	var count int64
-	if err := tx.Unscoped().Model(&models.Document{}).Where("id = ? AND owner_user_id = ?", documentID, userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
+	document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID)
+	if err != nil {
 		return nil
 	}
 
@@ -242,7 +239,7 @@ func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUI
 		return err
 	}
 
-	return removeDocumentAssetRefs(tx, userID, documentID, time.Now())
+	return removeDocumentAssetRefs(tx, document.OwnerUserID, documentID, time.Now())
 }
 
 func normalizeContentJSON(raw []byte) (string, error) {
@@ -250,7 +247,7 @@ func normalizeContentJSON(raw []byte) (string, error) {
 		return defaultContentJSON, nil
 	}
 	if !json.Valid(raw) {
-		return "", errors.New("contentJson must be valid JSON")
+		return "", ErrInvalidContentJSON
 	}
 	return string(raw), nil
 }
@@ -300,13 +297,15 @@ func joinWithSpace(parts []string) string {
 }
 
 func buildExcerpt(plainText string) string {
-	if len(plainText) == 0 {
+	text := strings.TrimSpace(plainText)
+	if text == "" {
 		return ""
 	}
-	if len(plainText) > 100 {
-		return plainText[:100] + "..."
+	runes := []rune(text)
+	if len(runes) > 100 {
+		return string(runes[:100]) + "..."
 	}
-	return plainText
+	return text
 }
 
 // BuildExcerptFromContentJSON derives a document excerpt from editor JSON.
@@ -315,13 +314,50 @@ func BuildExcerptFromContentJSON(contentJSONRaw string) string {
 	if err != nil {
 		return ""
 	}
+	firstParagraph := extractFirstParagraph(contentJSON)
+	if firstParagraph != "" {
+		return buildExcerpt(firstParagraph)
+	}
 	return buildExcerpt(toPlainText(contentJSON))
+}
+
+func extractFirstParagraph(contentJSON string) string {
+	var node map[string]any
+	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
+		return ""
+	}
+
+	contentNodes, ok := node["content"].([]any)
+	if !ok {
+		return ""
+	}
+
+	for _, rawBlock := range contentNodes {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		blockType, _ := block["type"].(string)
+		if blockType != "paragraph" && blockType != "heading" {
+			continue
+		}
+
+		parts := make([]string, 0, 16)
+		collectText(block, &parts)
+		plain := strings.TrimSpace(joinWithSpace(parts))
+		if plain != "" {
+			return plain
+		}
+	}
+
+	return ""
 }
 
 func extractAssetIDsFromContentJSON(contentJSON string) ([]uuid.UUID, error) {
 	var node any
 	if err := json.Unmarshal([]byte(contentJSON), &node); err != nil {
-		return nil, errors.New("contentJson must be valid JSON")
+		return nil, ErrInvalidContentJSON
 	}
 
 	seen := make(map[uuid.UUID]struct{})
@@ -387,7 +423,7 @@ func syncDocumentAssetRefs(tx *gorm.DB, ownerUserID, documentID uuid.UUID, asset
 		return err
 	}
 	if len(validAssetIDs) != len(assetIDs) {
-		return errors.New("content references invalid assets")
+		return ErrInvalidContentAssetReferences
 	}
 
 	var existingRefs []models.DocumentAssetRef

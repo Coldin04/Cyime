@@ -19,12 +19,16 @@ type FileItem struct {
 	Type                   string      `json:"type"` // "folder" | "document"
 	DocumentType           *string     `json:"documentType,omitempty"`
 	PreferredImageTargetID *string     `json:"preferredImageTargetId,omitempty"`
+	MyRole                 *string     `json:"myRole,omitempty"`
+	PublicAccess           *string     `json:"publicAccess,omitempty"`
+	PublicURL              *string     `json:"publicUrl,omitempty"`
 	Name                   string      `json:"name"`
 	Description            *string     `json:"description,omitempty"`
 	ParentID               *uuid.UUID  `json:"parentId,omitempty"`
 	FolderID               *uuid.UUID  `json:"folderId,omitempty"`
 	Title                  *string     `json:"title,omitempty"`
 	Excerpt                *string     `json:"excerpt,omitempty"`
+	ManualExcerpt          *string     `json:"manualExcerpt,omitempty"`
 	CreatedAt              time.Time   `json:"createdAt"`
 	UpdatedAt              time.Time   `json:"updatedAt"`
 	Creator                CreatorInfo `json:"creator"`
@@ -128,6 +132,24 @@ type UpdateDocumentImageTargetRequest struct {
 	PreferredImageTargetID string `json:"preferredImageTargetId"`
 }
 
+type UpdateDocumentExcerptRequest struct {
+	Excerpt string `json:"excerpt"`
+}
+
+type UpdateDocumentPublicAccessRequest struct {
+	PublicAccess string `json:"publicAccess"`
+}
+
+type DocumentPublicContentResponse struct {
+	ID             uuid.UUID       `json:"id"`
+	DocumentID     uuid.UUID       `json:"documentId"`
+	ContentJSON    json.RawMessage `json:"contentJson"`
+	PlainText      string          `json:"plainText"`
+	ContentVersion int64           `json:"contentVersion"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
 type BatchMoveRequest struct {
 	Items               []ItemToMove `json:"items"`
 	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"`
@@ -150,10 +172,16 @@ type ShareDocumentRequest struct {
 	Role   string    `json:"role"`
 }
 
+type InviteDocumentByEmailRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 type ShareDocumentMember struct {
 	UserID      uuid.UUID `json:"userId"`
 	Role        string    `json:"role"`
 	DisplayName *string   `json:"displayName,omitempty"`
+	Email       *string   `json:"email,omitempty"`
 }
 
 type ShareDocumentResponse struct {
@@ -179,4 +207,67 @@ type SharedDocumentListResponse struct {
 	Items   []SharedDocumentItem `json:"items"`
 	HasMore bool                 `json:"hasMore"`
 	Total   int64                `json:"total"`
+}
+
+type SharedDocumentSummaryResponse struct {
+	HasSharedDocuments bool `json:"hasSharedDocuments"`
+}
+
+type OutgoingSharedDocumentItem struct {
+	DocumentID             uuid.UUID  `json:"documentId"`
+	Title                  string     `json:"title"`
+	Excerpt                string     `json:"excerpt"`
+	DocumentType           string     `json:"documentType"`
+	PreferredImageTargetID string     `json:"preferredImageTargetId"`
+	FolderID               *uuid.UUID `json:"folderId,omitempty"`
+	MyRole                 string     `json:"myRole"`
+	PublicAccess           string     `json:"publicAccess"`
+	PublicURL              string     `json:"publicUrl"`
+	SharedMemberCount      int64      `json:"sharedMemberCount"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+}
+
+type OutgoingSharedDocumentListResponse struct {
+	Items   []OutgoingSharedDocumentItem `json:"items"`
+	HasMore bool                         `json:"hasMore"`
+	Total   int64                        `json:"total"`
+}
+
+type NotificationItem struct {
+	ID        uuid.UUID       `json:"id"`
+	UserID    uuid.UUID       `json:"userId"`
+	Type      string          `json:"type"`
+	GroupKey  string          `json:"groupKey"`
+	Data      json.RawMessage `json:"data"`
+	ReadAt    *time.Time      `json:"readAt,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+type NotificationListResponse struct {
+	Items       []NotificationItem `json:"items"`
+	HasMore     bool               `json:"hasMore"`
+	Total       int64              `json:"total"`
+	UnreadCount int64              `json:"unreadCount"`
+}
+
+// DocumentACLResponse represents the ACL information for a document
+type DocumentACLResponse struct {
+	MyRole           string `json:"myRole"` // "viewer", "editor", "collaborator", "owner"
+	CanRead          bool   `json:"canRead"`
+	CanEdit          bool   `json:"canEdit"`
+	CanManageMembers bool   `json:"canManageMembers"`
+}
+
+// GetYjsStateResponse represents the Yjs state response
+type GetYjsStateResponse struct {
+	YjsState       string `json:"yjsState"`
+	YjsStateVector string `json:"yjsStateVector"`
+}
+
+// UpdateYjsStateRequest represents the request to update Yjs state
+type UpdateYjsStateRequest struct {
+	YjsState       string `json:"yjsState"`
+	YjsStateVector string `json:"yjsStateVector"`
 }
