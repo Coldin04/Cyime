@@ -19,7 +19,12 @@
 	import { realtimeConfig } from '$lib/stores/realtime';
 	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
 	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
-	import { getDocumentDetails, updateDocumentImageTarget } from '$lib/api/workspace';
+	import {
+		getDocumentDetails,
+		listDocumentMembers,
+		updateDocumentImageTarget,
+		type ShareDocumentMember
+	} from '$lib/api/workspace';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
 		getDocumentImageTargetLabel,
@@ -56,6 +61,8 @@
 	let presenceCount = $state(0);
 	let presenceConnected = $state(false);
 	let hasAttemptedPresence = $state(false);
+	let documentMembers = $state<ShareDocumentMember[]>([]);
+	let onlineMembers = $state<ShareDocumentMember[]>([]);
 	let presenceSessionId = $state('');
 	let presenceHeartbeatTimer: number | null = null;
 	let isInitializingCollaboration = $state(false);
@@ -237,6 +244,64 @@
 		publicUrl = nextPublicURL;
 	}
 
+	function getCurrentUserMember(): ShareDocumentMember | null {
+		const user = authSignal.user;
+		if (!user?.id) {
+			return null;
+		}
+
+		return {
+			userId: user.id,
+			role: myRole,
+			displayName:
+				(typeof user.displayName === 'string' && user.displayName.trim() !== ''
+					? user.displayName.trim()
+					: null) ??
+				(typeof user.email === 'string' && user.email.trim() !== '' ? user.email.trim() : null),
+			email: typeof user.email === 'string' && user.email.trim() !== '' ? user.email.trim() : null
+		};
+	}
+
+	function setOnlineMembersFromUserIds(userIds: string[]) {
+		const seen = new Set<string>();
+		const nextMembers: ShareDocumentMember[] = [];
+		const membersById = new Map(documentMembers.map((member) => [member.userId, member]));
+
+		for (const userId of userIds) {
+			if (!userId || seen.has(userId)) {
+				continue;
+			}
+			seen.add(userId);
+			const matchedMember = membersById.get(userId);
+			if (matchedMember) {
+				nextMembers.push(matchedMember);
+				continue;
+			}
+
+			if (userId === authSignal.user?.id) {
+				const currentUserMember = getCurrentUserMember();
+				if (currentUserMember) {
+					nextMembers.push(currentUserMember);
+					continue;
+				}
+			}
+
+			nextMembers.push({
+				userId,
+				role: 'editor',
+				displayName: userId,
+				email: null
+			});
+		}
+
+		onlineMembers = nextMembers;
+	}
+
+	function resetOnlineMembers() {
+		const currentUserMember = getCurrentUserMember();
+		onlineMembers = currentUserMember ? [currentUserMember] : [];
+	}
+
 	function updateCollaborationIndicator() {
 		if (presenceCount > 1) {
 			if (isYjsConnected) {
@@ -344,7 +409,6 @@
 				presenceCount = typeof payload.connectedCount === 'number' ? payload.connectedCount : 0;
 				presenceConnected = true;
 				collaborationError = isYjsConnected ? null : collaborationError;
-				console.log(`[Presence] ${nextDocumentId} has ${presenceCount} active session(s)`);
 				updateCollaborationIndicator();
 			} catch (error) {
 				presenceConnected = false;
@@ -353,7 +417,6 @@
 			}
 		};
 
-		console.log(`[Presence] Starting backend heartbeat for ${nextDocumentId}`);
 		await heartbeat();
 		presenceHeartbeatTimer = window.setInterval(() => {
 			void heartbeat();
@@ -388,9 +451,6 @@
 			(collaboration && !collaborationError) ||
 			(now - lastCollaborationAttemptAt < 10000 && reason !== 'presence')
 		) {
-			console.log(
-				`[Collaboration] Start skipped for ${nextDocumentId}: initializing=${isInitializingCollaboration}, existing=${Boolean(collaboration && !collaborationError)}, recent=${now - lastCollaborationAttemptAt < 10000 && reason !== 'presence'}`
-			);
 			return;
 		}
 
@@ -403,15 +463,11 @@
 		isInitializingCollaboration = true;
 		lastCollaborationAttemptAt = now;
 		try {
-			console.log(`[Collaboration] Starting Yjs for ${nextDocumentId} via ${reason}`);
 			const collaborationInstance = await initializeCollaboration(nextDocumentId);
 			if (collaborationInstance.error || !collaborationInstance.provider) {
 				collaboration = null;
 				collaborationError = collaborationInstance.error || '协作连接失败';
 				isYjsConnected = false;
-				console.warn(
-					`[Collaboration] Yjs unavailable for ${nextDocumentId}: ${collaborationError}`
-				);
 				updateCollaborationIndicator();
 				yjsProvider.destroyProvider(nextDocumentId);
 				return;
@@ -419,7 +475,6 @@
 
 			collaboration = collaborationInstance;
 			collaborationError = null;
-			console.log(`[Collaboration] Yjs provider ready for ${nextDocumentId}`);
 			attachCollaborationListeners(collaborationInstance);
 		} catch (collaborationInitError) {
 			console.error('[Collaboration] Failed to initialize realtime collaboration:', collaborationInitError);
@@ -452,10 +507,23 @@
 		}
 
 		const syncPresence = (states?: Array<{ clientId: number }>) => {
-			const peerCount =
-				states?.length ??
-				Array.from(instance.provider?.awareness?.getStates().values?.() ?? []).length;
+			const awarenessStates = Array.from(instance.provider?.awareness?.getStates().values?.() ?? []);
+			const peerCount = states?.length ?? awarenessStates.length;
+			const onlineUserIds = awarenessStates
+				.map((state) => {
+					const userState = (state as { user?: { id?: string } }).user;
+					return typeof userState?.id === 'string' ? userState.id : '';
+				})
+				.filter((value) => value !== '');
+
 			presenceCount = Math.max(peerCount, 1);
+			setOnlineMembersFromUserIds(
+				onlineUserIds.length > 0
+					? onlineUserIds
+					: authSignal.user?.id
+						? [authSignal.user.id]
+						: []
+			);
 			updateCollaborationIndicator();
 		};
 
@@ -463,7 +531,6 @@
 			if (status === 'connected') {
 				collaborationError = null;
 				isYjsConnected = true;
-				console.log(`[Yjs] Connected for ${documentId}`);
 				syncPresence();
 				return;
 			}
@@ -471,6 +538,7 @@
 			if (status === 'disconnected') {
 				collaborationError = '协作连接已断开';
 				isYjsConnected = false;
+				resetOnlineMembers();
 				console.warn(`[Yjs] Disconnected for ${documentId}`);
 				updateCollaborationIndicator();
 			}
@@ -479,6 +547,7 @@
 		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
 			collaborationError = reason || '协作鉴权失败';
 			isYjsConnected = false;
+			resetOnlineMembers();
 			console.warn(`[Yjs] Authentication failed for ${documentId}: ${collaborationError}`);
 			updateCollaborationIndicator();
 			if (documentId) {
@@ -502,12 +571,14 @@
 		if (instance.error) {
 			collaborationError = instance.error;
 			isYjsConnected = false;
+			resetOnlineMembers();
 			updateCollaborationIndicator();
 		} else if (instance.isConnected) {
 			isYjsConnected = true;
 			syncPresence();
 		} else {
 			isYjsConnected = false;
+			resetOnlineMembers();
 			updateCollaborationIndicator();
 		}
 	}
@@ -572,13 +643,14 @@
 				try {
 					console.log('[Load] Loading document for ID:', documentId);
 					// Load document details (for title) and content in parallel
-					const [details, data, configs] = await Promise.all([
+					const [details, data, configs, memberResponse] = await Promise.all([
 						getDocumentDetails(documentId),
 						getDocumentContent(documentId),
 						getImageBedConfigs().catch((error) => {
 							console.error('[Load] Failed to load image bed configs:', error);
 							return [] as ImageBedConfig[];
-						})
+						}),
+						listDocumentMembers(documentId).catch(() => ({ documentId, members: [] as ShareDocumentMember[] }))
 					]);
 
 					if (details.myRole === 'viewer') {
@@ -593,6 +665,7 @@
 					title = details.title ?? '';
 					manualExcerpt = details.manualExcerpt ?? '';
 					myRole = details.myRole ?? 'owner';
+					documentMembers = memberResponse.members;
 					publicAccess = details.publicAccess ?? 'private';
 					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
 					documentType = details.documentType ?? 'rich_text';
@@ -604,6 +677,7 @@
 					hasAttemptedPresence = false;
 					collaborationError = null;
 					isYjsConnected = false;
+					resetOnlineMembers();
 					clearPresenceSocket();
 					clearCollaborationListeners();
 					if (documentId) {
@@ -734,6 +808,7 @@
 				{publicAccess}
 				{publicUrl}
 				{collaborationIndicator}
+				{onlineMembers}
 				readOnly={false}
 				showEditShortcut={false}
 				{isUpdatingImageTarget}

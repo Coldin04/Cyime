@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateDocumentTitle } from '$lib/api/workspace';
+	import { updateDocumentTitle, type ShareDocumentMember } from '$lib/api/workspace';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
@@ -28,6 +28,7 @@ let {
 	publicAccess = 'private',
 	publicUrl = '',
 	collaborationIndicator = null,
+	onlineMembers = [],
 	readOnly = false,
 	showEditShortcut = false,
 	editHref = '',
@@ -52,6 +53,7 @@ let {
 	collaborationIndicator?:
 		| { kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string }
 		| null;
+	onlineMembers?: ShareDocumentMember[];
 	readOnly?: boolean;
 	showEditShortcut?: boolean;
 	editHref?: string;
@@ -125,6 +127,19 @@ $effect(() => {
 			saveTitle();
 		} else if (e.key === 'Escape') {
 			cancelEditingTitle();
+		}
+	}
+
+	function roleLabel(role: string) {
+		switch (role) {
+			case 'owner':
+				return '所有者';
+			case 'collaborator':
+				return '协同者';
+			case 'editor':
+				return '编辑者';
+			default:
+				return '查看者';
 		}
 	}
 
@@ -226,9 +241,21 @@ $effect(() => {
 							{/if}
 						</div>
 						<div
-							class="pointer-events-none absolute left-0 top-7 z-40 w-max max-w-xs rounded-md bg-zinc-900 px-2 py-1 text-[11px] text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-zinc-100 dark:text-zinc-900"
+							class="pointer-events-none absolute left-0 top-7 z-40 min-w-52 max-w-xs rounded-md border border-zinc-200 bg-white px-2 py-2 text-[11px] text-zinc-900 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
 						>
-							{collaborationIndicator.label}
+							<p class="font-medium">{collaborationIndicator.label}</p>
+							{#if onlineMembers.length > 0}
+								<ul class="mt-2 space-y-1 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+									{#each onlineMembers as member (member.userId)}
+										<li class="flex items-center justify-between gap-3">
+											<span class="truncate">
+												{member.displayName || member.email || member.userId}
+											</span>
+											<span class="shrink-0 text-[10px] opacity-70">{roleLabel(member.role)}</span>
+										</li>
+									{/each}
+								</ul>
+							{/if}
 						</div>
 					</div>
 				{/if}

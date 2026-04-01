@@ -31,7 +31,6 @@ class YjsProviderManager {
 		const docId = config.documentId;
 
 		if (this.instances.has(docId)) {
-			console.log(`[Yjs] Reusing cached provider for document ${docId}`);
 			return this.instances.get(docId)!;
 		}
 
@@ -64,16 +63,13 @@ class YjsProviderManager {
 					instance.isConnected = status === 'connected';
 					if (status === 'connected') {
 						instance.error = null;
-						console.log(`[Yjs] Connected to collaboration server for ${docId}`);
 					} else if (status === 'disconnected') {
 						console.warn(`[Yjs] Disconnected from collaboration server for ${docId}`);
 					}
 				},
 				onSynced: ({ state }: onSyncedParameters) => {
 					instance.isSynced = state;
-					if (state) {
-						console.log(`[Yjs] Document ${docId} synced`);
-					}
+					void state;
 				},
 				onAuthenticationFailed: ({ reason }: onAuthenticationFailedParameters) => {
 					instance.error = reason || 'Authentication failed';
@@ -90,11 +86,8 @@ class YjsProviderManager {
 				id: config.userId
 			});
 			provider.attach();
-			console.log(`[Yjs] Provider attached for document ${docId}`);
 
 			this.instances.set(docId, instance);
-			console.log(`[Yjs] Creating provider for document ${docId}`);
-			console.log(`[Yjs] Opening websocket for document ${docId}`);
 			void websocketProvider.connect().catch((error: unknown) => {
 				const errorMsg = error instanceof Error ? error.message : String(error);
 				instance.error = errorMsg;
@@ -103,7 +96,6 @@ class YjsProviderManager {
 			});
 			await this.waitForConnection(provider, this.CONNECTION_TIMEOUT);
 
-			console.log(`[Yjs] Provider created for document ${docId}`);
 			return instance;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -135,7 +127,6 @@ class YjsProviderManager {
 
 	private async waitForConnection(provider: HocuspocusProvider, timeout: number): Promise<void> {
 		if (provider.configuration.websocketProvider.status === 'connected') {
-			console.log(`[Yjs] Websocket already connected for ${provider.configuration.name}`);
 			return;
 		}
 
@@ -147,7 +138,6 @@ class YjsProviderManager {
 			}, timeout);
 
 			const handleStatus = ({ status }: { status: string }) => {
-				console.log(`[Yjs] Status for ${provider.configuration.name}: ${status}`);
 				if (status === 'connected') {
 					cleanup();
 					resolve();
@@ -205,7 +195,6 @@ class YjsProviderManager {
 		instance.provider?.destroy();
 		instance.doc?.destroy();
 		this.instances.delete(documentId);
-		console.log(`[Yjs] Provider destroyed for document ${documentId}`);
 	}
 
 	destroyAll(): void {
