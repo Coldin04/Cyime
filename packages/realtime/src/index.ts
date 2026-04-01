@@ -11,7 +11,13 @@ dotenv.config();
 // 配置
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const GO_API_URL = process.env.GO_API_URL || 'http://localhost:8080/api/v1';
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = (() => {
+	const secret = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET;
+	if (!secret) {
+		throw new Error('JWT secret not configured. Please set JWT_SECRET_KEY or JWT_SECRET.');
+	}
+	return secret;
+})();
 
 interface TokenPayload {
 	sub: string;
