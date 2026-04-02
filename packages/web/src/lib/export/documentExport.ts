@@ -127,7 +127,7 @@ export function exportHtmlDocument(options: {
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     blockquote { margin: 20px 0; padding: 12px 16px; border-left: 3px solid #14b8a6; background: #f4f4f5; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #e4e4e7; padding: 8px 10px; }
+    th, td { border: 1px solid #a1a1aa; padding: 8px 10px; }
   </style>
 </head>
 <body>

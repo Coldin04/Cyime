@@ -42,7 +42,10 @@
 		collectImageNodes,
 		collectManagedImages,
 		cloneContentJson,
+		exportPdfDocument,
+		exportHtmlDocument,
 		getManagedAssetId,
+		inlineManagedImagesAsDataURLs,
 		replaceManagedImagesWithPublicURLs,
 		runExportAction
 	} from '$lib/export/exportPrivateImages';
@@ -203,6 +206,21 @@
 
 	async function performExport(action: ExportAction, exportContent: JSONContent) {
 		try {
+			if (action === 'download-pdf') {
+				const printContent = await inlineManagedImagesAsDataURLs(exportContent, (assetId) =>
+					resolveApiUrl(`/api/v1/media/assets/${assetId}/content`)
+				);
+				const html = exportHtmlDocument({
+					title: title.trim() || 'CyimeWrite Export',
+					contentJson: printContent
+				});
+				await exportPdfDocument({
+					title: title.trim() || 'CyimeWrite Export',
+					html
+				});
+				return;
+			}
+
 			const result = await runExportAction(action, {
 				title,
 				contentJson: exportContent
