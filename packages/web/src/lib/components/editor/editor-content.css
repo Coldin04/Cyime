@@ -187,11 +187,22 @@
 }
 
 .tiptap .tiptap-mathematics-render[data-type='block-math'] {
-	display: flex;
+	display: block;
 	justify-content: center;
 	margin: 1.4rem 0;
-	overflow-x: auto;
-	padding: 0.2rem 0.35rem;
+	max-width: 100%;
+	overflow: visible;
+	padding: 0.5rem 0.35rem;
+	text-align: center;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] .katex {
+	font-size: clamp(1.5em, 1.02em + 0.68vw, 1.68em);
+	max-width: 100%;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] .katex-display {
+	line-height: 1.45;
 }
 
 .tiptap .tiptap-mathematics-render--editable {
