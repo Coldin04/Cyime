@@ -107,6 +107,7 @@
 						type="button"
 						class="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 						onclick={closeDialog}
+						aria-label="Close dialog"
 					>
 						✕
 					</button>
