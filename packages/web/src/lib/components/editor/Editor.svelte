@@ -6,6 +6,7 @@
 	import Collaboration from '@tiptap/extension-collaboration';
 	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
+	import Mathematics from '@tiptap/extension-mathematics';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
 	import { Table } from '@tiptap/extension-table';
@@ -30,14 +31,17 @@
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
 	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
+	import InlineMathControls from '$lib/components/editor/InlineMathControls.svelte';
 	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
 	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
+	import MathInputDialog from '$lib/components/editor/MathInputDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
 	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
+	import Function from '~icons/ph/function';
 	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
@@ -77,8 +81,13 @@
 	let editorRevision = $state(0);
 	let uploadingImageCount = $state(0);
 	let isImageInsertDialogOpen = $state(false);
+	let isMathDialogOpen = $state(false);
+	let mathDialogMode = $state<'inline' | 'block'>('inline');
+	let mathDialogValue = $state('');
+	let editingMathPosition = $state<number | null>(null);
 	let hasSeededCollaborationContent = false;
 	let hasHydratedManagedImages = false;
+	let isNormalizingMathInput = false;
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -254,6 +263,110 @@
 	function showUnsupportedImageUploadToast(file: File) {
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? 'unknown';
 		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF`);
+	}
+
+	function closeMathDialog() {
+		isMathDialogOpen = false;
+		mathDialogValue = '';
+		editingMathPosition = null;
+	}
+
+	function openMathDialog(mode: 'inline' | 'block', latex = '', pos: number | null = null) {
+		if (readOnly) {
+			return;
+		}
+
+		mathDialogMode = mode;
+		mathDialogValue = latex;
+		editingMathPosition = pos;
+		isMathDialogOpen = true;
+	}
+
+	async function submitMathDialog(rawLatex: string): Promise<boolean> {
+		const editorInstance = editor;
+		if (!editorInstance) {
+			return false;
+		}
+
+		const latex = rawLatex.trim();
+		if (latex === '') {
+			toast.error('请输入 LaTeX 公式内容');
+			return false;
+		}
+
+		const editingPos = editingMathPosition ?? undefined;
+		const command =
+			mathDialogMode === 'inline'
+				? editingPos === undefined
+					? () => editorInstance.chain().focus().insertInlineMath({ latex }).run()
+					: () => editorInstance.chain().focus().updateInlineMath({ latex, pos: editingPos }).run()
+				: editingPos === undefined
+					? () => editorInstance.chain().focus().insertBlockMath({ latex }).run()
+					: () => editorInstance.chain().focus().updateBlockMath({ latex, pos: editingPos }).run();
+
+		const succeeded = command();
+		if (!succeeded) {
+			toast.error('公式插入失败');
+			return false;
+		}
+
+		editorRevision += 1;
+		closeMathDialog();
+		return true;
+	}
+
+	function normalizeMarkdownMathInput(editorInstance: Editor): boolean {
+		const inlineMathType = editorInstance.schema.nodes.inlineMath;
+		if (!inlineMathType) {
+			return false;
+		}
+
+		const replacements: Array<{ kind: 'inline'; from: number; to: number; latex: string }> = [];
+
+		editorInstance.state.doc.descendants((node, pos) => {
+			if (!node.isText || !node.text || node.text.includes('\n')) {
+				return;
+			}
+
+			const textValue = node.text;
+			const inlinePattern = /(?<!\$)\$([^$\n]+?)\$(?!\$)/g;
+			for (const match of textValue.matchAll(inlinePattern)) {
+				const raw = match[0];
+				const latex = match[1]?.trim() ?? '';
+				const start = match.index ?? -1;
+				if (raw === undefined || start < 0 || latex === '') {
+					continue;
+				}
+				replacements.push({
+					kind: 'inline',
+					from: pos + start,
+					to: pos + start + raw.length,
+					latex
+				});
+			}
+		});
+
+		if (replacements.length === 0) {
+			return false;
+		}
+
+		const transaction = editorInstance.state.tr;
+		for (const replacement of [...replacements].sort((left, right) => right.from - left.from)) {
+			transaction.replaceWith(
+				replacement.from,
+				replacement.to,
+				inlineMathType.create({ latex: replacement.latex })
+			);
+		}
+
+		if (!transaction.docChanged) {
+			return false;
+		}
+
+		isNormalizingMathInput = true;
+		editorInstance.view.dispatch(transaction);
+		isNormalizingMathInput = false;
+		return true;
 	}
 
 	function insertUploadedImage(attrs: Record<string, unknown>) {
@@ -497,6 +610,23 @@
 				autolink: true,
 				defaultProtocol: 'https'
 			}),
+			Mathematics.configure({
+				katexOptions: {
+					throwOnError: false,
+					strict: 'ignore'
+				},
+				...(readOnly
+					? {}
+					: {
+							blockOptions: {
+								onClick: (node, pos) => {
+									const latex =
+										typeof node.attrs?.latex === 'string' ? node.attrs.latex : '';
+									openMathDialog('block', latex, pos);
+								}
+							}
+						})
+			}),
 			Table.configure({
 				resizable: true,
 				HTMLAttributes: {
@@ -506,9 +636,13 @@
 			TableRow,
 			TableHeader,
 			TableCell,
-			Placeholder.configure({
-				placeholder: m.editor_placeholder()
-			})
+			...(!readOnly
+				? [
+						Placeholder.configure({
+							placeholder: m.editor_placeholder()
+						})
+					]
+				: [])
 		];
 
 		if (collaboration?.doc) {
@@ -630,6 +764,9 @@
 			},
 			onUpdate: ({ editor }) => {
 				if (readOnly) {
+					return;
+				}
+				if (!isNormalizingMathInput && normalizeMarkdownMathInput(editor)) {
 					return;
 				}
 				const nextContent = editor.getJSON();
@@ -802,6 +939,13 @@
 		return typeof attrs.href === 'string' ? attrs.href : '';
 	}
 
+	function currentInlineMathLatex() {
+		editorRevision;
+		if (!editor || !editor.isActive('inlineMath')) return '';
+		const attrs = editor.getAttributes('inlineMath');
+		return typeof attrs.latex === 'string' ? attrs.latex : '';
+	}
+
 	function applyImageWidth(width: string) {
 		if (!editor || !editor.isActive('image')) {
 			return;
@@ -931,6 +1075,34 @@
 	function removeLink() {
 		if (!editor) return;
 		editor.chain().focus().extendMarkRange('link').unsetLink().run();
+		editorRevision += 1;
+	}
+
+	function applyInlineMathLatex(latexInput: string) {
+		if (!editor) return;
+		const latex = latexInput.trim();
+
+		if (latex === '') {
+			if (editor.isActive('inlineMath')) {
+				editor.chain().focus().deleteInlineMath().run();
+				editorRevision += 1;
+			}
+			return;
+		}
+
+		const succeeded = editor.isActive('inlineMath')
+			? editor.chain().focus().updateInlineMath({ latex }).run()
+			: editor.chain().focus().insertInlineMath({ latex }).run();
+		if (!succeeded) {
+			toast.error('公式插入失败');
+			return;
+		}
+		editorRevision += 1;
+	}
+
+	function removeInlineMath() {
+		if (!editor || !editor.isActive('inlineMath')) return;
+		editor.chain().focus().deleteInlineMath().run();
 		editorRevision += 1;
 	}
 
@@ -1093,6 +1265,23 @@
 			>
 				<Minus class="h-4 w-4" />
 			</button>
+			<InlineMathControls
+				latex={currentInlineMathLatex()}
+				isActive={isActive('inlineMath')}
+				onSave={applyInlineMathLatex}
+				onRemove={removeInlineMath}
+			/>
+			<button
+				type="button"
+				title={m.editor_math_block_title()}
+				aria-label={m.editor_math_block_title()}
+				class={`rounded-md px-2 py-1 text-[11px] font-medium leading-none transition-colors ${
+					isActive('blockMath') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() => openMathDialog('block')}
+			>
+				math
+			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -1192,3 +1381,10 @@
 		onInsertLink={async (src) => insertExternalImage(src)}
 	/>
 {/if}
+
+<MathInputDialog
+	bind:open={isMathDialogOpen}
+	mode={mathDialogMode}
+	initialValue={mathDialogValue}
+	onSubmit={submitMathDialog}
+/>
