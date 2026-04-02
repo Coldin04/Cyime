@@ -31,6 +31,7 @@
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
 	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
+	import ExportControls, { type ExportAction } from '$lib/components/editor/ExportControls.svelte';
 	import InlineMathControls from '$lib/components/editor/InlineMathControls.svelte';
 	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
@@ -54,6 +55,7 @@
 		onContentChange?: (content: JSONContent) => void;
 		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
+		onExportAction?: (action: ExportAction) => void | Promise<unknown>;
 	}
 
 	let {
@@ -66,7 +68,8 @@
 		hasUnsavedChanges = false,
 		onContentChange,
 		hydrateManagedContent,
-		onSave
+		onSave,
+		onExportAction
 	}: Props = $props();
 
 	const EMPTY_DOC: JSONContent = {
@@ -337,13 +340,49 @@
 
 	function normalizeMarkdownMathInput(editorInstance: Editor): boolean {
 		const inlineMathType = editorInstance.schema.nodes.inlineMath;
+		const blockMathType = editorInstance.schema.nodes.blockMath;
 		if (!inlineMathType) {
 			return false;
 		}
 
+		const blockReplacements: Array<{ from: number; to: number; latex: string }> = [];
 		const replacements: Array<{ kind: 'inline'; from: number; to: number; latex: string }> = [];
 
 		editorInstance.state.doc.descendants((node, pos, parent) => {
+			if (node.type.name === 'paragraph' && blockMathType) {
+				const paragraphChildren = node.content.content;
+				const hasOnlyTextAndBreaks = paragraphChildren.every(
+					(child) => child.type.name === 'text' || child.type.name === 'hardBreak'
+				);
+				if (hasOnlyTextAndBreaks) {
+					const paragraphText = paragraphChildren
+						.map((child) => {
+							if (child.type.name === 'hardBreak') return '\n';
+							return child.text ?? '';
+						})
+						.join('');
+					const lines = paragraphText.split('\n');
+					if (
+						lines.length >= 3 &&
+						lines[0]?.trim() === '$$' &&
+						lines[lines.length - 1]?.trim() === '$$'
+					) {
+						const latex = lines
+							.slice(1, -1)
+							.join('\n')
+							.trim();
+						if (latex !== '') {
+							blockReplacements.push({
+								from: pos,
+								to: pos + node.nodeSize,
+								latex
+							});
+							return false;
+						}
+					}
+				}
+			}
+
 			if (!node.isText || !node.text || node.text.includes('\n')) {
 				return;
 			}
@@ -372,11 +411,31 @@
 			}
 		});
 
-		if (replacements.length === 0) {
+		if (blockReplacements.length === 0 && replacements.length === 0) {
 			return false;
 		}
 
 		const transaction = editorInstance.state.tr;
+		for (const replacement of [...blockReplacements].sort((left, right) => right.from - left.from)) {
+			if (!blockMathType) {
+				continue;
+			}
+			const mappedFrom = transaction.mapping.map(replacement.from);
+			const mappedTo = transaction.mapping.map(replacement.to);
+			const fromResolved = transaction.doc.resolve(mappedFrom);
+			const parent = fromResolved.parent;
+			const index = fromResolved.index();
+			if (!parent.canReplaceWith(index, index + 1, blockMathType)) {
+				continue;
+			}
+
+			transaction.replaceWith(
+				mappedFrom,
+				mappedTo,
+				blockMathType.create({ latex: replacement.latex })
+			);
+		}
+
 		for (const replacement of [...replacements].sort((left, right) => right.from - left.from)) {
 			const mappedFrom = transaction.mapping.map(replacement.from);
 			const mappedTo = transaction.mapping.map(replacement.to);
@@ -408,6 +467,27 @@
 		editorInstance.view.dispatch(transaction);
 		isNormalizingMathInput = false;
 		return true;
+	}
+
+	function parsePastedMathExpression(raw: string): { mode: 'inline' | 'block'; latex: string } | null {
+		const trimmed = raw.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		const blockMatch = trimmed.match(/^\$\$([\s\S]+)\$\$$/);
+		if (blockMatch) {
+			const latex = blockMatch[1]?.trim() ?? '';
+			return latex ? { mode: 'block', latex } : null;
+		}
+
+		const inlineMatch = trimmed.match(/^\$([^$\n]+)\$$/);
+		if (inlineMatch) {
+			const latex = inlineMatch[1]?.trim() ?? '';
+			return latex ? { mode: 'inline', latex } : null;
+		}
+
+		return null;
 	}
 
 	function insertUploadedImage(attrs: Record<string, unknown>) {
@@ -778,6 +858,20 @@
 						if (isExternalImageURL(text.trim())) {
 							clipboardEvent.preventDefault();
 							insertExternalImage(text);
+							return true;
+						}
+
+						const pastedMath = parsePastedMathExpression(text);
+						if (pastedMath) {
+							clipboardEvent.preventDefault();
+							const chain = editor?.chain().focus();
+							const succeeded =
+								pastedMath.mode === 'block'
+									? chain?.insertBlockMath({ latex: pastedMath.latex }).run()
+									: chain?.insertInlineMath({ latex: pastedMath.latex }).run();
+							if (!succeeded) {
+								toast.error('公式插入失败');
+							}
 							return true;
 						}
 
@@ -1171,6 +1265,11 @@
 				>
 					<FloppyDisk class="h-4 w-4" />
 				</button>
+				<ExportControls
+					onAction={(action) => {
+						void onExportAction?.(action);
+					}}
+				/>
 			<a
 				href={`/view/documents/${documentId}`}
 				title={m.editor_toolbar_open_reader_mode()}

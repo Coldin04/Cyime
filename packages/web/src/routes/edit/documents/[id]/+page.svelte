@@ -7,6 +7,7 @@
 	import { get } from 'svelte/store';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
+	import type { ExportAction } from '$lib/components/editor/ExportControls.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import {
 		defaultAutoSaveEnabled,
@@ -30,6 +31,12 @@
 		getDocumentImageTargetLabel,
 		getDocumentImageTargetOptions
 	} from '$lib/components/editor/documentImageTargets';
+	import {
+		copyToClipboard,
+		downloadTextFile,
+		exportHtmlDocument,
+		exportMarkdown
+	} from '$lib/export/documentExport';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -179,6 +186,43 @@
 
 	function serializeComparableContent(input: JSONContent): string {
 		return JSON.stringify(normalizeManagedImagesForSave(input));
+	}
+
+	function buildExportFilename(extension: 'html' | 'md'): string {
+		const rawTitle = title.trim();
+		const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+		return `${safeTitle || 'cyimewrite-export'}.${extension}`;
+	}
+
+	async function handleExportAction(action: ExportAction) {
+		try {
+			if (action === 'download-html') {
+				const html = exportHtmlDocument({
+					title: title.trim() || 'CyimeWrite Export',
+					contentJson: content
+				});
+				downloadTextFile(buildExportFilename('html'), html, 'text/html;charset=utf-8');
+				return;
+			}
+
+			const markdown = exportMarkdown(content);
+			if (action === 'copy-markdown') {
+				const copied = await copyToClipboard(markdown);
+				if (copied) {
+					toast.success(m.editor_export_markdown_copied());
+				} else {
+					toast.error(m.editor_export_markdown_copy_failed());
+				}
+				return;
+			}
+
+			if (action === 'download-markdown') {
+				downloadTextFile(buildExportFilename('md'), markdown, 'text/markdown;charset=utf-8');
+			}
+		} catch (error) {
+			console.error('[Export] Failed to export document:', error);
+			toast.error(m.editor_export_failed());
+		}
 	}
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
@@ -849,6 +893,7 @@
 							{hasUnsavedChanges}
 							hydrateManagedContent={refreshSignedImageSources}
 							onSave={saveContent}
+							onExportAction={handleExportAction}
 							onContentChange={handleContentChange}
 						/>
 					{/key}
