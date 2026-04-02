@@ -525,6 +525,23 @@
 			);
 		}
 
+		const editorRootClass = [
+			'tiptap',
+			'min-h-full',
+			'w-full',
+			'px-4',
+			'py-6',
+			'text-base',
+			'text-zinc-800',
+			'outline-none',
+			'dark:text-zinc-100',
+			'sm:px-8',
+			'lg:px-[14%]',
+			collaboration?.doc ? 'cw-collab-mode' : ''
+		]
+			.filter(Boolean)
+			.join(' ');
+
 		editor = new Editor({
 			element: editorElement,
 			editable: !readOnly,
@@ -608,7 +625,7 @@
 					}
 				},
 				attributes: {
-					class: `tiptap ${collaboration?.doc ? 'cw-collab-mode' : ''} min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%}`
+					class: editorRootClass
 				}
 			},
 			onUpdate: ({ editor }) => {
