@@ -162,10 +162,16 @@ export async function uploadDocumentAsset(
 
 export async function pasteDocumentImage(
 	documentId: string,
-	file: File
+	file: File,
+	options: {
+		targetId?: string;
+	} = {}
 ): Promise<UploadDocumentImageResponse> {
 	const formData = new FormData();
 	formData.append('file', file);
+	if (options.targetId && options.targetId.trim() !== '') {
+		formData.append('targetId', options.targetId.trim());
+	}
 
 	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/paste-image`, {
 		method: 'POST',

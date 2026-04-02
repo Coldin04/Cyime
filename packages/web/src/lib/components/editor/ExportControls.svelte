@@ -2,10 +2,9 @@
 	import { tick } from 'svelte';
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import { fade } from 'svelte/transition';
+	import type { ExportAction } from '$lib/export/exportActions';
 	import * as m from '$paraglide/messages';
 	import ShareNetwork from '~icons/ph/share-network';
-
-	export type ExportAction = 'download-html' | 'copy-markdown' | 'download-markdown';
 
 	interface Props {
 		onAction: (action: ExportAction) => void | Promise<unknown>;

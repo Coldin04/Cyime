@@ -31,7 +31,7 @@
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
 	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
-	import ExportControls, { type ExportAction } from '$lib/components/editor/ExportControls.svelte';
+	import ExportControls from '$lib/components/editor/ExportControls.svelte';
 	import InlineMathControls from '$lib/components/editor/InlineMathControls.svelte';
 	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
@@ -39,6 +39,7 @@
 	import MathInputDialog from '$lib/components/editor/MathInputDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
+	import type { ExportAction } from '$lib/export/exportActions';
 	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';

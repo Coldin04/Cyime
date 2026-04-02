@@ -5,9 +5,10 @@
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
+	import type { ExportAction } from '$lib/export/exportActions';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import EditorTopBar from '$lib/components/editor/EditorTopBar.svelte';
-	import type { ExportAction } from '$lib/components/editor/ExportControls.svelte';
+	import ExportPrivateImagesDialog from '$lib/components/editor/ExportPrivateImagesDialog.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import {
 		defaultAutoSaveEnabled,
@@ -19,8 +20,14 @@
 	import { resolveApiUrl } from '$lib/config/api';
 	import { realtimeConfig } from '$lib/stores/realtime';
 	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
-	import { getDocumentContent, resolveAssetReadURLs, updateDocumentContent } from '$lib/api/editor';
 	import {
+		getDocumentContent,
+		pasteDocumentImage,
+		resolveAssetReadURLs,
+		updateDocumentContent
+	} from '$lib/api/editor';
+	import {
+		createDocument,
 		getDocumentDetails,
 		listDocumentMembers,
 		updateDocumentImageTarget,
@@ -32,11 +39,14 @@
 		getDocumentImageTargetOptions
 	} from '$lib/components/editor/documentImageTargets';
 	import {
-		copyToClipboard,
-		downloadTextFile,
-		exportHtmlDocument,
-		exportMarkdown
-	} from '$lib/export/documentExport';
+		collectImageNodes,
+		collectManagedImages,
+		cloneContentJson,
+		getManagedAssetId,
+		replaceManagedImagesWithPublicURLs,
+		runExportAction
+	} from '$lib/export/exportPrivateImages';
+	import { exportActionRequiresPublicImageURLs } from '$lib/export/exportActions';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 
@@ -45,6 +55,7 @@
 	let myRole = $state<'owner' | 'collaborator' | 'editor' | 'viewer' | string>('owner');
 	let publicAccess = $state<'private' | 'authenticated' | 'public' | string>('private');
 	let publicUrl = $state('');
+	let folderId = $state<string | null>(null);
 	const EMPTY_DOC: JSONContent = {
 		type: 'doc',
 		content: [{ type: 'paragraph' }]
@@ -78,41 +89,23 @@
 	let isLeaveConfirmOpen = $state(false);
 	let pendingNavigationUrl = $state<string | null>(null);
 	let bypassLeaveGuard = $state(false);
+	let isExportPrivateImagesDialogOpen = $state(false);
+	let isPreparingExport = $state(false);
+	let pendingExportAction = $state<ExportAction | null>(null);
+	let exportTargetId = $state('');
 	let autoSaveEnabled = $state(defaultAutoSaveEnabled);
 	let autoSaveIntervalSeconds = $state(defaultAutoSaveIntervalSeconds);
 	const availableImageTargets = $derived(getDocumentImageTargetOptions(imageBedConfigs));
+	const exportImageTargetOptions = $derived(
+		availableImageTargets.filter((option) => option.id !== 'managed-r2')
+	);
 	const currentImageTargetLabel = $derived(
 		getDocumentImageTargetLabel(preferredImageTargetId, availableImageTargets)
 	);
 
-	function cloneContentJson(value: JSONContent): JSONContent {
-		return JSON.parse(JSON.stringify(value)) as JSONContent;
-	}
-
 	type ImageNodeRecord = Record<string, unknown> & {
 		attrs?: Record<string, unknown>;
 	};
-
-	function collectImageNodes(value: unknown, nodes: ImageNodeRecord[]) {
-		if (!value || typeof value !== 'object') {
-			return;
-		}
-		const node = value as ImageNodeRecord;
-		if (node.type === 'image') {
-			nodes.push(node);
-		}
-		const children = node.content;
-		if (Array.isArray(children)) {
-			for (const child of children) {
-				collectImageNodes(child, nodes);
-			}
-		}
-	}
-
-	function getManagedAssetId(attrs: Record<string, unknown>): string | null {
-		const raw = attrs.assetId;
-		return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null;
-	}
 
 	async function refreshSignedImageSources(input: JSONContent): Promise<JSONContent> {
 		const cloned = cloneContentJson(input);
@@ -188,41 +181,179 @@
 		return JSON.stringify(normalizeManagedImagesForSave(input));
 	}
 
-	function buildExportFilename(extension: 'html' | 'md'): string {
-		const rawTitle = title.trim();
-		const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
-		return `${safeTitle || 'cyimewrite-export'}.${extension}`;
+	function createExportCopyTitle(value: string): string {
+		const trimmed = value.trim();
+		return trimmed === '' ? 'Untitled Export' : `${trimmed} (Export)`;
 	}
 
-	async function handleExportAction(action: ExportAction) {
+	function buildExportFileName(assetId: string, mimeType: string, fallbackLabel?: string | null): string {
+		const rawLabel = (fallbackLabel ?? '').trim() || `asset-${assetId}`;
+		const safeLabel = rawLabel.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+		const extension = mimeType === 'image/png'
+			? 'png'
+			: mimeType === 'image/jpeg'
+				? 'jpg'
+				: mimeType === 'image/webp'
+					? 'webp'
+					: mimeType === 'image/gif'
+						? 'gif'
+						: 'bin';
+		return `${safeLabel || `asset-${assetId}`}.${extension}`;
+	}
+
+	async function performExport(action: ExportAction, exportContent: JSONContent) {
 		try {
-			if (action === 'download-html') {
-				const html = exportHtmlDocument({
-					title: title.trim() || 'CyimeWrite Export',
-					contentJson: content
-				});
-				downloadTextFile(buildExportFilename('html'), html, 'text/html;charset=utf-8');
-				return;
-			}
-
-			const markdown = exportMarkdown(content);
-			if (action === 'copy-markdown') {
-				const copied = await copyToClipboard(markdown);
-				if (copied) {
-					toast.success(m.editor_export_markdown_copied());
-				} else {
-					toast.error(m.editor_export_markdown_copy_failed());
-				}
-				return;
-			}
-
-			if (action === 'download-markdown') {
-				downloadTextFile(buildExportFilename('md'), markdown, 'text/markdown;charset=utf-8');
+			const result = await runExportAction(action, {
+				title,
+				contentJson: exportContent
+			});
+			if (action === 'copy-markdown' && result === 'copied') {
+				toast.success(m.editor_export_markdown_copied());
 			}
 		} catch (error) {
 			console.error('[Export] Failed to export document:', error);
+			if (error instanceof Error && error.message === 'copy_markdown_failed') {
+				toast.error(m.editor_export_markdown_copy_failed());
+				return;
+			}
 			toast.error(m.editor_export_failed());
 		}
+	}
+
+	async function prepareExportContentWithPublicImages(targetId: string): Promise<JSONContent> {
+		if (!documentId) {
+			throw new Error('Missing document id');
+		}
+
+		const managedImages = collectManagedImages(content);
+		if (managedImages.length === 0) {
+			return cloneContentJson(content);
+		}
+
+		toast.loading(`正在准备导出图片（0/${managedImages.length}）...`, {
+			id: 'export-private-images',
+			duration: Infinity
+		});
+
+		try {
+			const publicURLByAssetID = new Map<string, string>();
+
+			for (let index = 0; index < managedImages.length; index += 1) {
+				const item = managedImages[index];
+				toast.loading(`正在准备导出图片（${index + 1}/${managedImages.length}）...`, {
+					id: 'export-private-images',
+					duration: Infinity
+				});
+
+				const response = await fetch(resolveApiUrl(`/api/v1/media/assets/${item.assetId}/content`), {
+					credentials: 'include'
+				});
+				if (!response.ok) {
+					throw new Error(`Failed to fetch private image ${item.assetId}`);
+				}
+
+				const blob = await response.blob();
+				const mimeType = blob.type || 'application/octet-stream';
+				const file = new File(
+					[blob],
+					buildExportFileName(item.assetId, mimeType, item.title ?? item.alt),
+					{ type: mimeType }
+				);
+				const uploaded = await pasteDocumentImage(documentId, file, { targetId });
+				publicURLByAssetID.set(item.assetId, uploaded.url);
+			}
+
+			return replaceManagedImagesWithPublicURLs(content, publicURLByAssetID);
+		} finally {
+			toast.dismiss('export-private-images');
+		}
+	}
+
+	function closeExportPrivateImagesDialog() {
+		if (isPreparingExport) {
+			return;
+		}
+		isExportPrivateImagesDialogOpen = false;
+		pendingExportAction = null;
+		exportTargetId = '';
+	}
+
+	async function finalizeExportWithProcessedContent(exportContent: JSONContent) {
+		if (!pendingExportAction) {
+			return;
+		}
+		const action = pendingExportAction;
+		isExportPrivateImagesDialogOpen = false;
+		pendingExportAction = null;
+		exportTargetId = '';
+		await performExport(action, exportContent);
+	}
+
+	async function handleExportWithSaveAs() {
+		if (!pendingExportAction || !documentId || !exportTargetId || isPreparingExport) {
+			return;
+		}
+
+		isPreparingExport = true;
+		try {
+			const exportContent = await prepareExportContentWithPublicImages(exportTargetId);
+			await createDocument({
+				title: createExportCopyTitle(title),
+				contentJson: normalizeManagedImagesForSave(exportContent) as { [key: string]: unknown },
+				folderId,
+				documentType: documentType === 'table' ? 'table' : 'rich_text',
+				preferredImageTargetId: exportTargetId
+			});
+			await finalizeExportWithProcessedContent(exportContent);
+		} catch (error) {
+			console.error('[Export] Failed to create export copy:', error);
+			toast.error(error instanceof Error && error.message.trim() !== '' ? error.message : m.editor_export_failed());
+		} finally {
+			isPreparingExport = false;
+		}
+	}
+
+	async function handleExportWithReplace() {
+		if (!pendingExportAction || !documentId || !exportTargetId || isPreparingExport) {
+			return;
+		}
+
+		isPreparingExport = true;
+		try {
+			const exportContent = await prepareExportContentWithPublicImages(exportTargetId);
+			const [saveResult, targetResult] = await Promise.all([
+				updateDocumentContent(documentId, normalizeManagedImagesForSave(exportContent)),
+				updateDocumentImageTarget(documentId, exportTargetId)
+			]);
+			content = exportContent;
+			preferredImageTargetId = targetResult.preferredImageTargetId;
+			lastSaved = new Date(saveResult.updatedAt);
+			hasUnsavedChanges = false;
+			await finalizeExportWithProcessedContent(exportContent);
+		} catch (error) {
+			console.error('[Export] Failed to replace private images for export:', error);
+			toast.error(error instanceof Error && error.message.trim() !== '' ? error.message : m.editor_export_failed());
+		} finally {
+			isPreparingExport = false;
+		}
+	}
+
+	async function handleExportAction(action: ExportAction) {
+		const managedImages = collectManagedImages(content);
+		if (!exportActionRequiresPublicImageURLs(action) || managedImages.length === 0) {
+			await performExport(action, content);
+			return;
+		}
+
+		if (exportImageTargetOptions.length === 0) {
+			toast.error('文档包含私有图片，请先配置并启用图床后再导出。');
+			return;
+		}
+
+		const preferredTarget = exportImageTargetOptions.find((option) => option.id === preferredImageTargetId);
+		exportTargetId = preferredTarget?.id ?? exportImageTargetOptions[0].id;
+		pendingExportAction = action;
+		isExportPrivateImagesDialogOpen = true;
 	}
 
 	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
@@ -715,6 +846,7 @@
 					// Use the title from the API
 					title = details.title ?? '';
 					manualExcerpt = details.manualExcerpt ?? '';
+					folderId = details.folderId ?? null;
 					myRole = details.myRole ?? 'owner';
 					documentMembers = memberResponse.members;
 					publicAccess = details.publicAccess ?? 'private';
@@ -917,4 +1049,18 @@
 	onCancel={handleCancelLeave}
 	onSecondary={handleLeaveWithoutSave}
 	onConfirm={handleSaveAndLeave}
+/>
+
+<ExportPrivateImagesDialog
+	open={isExportPrivateImagesDialogOpen}
+	imageCount={collectManagedImages(content).length}
+	targetOptions={exportImageTargetOptions}
+	selectedTargetId={exportTargetId}
+	busy={isPreparingExport}
+	onTargetChange={(nextTargetId) => {
+		exportTargetId = nextTargetId;
+	}}
+	onCancel={closeExportPrivateImagesDialog}
+	onSaveAs={handleExportWithSaveAs}
+	onReplace={handleExportWithReplace}
 />
