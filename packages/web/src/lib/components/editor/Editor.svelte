@@ -41,7 +41,6 @@
 	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
-	import Function from '~icons/ph/function';
 	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
