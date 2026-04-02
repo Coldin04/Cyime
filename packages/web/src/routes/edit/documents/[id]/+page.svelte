@@ -1019,10 +1019,14 @@
 						<Editor
 							documentId={documentId!}
 							{content}
+							currentImageTargetId={preferredImageTargetId}
 							currentImageTargetLabel={currentImageTargetLabel}
+							imageTargetOptions={availableImageTargets}
 							{collaboration}
+							{isUpdatingImageTarget}
 							{isSaving}
 							{hasUnsavedChanges}
+							onImageTargetChange={handleImageTargetChange}
 							hydrateManagedContent={refreshSignedImageSources}
 							onSave={saveContent}
 							onExportAction={handleExportAction}

@@ -39,6 +39,7 @@
 	import MathInputDialog from '$lib/components/editor/MathInputDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
+	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 	import type { ExportAction } from '$lib/export/exportActions';
 	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
@@ -48,12 +49,16 @@
 	interface Props {
 		documentId: string;
 		content: JSONContent;
+		currentImageTargetId?: string;
 		currentImageTargetLabel?: string;
+		imageTargetOptions?: DocumentImageTargetOption[];
 		collaboration?: ProviderInstance | null;
 		readOnly?: boolean;
+		isUpdatingImageTarget?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
+		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
 		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
 		onExportAction?: (action: ExportAction) => void | Promise<unknown>;
@@ -62,12 +67,16 @@
 	let {
 		documentId,
 		content,
+		currentImageTargetId = 'managed-r2',
 		currentImageTargetLabel = '',
+		imageTargetOptions = [],
 		collaboration = null,
 		readOnly = false,
+		isUpdatingImageTarget = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
+		onImageTargetChange,
 		hydrateManagedContent,
 		onSave,
 		onExportAction
@@ -1515,7 +1524,11 @@
 		bind:open={isImageInsertDialogOpen}
 		accept={imageUploadAccept}
 		isUploading={uploadingImageCount > 0}
+		isUpdatingTarget={isUpdatingImageTarget}
+		currentTargetId={currentImageTargetId}
 		currentTargetLabel={currentImageTargetLabel}
+		targetOptions={imageTargetOptions}
+		onTargetChange={(targetId) => onImageTargetChange?.(targetId)}
 		onFilesSelected={(files) => {
 			void uploadAndInsertImages(files, 'picker');
 		}}
