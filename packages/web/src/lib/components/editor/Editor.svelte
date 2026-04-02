@@ -314,6 +314,27 @@
 		return true;
 	}
 
+	async function deleteMathDialogTarget(): Promise<boolean> {
+		const editorInstance = editor;
+		if (!editorInstance || mathDialogMode !== 'block') {
+			return false;
+		}
+
+		const editingPos = editingMathPosition ?? undefined;
+		const succeeded =
+			editingPos === undefined
+				? editorInstance.chain().focus().deleteBlockMath().run()
+				: editorInstance.chain().focus().deleteBlockMath({ pos: editingPos }).run();
+		if (!succeeded) {
+			toast.error('公式删除失败');
+			return false;
+		}
+
+		editorRevision += 1;
+		closeMathDialog();
+		return true;
+	}
+
 	function normalizeMarkdownMathInput(editorInstance: Editor): boolean {
 		const inlineMathType = editorInstance.schema.nodes.inlineMath;
 		if (!inlineMathType) {
@@ -322,8 +343,14 @@
 
 		const replacements: Array<{ kind: 'inline'; from: number; to: number; latex: string }> = [];
 
-		editorInstance.state.doc.descendants((node, pos) => {
+		editorInstance.state.doc.descendants((node, pos, parent) => {
 			if (!node.isText || !node.text || node.text.includes('\n')) {
+				return;
+			}
+			if (parent?.type?.name === 'codeBlock') {
+				return;
+			}
+			if (node.marks.some((mark) => mark.type.name === 'code')) {
 				return;
 			}
 
@@ -351,9 +378,24 @@
 
 		const transaction = editorInstance.state.tr;
 		for (const replacement of [...replacements].sort((left, right) => right.from - left.from)) {
+			const mappedFrom = transaction.mapping.map(replacement.from);
+			const mappedTo = transaction.mapping.map(replacement.to);
+			const fromResolved = transaction.doc.resolve(mappedFrom);
+			if (fromResolved.parent.type.name === 'codeBlock') {
+				continue;
+			}
+			if (fromResolved.marks().some((mark) => mark.type.name === 'code')) {
+				continue;
+			}
+			const parent = fromResolved.parent;
+			const index = fromResolved.index();
+			if (!parent.canReplaceWith(index, index + 1, inlineMathType)) {
+				continue;
+			}
+
 			transaction.replaceWith(
-				replacement.from,
-				replacement.to,
+				mappedFrom,
+				mappedTo,
 				inlineMathType.create({ latex: replacement.latex })
 			);
 		}
@@ -1385,5 +1427,7 @@
 	bind:open={isMathDialogOpen}
 	mode={mathDialogMode}
 	initialValue={mathDialogValue}
+	showDelete={mathDialogMode === 'block' && editingMathPosition !== null}
 	onSubmit={submitMathDialog}
+	onDelete={deleteMathDialogTarget}
 />

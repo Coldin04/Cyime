@@ -9,14 +9,18 @@
 		open: boolean;
 		mode: MathMode;
 		initialValue?: string;
+		showDelete?: boolean;
 		onSubmit: (latex: string) => boolean | Promise<boolean>;
+		onDelete?: () => boolean | Promise<boolean>;
 	};
 
 	let {
 		open = $bindable(false),
 		mode,
 		initialValue = '',
-		onSubmit
+		showDelete = false,
+		onSubmit,
+		onDelete
 	}: Props = $props();
 
 	let latexValue = $state('');
@@ -57,6 +61,21 @@
 		try {
 			const submitted = await onSubmit(latexValue);
 			if (submitted) {
+				closeDialog();
+			}
+		} finally {
+			isSubmitting = false;
+		}
+	}
+
+	async function handleDelete() {
+		if (!onDelete || isSubmitting) {
+			return;
+		}
+		isSubmitting = true;
+		try {
+			const deleted = await onDelete();
+			if (deleted) {
 				closeDialog();
 			}
 		} finally {
@@ -107,7 +126,6 @@
 						type="button"
 						class="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 						onclick={closeDialog}
-						aria-label="Close dialog"
 					>
 						✕
 					</button>
@@ -155,6 +173,18 @@
 				</div>
 
 				<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+					{#if mode === 'block' && showDelete}
+						<button
+							type="button"
+							class="h-8 rounded-md border border-red-200 px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/30"
+							disabled={isSubmitting}
+							onclick={() => {
+								void handleDelete();
+							}}
+						>
+							{m.common_delete()}
+						</button>
+					{/if}
 					<button
 						type="button"
 						class="h-8 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
