@@ -99,11 +99,13 @@
 		>
 			<div class="flex min-w-[18rem] items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
 				<label class="flex min-w-0 flex-1 items-center gap-2">
+					<span class="sr-only">{m.editor_math_inline_title()}</span>
 					<span class="shrink-0 text-zinc-500 dark:text-zinc-400">
 						<Function class="h-3.5 w-3.5" />
 					</span>
 					<input
 						type="text"
+						aria-label={m.editor_math_inline_title()}
 						class="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
 						placeholder={inlinePlaceholder}
 						bind:value={draft}
