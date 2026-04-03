@@ -72,6 +72,7 @@ type UploadDocumentImageRequest struct {
 	DocumentID uuid.UUID
 	UserID     uuid.UUID
 	FileHeader *multipart.FileHeader
+	TargetID   string
 }
 
 type UploadDocumentImageResult struct {
@@ -502,6 +503,19 @@ func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error
 	}
 }
 
+func normalizeDocumentImageTargetID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "", documentImageTargetManagedR2:
+		return documentImageTargetManagedR2
+	default:
+		if _, err := uuid.Parse(trimmed); err == nil {
+			return trimmed
+		}
+		return ""
+	}
+}
+
 func newDocumentImageUploader(userID uuid.UUID, targetID string) (documentImageUploader, error) {
 	switch targetID {
 	case documentImageTargetManagedR2:
@@ -558,9 +572,16 @@ func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*
 		return nil, ErrFileRequired
 	}
 
-	targetID, err := getDocumentImageUploadTargetID(req.UserID, req.DocumentID)
-	if err != nil {
-		return nil, err
+	targetID := normalizeDocumentImageTargetID(req.TargetID)
+	if targetID == "" {
+		return nil, newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
+	}
+	if strings.TrimSpace(req.TargetID) == "" {
+		var err error
+		targetID, err = getDocumentImageUploadTargetID(req.UserID, req.DocumentID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	uploader, err := newDocumentImageUploader(req.UserID, targetID)

@@ -53,9 +53,6 @@ importers:
       '@tiptap/extension-table-row':
         specifier: ^3.20.4
         version: 3.20.4(@tiptap/extension-table@3.20.4(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))(@tiptap/pm@3.21.0))
-      '@tiptap/pm':
-        specifier: ^3.20.4
-        version: 3.21.0
       '@tiptap/starter-kit':
         specifier: ^3.20.4
         version: 3.21.0
@@ -68,9 +65,6 @@ importers:
       marked:
         specifier: ^17.0.4
         version: 17.0.4
-      phosphor-svelte:
-        specifier: ^3.1.0
-        version: 3.1.0(svelte@5.53.7)(vite@7.3.1(@types/node@25.3.5)(jiti@1.21.7))
       svelte-easy-crop:
         specifier: ^5.0.0
         version: 5.0.0(svelte@5.53.7)
@@ -80,9 +74,6 @@ importers:
       y-protocols:
         specifier: ^1.0.7
         version: 1.0.7(yjs@13.6.30)
-      y-websocket:
-        specifier: ^3.0.0
-        version: 3.0.0(yjs@13.6.30)
       yjs:
         specifier: ^13.6.30
         version: 13.6.30
@@ -993,9 +984,6 @@ packages:
   estree-walker@2.0.2:
     resolution: {integrity: sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w==}
 
-  estree-walker@3.0.3:
-    resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
-
   exsolve@1.0.8:
     resolution: {integrity: sha512-LmDxfWXwcTArk8fUEnOfSZpHOJ6zOMUJKOtFLFqJLoKJetuQG874Uc7/Kki7zFLzYybmZhp1M7+98pfMqeX8yA==}
 
@@ -1192,15 +1180,6 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
-
-  phosphor-svelte@3.1.0:
-    resolution: {integrity: sha512-nldtxx+XCgNREvrb7O5xgDsefytXpSkPTx8Rnu3f2qQCUZLDV1rLxYSd2Jcwckuo9lZB1qKMqGR17P4UDC0PrA==}
-    peerDependencies:
-      svelte: ^5.0.0 || ^5.0.0-next.96
-      vite: '>=5'
-    peerDependenciesMeta:
-      vite:
-        optional: true
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -1593,12 +1572,6 @@ packages:
     engines: {node: '>=16.0.0', npm: '>=8.0.0'}
     peerDependencies:
       yjs: ^13.0.0
-
-  y-websocket@3.0.0:
-    resolution: {integrity: sha512-mUHy7AzkOZ834T/7piqtlA8Yk6AchqKqcrCXjKW8J1w2lPtRDjz8W5/CvXz9higKAHgKRKqpI3T33YkRFLkPtg==}
-    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
-    peerDependencies:
-      yjs: ^13.5.6
 
   yjs@13.6.30:
     resolution: {integrity: sha512-vv/9h42eCMC81ZHDFswuu/MKzkl/vyq1BhaNGfHyOonwlG4CJbQF4oiBBJPvfdeCt/PlVDWh7Nov9D34YY09uQ==}
@@ -2361,10 +2334,6 @@ snapshots:
   estree-walker@2.0.2:
     optional: true
 
-  estree-walker@3.0.3:
-    dependencies:
-      '@types/estree': 1.0.8
-
   exsolve@1.0.8: {}
 
   fast-glob@3.3.3:
@@ -2526,14 +2495,6 @@ snapshots:
   path-parse@1.0.7: {}
 
   pathe@2.0.3: {}
-
-  phosphor-svelte@3.1.0(svelte@5.53.7)(vite@7.3.1(@types/node@25.3.5)(jiti@1.21.7)):
-    dependencies:
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-      svelte: 5.53.7
-    optionalDependencies:
-      vite: 7.3.1(@types/node@25.3.5)(jiti@1.21.7)
 
   picocolors@1.1.1: {}
 
@@ -2960,12 +2921,6 @@ snapshots:
   y-protocols@1.0.7(yjs@13.6.30):
     dependencies:
       lib0: 0.2.117
-      yjs: 13.6.30
-
-  y-websocket@3.0.0(yjs@13.6.30):
-    dependencies:
-      lib0: 0.2.117
-      y-protocols: 1.0.7(yjs@13.6.30)
       yjs: 13.6.30
 
   yjs@13.6.30:

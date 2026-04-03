@@ -735,6 +735,7 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		DocumentID: documentID,
 		UserID:     userID,
 		FileHeader: fileHeader,
+		TargetID:   c.FormValue("targetId"),
 	})
 	if err != nil {
 		status := fiber.StatusInternalServerError
