@@ -2,6 +2,7 @@ import type { JSONContent } from '@tiptap/core';
 import {
 	copyToClipboard,
 	downloadTextFile,
+	exportBBCode,
 	exportHtmlDocument,
 	exportMarkdown
 } from '$lib/export/documentExport';
@@ -111,6 +112,15 @@ export async function runExportAction(action: ExportAction, options: {
 }): Promise<'copied' | 'downloaded'> {
 	if (action === 'download-pdf') {
 		throw new Error('download_pdf_requires_print_html');
+	}
+
+	if (action === 'copy-bbcode') {
+		const bbcode = exportBBCode(options.contentJson);
+		const copied = await copyToClipboard(bbcode);
+		if (!copied) {
+			throw new Error('copy_bbcode_failed');
+		}
+		return 'copied';
 	}
 
 	if (action === 'download-html') {

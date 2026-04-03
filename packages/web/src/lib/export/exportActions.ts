@@ -1,4 +1,9 @@
-export type ExportAction = 'download-html' | 'copy-markdown' | 'download-markdown' | 'download-pdf';
+export type ExportAction =
+	| 'download-html'
+	| 'copy-markdown'
+	| 'download-markdown'
+	| 'download-pdf'
+	| 'copy-bbcode';
 
 export type ExportActionCapability = {
 	requiresPublicImageURLs: boolean;
@@ -16,6 +21,9 @@ export const exportActionCapabilities: Record<ExportAction, ExportActionCapabili
 	},
 	'download-pdf': {
 		requiresPublicImageURLs: false
+	},
+	'copy-bbcode': {
+		requiresPublicImageURLs: true
 	}
 };
 

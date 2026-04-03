@@ -227,11 +227,19 @@
 			});
 			if (action === 'copy-markdown' && result === 'copied') {
 				toast.success(m.editor_export_markdown_copied());
+				return;
+			}
+			if (action === 'copy-bbcode' && result === 'copied') {
+				toast.success('BBCode 已复制');
 			}
 		} catch (error) {
 			console.error('[Export] Failed to export document:', error);
 			if (error instanceof Error && error.message === 'copy_markdown_failed') {
 				toast.error(m.editor_export_markdown_copy_failed());
+				return;
+			}
+			if (error instanceof Error && error.message === 'copy_bbcode_failed') {
+				toast.error('复制 BBCode 失败');
 				return;
 			}
 			toast.error(m.editor_export_failed());

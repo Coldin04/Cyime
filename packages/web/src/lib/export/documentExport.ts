@@ -275,6 +275,168 @@ export function exportMarkdown(contentJson: JSONContent): string {
 	return lines.join('\n');
 }
 
+function escapeBBCodeText(value: string): string {
+	return value.replaceAll('[', '&#91;').replaceAll(']', '&#93;');
+}
+
+export function exportBBCode(contentJson: JSONContent): string {
+	const lines: string[] = [];
+
+	function renderInline(nodes: ExportNode[] = []): string {
+		let output = '';
+
+		for (const node of nodes) {
+			switch (node.type) {
+				case 'text': {
+					let text = escapeBBCodeText(node.text ?? '');
+					const marks = node.marks ?? [];
+					const isCode = marks.some((mark) => mark.type === 'code');
+					const isBold = marks.some((mark) => mark.type === 'bold');
+					const isItalic = marks.some((mark) => mark.type === 'italic');
+					const linkMark = marks.find((mark) => mark.type === 'link');
+
+					if (isCode) {
+						text = `[icode]${text}[/icode]`;
+					} else {
+						if (isBold) text = `[b]${text}[/b]`;
+						if (isItalic) text = `[i]${text}[/i]`;
+					}
+
+					if (linkMark?.attrs?.href && typeof linkMark.attrs.href === 'string') {
+						text = `[url=${linkMark.attrs.href}]${text || linkMark.attrs.href}[/url]`;
+					}
+
+					output += text;
+					break;
+				}
+				case 'hardBreak':
+					output += '\n';
+					break;
+				case 'inlineMath':
+					output += `[icode]$${typeof node.attrs?.latex === 'string' ? node.attrs.latex : ''}$[/icode]`;
+					break;
+				case 'image': {
+					const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+					if (src) {
+						output += `[img]${src}[/img]`;
+					}
+					break;
+				}
+				default:
+					output += renderInline(node.content ?? []);
+			}
+		}
+
+		return output;
+	}
+
+	function renderTable(node: ExportNode) {
+		const rows = (node.content ?? []).filter((child) => child.type === 'tableRow');
+		if (rows.length === 0) {
+			return;
+		}
+
+		lines.push('[code]');
+		for (const row of rows) {
+			const cells = (row.content ?? []).map((cell) =>
+				renderInline(cell.content ?? []).replaceAll('\n', ' ').trim()
+			);
+			lines.push(cells.join(' | '));
+		}
+		lines.push('[/code]');
+		lines.push('');
+	}
+
+	function renderNode(node: ExportNode | undefined, depth = 0, orderedIndex = 1) {
+		if (!node) return;
+
+		switch (node.type) {
+			case 'doc':
+				for (const child of node.content ?? []) renderNode(child, depth);
+				return;
+			case 'paragraph': {
+				const text = renderInline(node.content ?? []);
+				lines.push(text);
+				lines.push('');
+				return;
+			}
+			case 'heading': {
+				const text = renderInline(node.content ?? []);
+				lines.push(`[b][size=5]${text}[/size][/b]`);
+				lines.push('');
+				return;
+			}
+			case 'bulletList':
+				lines.push('[list]');
+				for (const child of node.content ?? []) renderNode(child, depth + 1);
+				lines.push('[/list]');
+				lines.push('');
+				return;
+			case 'orderedList': {
+				let nextIndex = 1;
+				lines.push('[list=1]');
+				for (const child of node.content ?? []) {
+					renderNode(child, depth + 1, nextIndex);
+					nextIndex += 1;
+				}
+				lines.push('[/list]');
+				lines.push('');
+				return;
+			}
+			case 'listItem': {
+				const firstParagraph = (node.content ?? []).find((child) => child.type === 'paragraph');
+				const fallbackContent = firstParagraph?.content ?? node.content ?? [];
+				lines.push(`[*]${renderInline(fallbackContent)}`);
+				for (const child of node.content ?? []) {
+					if (child.type === 'paragraph') continue;
+					renderNode(child, depth, orderedIndex);
+				}
+				return;
+			}
+			case 'blockquote':
+				lines.push('[quote]');
+				for (const child of node.content ?? []) renderNode(child, depth);
+				lines.push('[/quote]');
+				lines.push('');
+				return;
+			case 'codeBlock':
+				lines.push('[code]');
+				lines.push(getText(node));
+				lines.push('[/code]');
+				lines.push('');
+				return;
+			case 'horizontalRule':
+				lines.push('[hr]');
+				lines.push('');
+				return;
+			case 'blockMath':
+				lines.push('[code]');
+				lines.push(typeof node.attrs?.latex === 'string' ? node.attrs.latex : '');
+				lines.push('[/code]');
+				lines.push('');
+				return;
+			case 'table':
+				renderTable(node);
+				return;
+			default: {
+				const inline = renderInline(node.content ?? []);
+				if (inline.trim() !== '') {
+					lines.push(inline);
+					lines.push('');
+				}
+			}
+		}
+	}
+
+	renderNode(contentJson as ExportNode);
+
+	while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+		lines.pop();
+	}
+
+	return lines.join('\n');
+}
+
 export function downloadTextFile(filename: string, content: string, mimeType: string) {
 	const blob = new Blob([content], { type: mimeType });
 	const url = URL.createObjectURL(blob);

@@ -105,6 +105,13 @@
 				<button
 					type="button"
 					class="inline-flex items-center rounded-md px-2 py-1.5 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+					onclick={() => handleAction('copy-bbcode')}
+				>
+					复制 BBCode
+				</button>
+				<button
+					type="button"
+					class="inline-flex items-center rounded-md px-2 py-1.5 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 					onclick={() => handleAction('download-pdf')}
 				>
 					导出 PDF
