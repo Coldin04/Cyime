@@ -26,14 +26,14 @@ type UploadUserAvatarResult struct {
 
 func UploadUserAvatar(ctx context.Context, userID uuid.UUID, fileHeader *multipart.FileHeader) (*UploadUserAvatarResult, error) {
 	if fileHeader == nil {
-		return nil, fmt.Errorf("file is required")
+		return nil, ErrFileRequired
 	}
 	contentType, ok := normalizeAllowedContentType(
 		strings.TrimSpace(fileHeader.Header.Get("Content-Type")),
 		fileHeader.Filename,
 	)
 	if !ok || !strings.HasPrefix(contentType, "image/") {
-		return nil, fmt.Errorf("unsupported avatar file type: %s", contentType)
+		return nil, &UnsupportedAvatarFileTypeError{ContentType: contentType}
 	}
 	maxBytes := avatarMaxBytes()
 	if fileHeader.Size > 0 && fileHeader.Size > maxBytes {

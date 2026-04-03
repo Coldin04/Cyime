@@ -52,6 +52,9 @@ func main() {
 	// --- ROUTING ---
 	api := app.Group("/api/v1")
 
+	// Client config endpoint (public)
+	api.Get("/config", config.GetClientConfigHandler)
+
 	// Auth routes
 	authRoutes := api.Group("/auth")
 	authRoutes.Get("/config", auth.GetAuthConfig)
@@ -80,7 +83,9 @@ func main() {
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+	workspaceRoutes.Get("/shared/summary", workspace.SharedDocumentSummaryHandler)
 	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
+	workspaceRoutes.Get("/shared/outgoing", workspace.ListOutgoingSharedDocumentsHandler)
 	workspaceRoutes.Get("/files/:id", workspace.GetFileHandler)
 	workspaceRoutes.Post("/folders", workspace.CreateFolderHandler)
 	workspaceRoutes.Post("/documents", workspace.CreateDocumentHandler)
@@ -92,11 +97,18 @@ func main() {
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
 	// Update document title
 	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
+	workspaceRoutes.Put("/documents/:id/excerpt", workspace.UpdateDocumentExcerptHandler)
 	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
+	workspaceRoutes.Put("/documents/:id/public-access", workspace.UpdateDocumentPublicAccessHandler)
 	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
 	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
+	workspaceRoutes.Post("/documents/:id/invites", workspace.InviteDocumentByEmailHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/me", workspace.LeaveSharedDocumentHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
+	workspaceRoutes.Post("/document-invites/:id/accept", workspace.AcceptDocumentInviteHandler)
+	workspaceRoutes.Post("/document-invites/:id/decline", workspace.DeclineDocumentInviteHandler)
+	workspaceRoutes.Get("/documents/:id/presence", workspace.GetDocumentPresenceHandler)
+	workspaceRoutes.Put("/documents/:id/presence", workspace.HeartbeatDocumentPresenceHandler)
 	// Update folder name
 	workspaceRoutes.Put("/folders/:id/name", workspace.UpdateFolderNameHandler)
 	// Move document
@@ -105,6 +117,13 @@ func main() {
 	workspaceRoutes.Put("/folders/:id/move", workspace.MoveFolderHandler)
 	// Batch move files and folders
 	workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
+	// ACL endpoint for realtime collaboration
+	workspaceRoutes.Get("/documents/:id/acl", workspace.GetDocumentACLHandler)
+
+	// Realtime routes for Yjs state management
+	realtimeRoutes := api.Group("/realtime", middleware.Protected())
+	realtimeRoutes.Get("/documents/:id/state", workspace.GetYjsStateHandler)
+	realtimeRoutes.Put("/documents/:id/state", workspace.UpdateYjsStateHandler)
 
 	// Edit routes (protected) - for document content management
 	editRoutes := api.Group("/edit/documents", middleware.Protected())
@@ -115,15 +134,26 @@ func main() {
 
 	// Media read routes:
 	// - URL exchange is protected by JWT.
-	// - Content endpoint is public but protected by short-lived media token.
+	// - Private content/thumbnail fallback endpoints require JWT and enforce ACL per request.
 	api.Get("/media/assets", middleware.Protected(), media.ListAssetsHandler)
 	api.Get("/media/shared-assets", middleware.Protected(), media.ListSharedAssetsHandler)
 	api.Get("/media/assets/:id/url", middleware.Protected(), media.GetAssetURLHandler)
 	api.Post("/media/assets/resolve", middleware.Protected(), media.ResolveAssetURLsHandler)
 	api.Get("/media/assets/:id/references", middleware.Protected(), media.GetAssetReferencesHandler)
 	api.Delete("/media/assets/:id", middleware.Protected(), media.DeleteAssetHandler)
-	api.Get("/media/assets/:id/thumbnail", media.GetAssetThumbnailHandler)
-	api.Get("/media/assets/:id/content", media.GetAssetContentHandler)
+	api.Get("/media/assets/:id/thumbnail", middleware.Protected(), media.GetAssetThumbnailHandler)
+	api.Get("/media/assets/:id/content", middleware.Protected(), media.GetAssetContentHandler)
+
+	// Notifications routes (protected)
+	notificationRoutes := api.Group("/notifications", middleware.Protected())
+	notificationRoutes.Get("/", workspace.ListNotificationsHandler)
+	notificationRoutes.Delete("/", workspace.ClearNotificationsHandler)
+	notificationRoutes.Post("/:id/read", workspace.MarkNotificationReadHandler)
+
+	// Public document read routes (no authentication)
+	publicRoutes := api.Group("/public", middleware.OptionalProtected())
+	publicRoutes.Get("/documents/:id", workspace.GetPublicDocumentHandler)
+	publicRoutes.Get("/documents/:id/content", workspace.GetPublicDocumentContentHandler)
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {

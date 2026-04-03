@@ -5,12 +5,16 @@ export type FileItem = {
 	type: 'folder' | 'document';
 	documentType?: 'rich_text' | 'table' | string;
 	preferredImageTargetId?: 'managed-r2' | string;
+	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string | null;
+	publicAccess?: 'private' | 'authenticated' | 'public' | string | null;
+	publicUrl?: string | null;
 	name: string;
 	description?: string | null;
 	parentId?: string | null;
 	folderId?: string | null;
 	title?: string | null;
 	excerpt?: string | null;
+	manualExcerpt?: string | null;
 	createdAt: string;
 	updatedAt: string;
 	creator: {
@@ -51,6 +55,81 @@ export type UpdateDocumentImageTargetResponse = {
 export type DeleteResponse = {
 	success: boolean;
 	message: string;
+};
+
+export type ShareDocumentMember = {
+	userId: string;
+	role: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	displayName?: string | null;
+	email?: string | null;
+};
+
+export type ShareDocumentResponse = {
+	documentId: string;
+	members: ShareDocumentMember[];
+};
+
+export type NotificationItem = {
+	id: string;
+	userId: string;
+	type: string;
+	groupKey: string;
+	data: Record<string, unknown>;
+	readAt?: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type NotificationListResponse = {
+	items: NotificationItem[];
+	hasMore: boolean;
+	total: number;
+	unreadCount: number;
+};
+
+export type SharedDocumentItem = {
+	documentId: string;
+	title: string;
+	excerpt: string;
+	documentType: 'rich_text' | 'table' | string;
+	preferredImageTargetId: 'managed-r2' | string;
+	folderId?: string | null;
+	ownerUserId: string;
+	ownerDisplayName?: string | null;
+	myRole: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type SharedDocumentListResponse = {
+	items: SharedDocumentItem[];
+	hasMore: boolean;
+	total: number;
+};
+
+export type SharedDocumentSummaryResponse = {
+	hasSharedDocuments: boolean;
+};
+
+export type OutgoingSharedDocumentItem = {
+	documentId: string;
+	title: string;
+	excerpt: string;
+	documentType: 'rich_text' | 'table' | string;
+	preferredImageTargetId: 'managed-r2' | string;
+	folderId?: string | null;
+	myRole: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	publicAccess: 'private' | 'authenticated' | 'public' | string;
+	publicUrl: string;
+	sharedMemberCount: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type OutgoingSharedDocumentListResponse = {
+	items: OutgoingSharedDocumentItem[];
+	hasMore: boolean;
+	total: number;
 };
 
 /**
@@ -289,6 +368,239 @@ export async function getDocumentDetails(id: string): Promise<FileItem> {
 	return response.json();
 }
 
+export async function getPublicDocumentDetails(id: string): Promise<FileItem> {
+	const response = await apiFetch(`/api/v1/public/documents/${id}`);
+
+	if (!response.ok) {
+		const error = await response.json();
+		const err = new Error(error.message || 'Failed to fetch public document details') as Error & {
+			status?: number;
+		};
+		err.status = response.status;
+		throw err;
+	}
+
+	return response.json();
+}
+
+export async function getSharedDocumentSummary(): Promise<SharedDocumentSummaryResponse> {
+	const response = await apiFetch('/api/v1/workspace/shared/summary');
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch shared document summary');
+	}
+	return response.json();
+}
+
+export async function getSharedDocuments(params: {
+	limit?: number;
+	offset?: number;
+}): Promise<SharedDocumentListResponse> {
+	const queryParams = new URLSearchParams();
+	if (params.limit !== undefined) {
+		queryParams.set('limit', String(params.limit));
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', String(params.offset));
+	}
+	const query = queryParams.toString();
+	const response = await apiFetch(
+		query ? `/api/v1/workspace/shared/documents?${query}` : '/api/v1/workspace/shared/documents'
+	);
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch shared documents');
+	}
+	return response.json();
+}
+
+export async function getOutgoingSharedDocuments(params: {
+	limit?: number;
+	offset?: number;
+}): Promise<OutgoingSharedDocumentListResponse> {
+	const queryParams = new URLSearchParams();
+	if (params.limit !== undefined) {
+		queryParams.set('limit', String(params.limit));
+	}
+	if (params.offset !== undefined) {
+		queryParams.set('offset', String(params.offset));
+	}
+	const query = queryParams.toString();
+	const response = await apiFetch(
+		query ? `/api/v1/workspace/shared/outgoing?${query}` : '/api/v1/workspace/shared/outgoing'
+	);
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch outgoing shared documents');
+	}
+	return response.json();
+}
+
+export async function leaveSharedDocument(documentId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares/me`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to leave shared document');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
+export async function listDocumentMembers(documentId: string): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`);
+
+	if (response.status === 404) {
+		return {
+			documentId,
+			members: []
+		};
+	}
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch document members');
+	}
+
+	return response.json();
+}
+
+export async function inviteDocumentByEmail(
+	documentId: string,
+	email: string,
+	role: 'viewer' | 'editor' | 'collaborator'
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/invites`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ email, role })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to invite collaborator');
+	}
+
+	return response.json();
+}
+
+export async function removeDocumentMember(
+	documentId: string,
+	userId: string
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares/${userId}`, {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to remove member');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentMemberRole(
+	documentId: string,
+	userId: string,
+	role: 'viewer' | 'editor' | 'collaborator'
+): Promise<ShareDocumentResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ userId, role })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update member role');
+	}
+
+	return response.json();
+}
+
+export async function listNotifications(params?: {
+	type?: string;
+	unread?: boolean;
+	limit?: number;
+	offset?: number;
+}): Promise<NotificationListResponse> {
+	const query = new URLSearchParams();
+	if (params?.type) query.set('type', params.type);
+	if (params?.unread) query.set('unread', '1');
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	if (params?.offset !== undefined) query.set('offset', String(params.offset));
+
+	const url = query.toString()
+		? `/api/v1/notifications?${query.toString()}`
+		: '/api/v1/notifications';
+	const response = await apiFetch(url);
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to fetch notifications');
+	}
+
+	return response.json();
+}
+
+export async function acceptDocumentInvite(inviteId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/document-invites/${inviteId}/accept`, {
+		method: 'POST'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to accept invite');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
+export async function declineDocumentInvite(inviteId: string): Promise<{ success?: boolean; message?: string }> {
+	const response = await apiFetch(`/api/v1/workspace/document-invites/${inviteId}/decline`, {
+		method: 'POST'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to decline invite');
+	}
+
+	if (response.status === 204) {
+		return { success: true };
+	}
+
+	return response.json();
+}
+
+export async function clearNotifications(): Promise<{ success: boolean; clearedCount: number }> {
+	const response = await apiFetch('/api/v1/notifications', {
+		method: 'DELETE'
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to clear notifications');
+	}
+
+	return response.json();
+}
+
 /**
  * Update document title
  */
@@ -309,6 +621,26 @@ export async function updateDocumentTitle(id: string, title: string): Promise<{ 
 	return response.json();
 }
 
+export async function updateDocumentExcerpt(
+	id: string,
+	excerpt: string
+): Promise<{ success: boolean; excerpt: string; manualExcerpt: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/excerpt`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ excerpt })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.message || 'Failed to update excerpt');
+	}
+
+	return response.json();
+}
+
 export async function updateDocumentImageTarget(
 	id: string,
 	preferredImageTargetId: string
@@ -324,6 +656,26 @@ export async function updateDocumentImageTarget(
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to update image target');
+	}
+
+	return response.json();
+}
+
+export async function updateDocumentPublicAccess(
+	id: string,
+	publicAccess: 'private' | 'authenticated' | 'public' | string
+): Promise<{ success: boolean; publicAccess: string; publicUrl: string }> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${id}/public-access`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ publicAccess })
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.Message || error.message || 'Failed to update document public access');
 	}
 
 	return response.json();

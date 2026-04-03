@@ -39,6 +39,10 @@
 	outline: none;
 }
 
+.tiptap.cw-collab-mode {
+	caret-color: #16a34a;
+}
+
 .tiptap p.is-editor-empty:first-child::before {
 	color: rgb(161 161 170);
 	content: attr(data-placeholder);
@@ -170,6 +174,71 @@
 	padding: 0;
 }
 
+.tiptap .tiptap-mathematics-render {
+	border-radius: 0.25rem;
+	display: inline-flex;
+	max-width: 100%;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='inline-math'] {
+	align-items: center;
+	margin: 0 0.12rem;
+	padding: 0.04rem 0.14rem;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] {
+	display: block;
+	justify-content: center;
+	margin: 1.4rem 0;
+	max-width: 100%;
+	overflow: visible;
+	padding: 0.5rem 0.35rem;
+	text-align: center;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] .katex {
+	font-size: clamp(1.5em, 1.02em + 0.68vw, 1.68em);
+	max-width: 100%;
+}
+
+.tiptap .tiptap-mathematics-render[data-type='block-math'] .katex-display {
+	line-height: 1.45;
+}
+
+.tiptap .tiptap-mathematics-render--editable {
+	background: transparent;
+	box-shadow: none;
+	cursor: pointer;
+	transition:
+		background-color 140ms ease,
+		box-shadow 140ms ease;
+}
+
+.tiptap .tiptap-mathematics-render--editable:hover {
+	background: rgb(244 244 245);
+	box-shadow: none;
+}
+
+@media (prefers-color-scheme: dark) {
+	.tiptap .tiptap-mathematics-render--editable:hover {
+		background: rgb(39 39 42);
+		box-shadow: none;
+	}
+}
+
+.tiptap .inline-math-error,
+.tiptap .block-math-error {
+	color: rgb(220 38 38);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+	font-size: 0.92rem;
+	white-space: pre-wrap;
+}
+
+.tiptap .block-math-inner,
+.tiptap .tiptap-mathematics-render .katex-display {
+	margin: 0;
+}
+
 .tiptap img {
 	border-radius: 0.75rem;
 	display: block;
@@ -233,6 +302,56 @@
 
 .tiptap .tableWrapper .column-resize-handle {
 	display: none;
+}
+
+.tiptap .collaboration-cursor__caret {
+	border-left: 1px solid var(--user-color);
+	border-right: 0;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--user-color) 35%, transparent);
+	height: 1.1em;
+	margin-left: -1px;
+	margin-right: 0;
+	pointer-events: none;
+	position: relative;
+	word-break: normal;
+}
+
+.tiptap .collaboration-cursor__label {
+	background: var(--user-color);
+	border-radius: 999px;
+	color: #fff;
+	font-size: 0.72rem;
+	font-weight: 600;
+	left: 0;
+	line-height: 1;
+	padding: 0.2rem 0.5rem;
+	position: absolute;
+	top: -1.7em;
+	user-select: none;
+	white-space: nowrap;
+	box-shadow: 0 2px 8px rgb(0 0 0 / 0.24);
+}
+
+.tiptap .collaboration-cursor__selection {
+	background: color-mix(in srgb, var(--user-color) 28%, transparent);
+}
+
+.tiptap .cw-cursor-label {
+	align-items: center;
+	display: inline-flex;
+	gap: 0.32rem;
+}
+
+.tiptap .cw-cursor-dot {
+	border: 1px solid rgb(255 255 255 / 0.7);
+	border-radius: 999px;
+	display: inline-block;
+	height: 0.58rem;
+	width: 0.58rem;
+}
+
+.tiptap .cw-cursor-name {
+	letter-spacing: 0.01em;
 }
 
 .tiptap .tableWrapper.resize-cursor,

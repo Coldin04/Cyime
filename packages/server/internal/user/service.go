@@ -3,7 +3,6 @@ package user
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"mime/multipart"
@@ -117,10 +116,10 @@ func GetOverviewStats(userID uuid.UUID) (*OverviewStats, error) {
 func UpdateProfile(userID uuid.UUID, displayName string) (*models.User, error) {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
-		return nil, errors.New("displayName is required")
+		return nil, ErrDisplayNameRequired
 	}
 	if len([]rune(displayName)) > 80 {
-		return nil, errors.New("displayName is too long")
+		return nil, ErrDisplayNameTooLong
 	}
 
 	if err := database.DB.Model(&models.User{}).
@@ -543,10 +542,10 @@ func UpdateAvatarWithGitHub(ctx context.Context, userID uuid.UUID, username stri
 
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return nil, errors.New("github username is required")
+		return nil, ErrGitHubUsernameRequired
 	}
 	if !githubUsernamePattern.MatchString(username) {
-		return nil, errors.New("invalid github username")
+		return nil, ErrGitHubUsernameInvalid
 	}
 
 	avatarURL := fmt.Sprintf("https://github.com/%s.png", username)

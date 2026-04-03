@@ -90,8 +90,8 @@
 </script>
 
 <div
-	class={`relative grid place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900 ${className}`}
-	style={`width:${size}px;height:${size}px;`}
+	class={`relative grid shrink-0 aspect-square place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900 ${className}`}
+	style={`width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;`}
 >
 	{#if resolvedSrc && !loadFailed}
 		{#if !loaded}

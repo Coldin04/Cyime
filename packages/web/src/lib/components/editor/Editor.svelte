@@ -3,7 +3,10 @@
 	import { fade } from 'svelte/transition';
 	import { Editor } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import Collaboration from '@tiptap/extension-collaboration';
+	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
+	import Mathematics from '@tiptap/extension-mathematics';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import StarterKit from '@tiptap/starter-kit';
 	import { Table } from '@tiptap/extension-table';
@@ -17,6 +20,7 @@
 	import ListBullets from '~icons/ph/list-bullets';
 	import ListNumbers from '~icons/ph/list-numbers';
 	import FloppyDisk from '~icons/ph/floppy-disk';
+	import Eye from '~icons/ph/eye';
 	import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise';
 	import ArrowClockwise from '~icons/ph/arrow-clockwise';
 	import Quotes from '~icons/ph/quotes';
@@ -27,32 +31,55 @@
 	import HeadingLevelMenu from '$lib/components/editor/HeadingLevelMenu.svelte';
 	import ImageLayoutControls from '$lib/components/editor/ImageLayoutControls.svelte';
 	import ImageReplaceButton from '$lib/components/editor/ImageReplaceButton.svelte';
+	import ExportControls from '$lib/components/editor/ExportControls.svelte';
+	import InlineMathControls from '$lib/components/editor/InlineMathControls.svelte';
 	import LinkControls from '$lib/components/editor/LinkControls.svelte';
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
 	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
+	import MathInputDialog from '$lib/components/editor/MathInputDialog.svelte';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
+	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
+	import type { ExportAction } from '$lib/export/exportActions';
+	import { auth } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
+	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
 		documentId: string;
 		content: JSONContent;
+		currentImageTargetId?: string;
 		currentImageTargetLabel?: string;
+		imageTargetOptions?: DocumentImageTargetOption[];
+		collaboration?: ProviderInstance | null;
+		readOnly?: boolean;
+		isUpdatingImageTarget?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
 		onContentChange?: (content: JSONContent) => void;
+		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
+		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
+		onExportAction?: (action: ExportAction) => void | Promise<unknown>;
 	}
 
 	let {
 		documentId,
 		content,
+		currentImageTargetId = 'managed-r2',
 		currentImageTargetLabel = '',
+		imageTargetOptions = [],
+		collaboration = null,
+		readOnly = false,
+		isUpdatingImageTarget = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
-		onSave
+		onImageTargetChange,
+		hydrateManagedContent,
+		onSave,
+		onExportAction
 	}: Props = $props();
 
 	const EMPTY_DOC: JSONContent = {
@@ -66,6 +93,13 @@
 	let editorRevision = $state(0);
 	let uploadingImageCount = $state(0);
 	let isImageInsertDialogOpen = $state(false);
+	let isMathDialogOpen = $state(false);
+	let mathDialogMode = $state<'inline' | 'block'>('inline');
+	let mathDialogValue = $state('');
+	let editingMathPosition = $state<number | null>(null);
+	let hasSeededCollaborationContent = false;
+	let hasHydratedManagedImages = false;
+	let isNormalizingMathInput = false;
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -78,6 +112,71 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
+	const LOCAL_CURSOR_COLOR = '#16a34a';
+	const remoteCursorPalette = [
+		'#2563eb',
+		'#9333ea',
+		'#ea580c',
+		'#dc2626',
+		'#1d4ed8',
+		'#be123c',
+		'#0891b2',
+		'#7c3aed',
+		'#c2410c',
+		'#b91c1c'
+	] as const;
+
+	function hashString(value: string): number {
+		let hash = 0;
+		for (let index = 0; index < value.length; index += 1) {
+			hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+		}
+		return hash;
+	}
+
+	function getCollaborationUser() {
+		const authState = $auth;
+		const id = authState.user?.id ?? collaboration?.provider?.awareness?.clientID?.toString() ?? 'unknown';
+		const name =
+			authState.user?.displayName?.trim() ||
+			authState.user?.email?.trim() ||
+			`协作者 ${id.slice(0, 6)}`;
+		const color = LOCAL_CURSOR_COLOR;
+
+		return { id, name, color };
+	}
+
+	function getRemoteCursorColor(userId: string) {
+		return remoteCursorPalette[hashString(userId) % remoteCursorPalette.length];
+	}
+
+	function renderCollaborationCursor(
+		user: { id?: string; name?: string; color?: string },
+		localUserId: string
+	) {
+		const cursor = document.createElement('span');
+		cursor.classList.add('collaboration-cursor__caret');
+		const isLocal = user.id === localUserId;
+		const effectiveColor = isLocal
+			? LOCAL_CURSOR_COLOR
+			: getRemoteCursorColor(user.id ?? user.name ?? 'remote-user');
+		cursor.style.setProperty('--user-color', effectiveColor);
+
+		const label = document.createElement('span');
+		label.classList.add('collaboration-cursor__label', 'cw-cursor-label');
+
+		const dot = document.createElement('span');
+		dot.classList.add('cw-cursor-dot');
+		dot.style.backgroundColor = effectiveColor;
+
+		const text = document.createElement('span');
+		text.classList.add('cw-cursor-name');
+		text.textContent = user.name || '协作者';
+
+		label.append(dot, text);
+		cursor.append(label);
+		return cursor;
+	}
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -159,6 +258,10 @@
 		return JSON.stringify(normalizeDoc(value));
 	}
 
+	function hasMeaningfulContent(value: JSONContent): boolean {
+		return serializeDoc(value) !== serializeDoc(EMPTY_DOC);
+	}
+
 	function isSupportedImageFile(file: File): boolean {
 		const type = file.type.trim().toLowerCase();
 		if (type && allowedImageMimeTypes.has(type)) {
@@ -172,6 +275,229 @@
 	function showUnsupportedImageUploadToast(file: File) {
 		const ext = file.name.split('.').pop()?.trim().toLowerCase() ?? 'unknown';
 		toast.error(`暂不支持上传 ${ext.toUpperCase()}，请使用 PNG/JPG/WebP/GIF`);
+	}
+
+	function closeMathDialog() {
+		isMathDialogOpen = false;
+		mathDialogValue = '';
+		editingMathPosition = null;
+	}
+
+	function openMathDialog(mode: 'inline' | 'block', latex = '', pos: number | null = null) {
+		if (readOnly) {
+			return;
+		}
+
+		mathDialogMode = mode;
+		mathDialogValue = latex;
+		editingMathPosition = pos;
+		isMathDialogOpen = true;
+	}
+
+	async function submitMathDialog(rawLatex: string): Promise<boolean> {
+		const editorInstance = editor;
+		if (!editorInstance) {
+			return false;
+		}
+
+		const latex = rawLatex.trim();
+		if (latex === '') {
+			toast.error('请输入 LaTeX 公式内容');
+			return false;
+		}
+
+		const editingPos = editingMathPosition ?? undefined;
+		const command =
+			mathDialogMode === 'inline'
+				? editingPos === undefined
+					? () => editorInstance.chain().focus().insertInlineMath({ latex }).run()
+					: () => editorInstance.chain().focus().updateInlineMath({ latex, pos: editingPos }).run()
+				: editingPos === undefined
+					? () => editorInstance.chain().focus().insertBlockMath({ latex }).run()
+					: () => editorInstance.chain().focus().updateBlockMath({ latex, pos: editingPos }).run();
+
+		const succeeded = command();
+		if (!succeeded) {
+			toast.error('公式插入失败');
+			return false;
+		}
+
+		editorRevision += 1;
+		closeMathDialog();
+		return true;
+	}
+
+	async function deleteMathDialogTarget(): Promise<boolean> {
+		const editorInstance = editor;
+		if (!editorInstance || mathDialogMode !== 'block') {
+			return false;
+		}
+
+		const editingPos = editingMathPosition ?? undefined;
+		const succeeded =
+			editingPos === undefined
+				? editorInstance.chain().focus().deleteBlockMath().run()
+				: editorInstance.chain().focus().deleteBlockMath({ pos: editingPos }).run();
+		if (!succeeded) {
+			toast.error('公式删除失败');
+			return false;
+		}
+
+		editorRevision += 1;
+		closeMathDialog();
+		return true;
+	}
+
+	function normalizeMarkdownMathInput(editorInstance: Editor): boolean {
+		const inlineMathType = editorInstance.schema.nodes.inlineMath;
+		const blockMathType = editorInstance.schema.nodes.blockMath;
+		if (!inlineMathType) {
+			return false;
+		}
+
+		const blockReplacements: Array<{ from: number; to: number; latex: string }> = [];
+		const replacements: Array<{ kind: 'inline'; from: number; to: number; latex: string }> = [];
+
+		editorInstance.state.doc.descendants((node, pos, parent) => {
+			if (node.type.name === 'paragraph' && blockMathType) {
+				const paragraphChildren = node.content.content;
+				const hasOnlyTextAndBreaks = paragraphChildren.every(
+					(child) => child.type.name === 'text' || child.type.name === 'hardBreak'
+				);
+				if (hasOnlyTextAndBreaks) {
+					const paragraphText = paragraphChildren
+						.map((child) => {
+							if (child.type.name === 'hardBreak') return '\n';
+							return child.text ?? '';
+						})
+						.join('');
+					const lines = paragraphText.split('\n');
+					if (
+						lines.length >= 3 &&
+						lines[0]?.trim() === '$$' &&
+						lines[lines.length - 1]?.trim() === '$$'
+					) {
+						const latex = lines
+							.slice(1, -1)
+							.join('\n')
+							.trim();
+						if (latex !== '') {
+							blockReplacements.push({
+								from: pos,
+								to: pos + node.nodeSize,
+								latex
+							});
+							return false;
+						}
+					}
+				}
+			}
+
+			if (!node.isText || !node.text || node.text.includes('\n')) {
+				return;
+			}
+			if (parent?.type?.name === 'codeBlock') {
+				return;
+			}
+			if (node.marks.some((mark) => mark.type.name === 'code')) {
+				return;
+			}
+
+			const textValue = node.text;
+			const inlinePattern = /(?<!\$)\$([^$\n]+?)\$(?!\$)/g;
+			for (const match of textValue.matchAll(inlinePattern)) {
+				const raw = match[0];
+				const latex = match[1]?.trim() ?? '';
+				const start = match.index ?? -1;
+				if (raw === undefined || start < 0 || latex === '') {
+					continue;
+				}
+				replacements.push({
+					kind: 'inline',
+					from: pos + start,
+					to: pos + start + raw.length,
+					latex
+				});
+			}
+		});
+
+		if (blockReplacements.length === 0 && replacements.length === 0) {
+			return false;
+		}
+
+		const transaction = editorInstance.state.tr;
+		for (const replacement of [...blockReplacements].sort((left, right) => right.from - left.from)) {
+			if (!blockMathType) {
+				continue;
+			}
+			const mappedFrom = transaction.mapping.map(replacement.from);
+			const mappedTo = transaction.mapping.map(replacement.to);
+			const fromResolved = transaction.doc.resolve(mappedFrom);
+			const parent = fromResolved.parent;
+			const index = fromResolved.index();
+			if (!parent.canReplaceWith(index, index + 1, blockMathType)) {
+				continue;
+			}
+
+			transaction.replaceWith(
+				mappedFrom,
+				mappedTo,
+				blockMathType.create({ latex: replacement.latex })
+			);
+		}
+
+		for (const replacement of [...replacements].sort((left, right) => right.from - left.from)) {
+			const mappedFrom = transaction.mapping.map(replacement.from);
+			const mappedTo = transaction.mapping.map(replacement.to);
+			const fromResolved = transaction.doc.resolve(mappedFrom);
+			if (fromResolved.parent.type.name === 'codeBlock') {
+				continue;
+			}
+			if (fromResolved.marks().some((mark) => mark.type.name === 'code')) {
+				continue;
+			}
+			const parent = fromResolved.parent;
+			const index = fromResolved.index();
+			if (!parent.canReplaceWith(index, index + 1, inlineMathType)) {
+				continue;
+			}
+
+			transaction.replaceWith(
+				mappedFrom,
+				mappedTo,
+				inlineMathType.create({ latex: replacement.latex })
+			);
+		}
+
+		if (!transaction.docChanged) {
+			return false;
+		}
+
+		isNormalizingMathInput = true;
+		editorInstance.view.dispatch(transaction);
+		isNormalizingMathInput = false;
+		return true;
+	}
+
+	function parsePastedMathExpression(raw: string): { mode: 'inline' | 'block'; latex: string } | null {
+		const trimmed = raw.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		const blockMatch = trimmed.match(/^\$\$([\s\S]+)\$\$$/);
+		if (blockMatch) {
+			const latex = blockMatch[1]?.trim() ?? '';
+			return latex ? { mode: 'block', latex } : null;
+		}
+
+		const inlineMatch = trimmed.match(/^\$([^$\n]+)\$$/);
+		if (inlineMatch) {
+			const latex = inlineMatch[1]?.trim() ?? '';
+			return latex ? { mode: 'inline', latex } : null;
+		}
+
+		return null;
 	}
 
 	function insertUploadedImage(attrs: Record<string, unknown>) {
@@ -397,41 +723,102 @@
 		}
 
 		lastSyncedContent = serializeDoc(content);
+		const collaborationUser = getCollaborationUser();
+		const extensions: any[] = [
+			StarterKit.configure({
+				heading: {
+					levels: [...headingLevels]
+				},
+				link: false,
+				...(collaboration?.doc ? { undoRedo: false } : {})
+			}),
+			CyImage.configure({
+				inline: false,
+				allowBase64: true
+			}),
+			Link.configure({
+				openOnClick: false,
+				autolink: true,
+				defaultProtocol: 'https'
+			}),
+			Mathematics.configure({
+				katexOptions: {
+					throwOnError: false,
+					strict: 'ignore'
+				},
+				...(readOnly
+					? {}
+					: {
+							blockOptions: {
+								onClick: (node, pos) => {
+									const latex =
+										typeof node.attrs?.latex === 'string' ? node.attrs.latex : '';
+									openMathDialog('block', latex, pos);
+								}
+							}
+						})
+			}),
+			Table.configure({
+				resizable: true,
+				HTMLAttributes: {
+					class: 'cw-editor-table'
+				}
+			}),
+			TableRow,
+			TableHeader,
+			TableCell,
+			...(!readOnly
+				? [
+						Placeholder.configure({
+							placeholder: m.editor_placeholder()
+						})
+					]
+				: [])
+		];
+
+		if (collaboration?.doc) {
+			collaboration.provider?.setAwarenessField('user', collaborationUser);
+			extensions.push(
+				Collaboration.configure({
+					document: collaboration.doc
+				}),
+				CollaborationCursor.configure({
+					provider: collaboration.provider,
+					user: collaborationUser,
+					render: (user) => renderCollaborationCursor(user, collaborationUser.id)
+				})
+			);
+		}
+
+		const editorRootClass = [
+			'tiptap',
+			'min-h-full',
+			'w-full',
+			'px-4',
+			'py-6',
+			'text-base',
+			'text-zinc-800',
+			'outline-none',
+			'dark:text-zinc-100',
+			'sm:px-8',
+			'lg:px-[14%]',
+			collaboration?.doc ? 'cw-collab-mode' : ''
+		]
+			.filter(Boolean)
+			.join(' ');
+
 		editor = new Editor({
 			element: editorElement,
-			extensions: [
-				StarterKit.configure({
-					heading: {
-						levels: [...headingLevels]
-					}
-				}),
-				CyImage.configure({
-					inline: false,
-					allowBase64: true
-				}),
-				Link.configure({
-					openOnClick: false,
-					autolink: true,
-					defaultProtocol: 'https'
-				}),
-				Table.configure({
-					resizable: true,
-					HTMLAttributes: {
-						class: 'cw-editor-table'
-					}
-				}),
-				TableRow,
-				TableHeader,
-				TableCell,
-				Placeholder.configure({
-					placeholder: m.editor_placeholder()
-				})
-			],
-			content: toTiptapContent(content),
+			editable: !readOnly,
+			extensions,
+			content: collaboration?.doc ? undefined : toTiptapContent(content),
 			editorProps: {
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				handleDOMEvents: {
 					paste: (_view, event) => {
+						if (readOnly) {
+							return false;
+						}
 						const clipboardEvent = event as ClipboardEvent;
 						const clipboard = clipboardEvent.clipboardData;
 						if (!clipboard) return false;
@@ -484,6 +871,20 @@
 							return true;
 						}
 
+						const pastedMath = parsePastedMathExpression(text);
+						if (pastedMath) {
+							clipboardEvent.preventDefault();
+							const chain = editor?.chain().focus();
+							const succeeded =
+								pastedMath.mode === 'block'
+									? chain?.insertBlockMath({ latex: pastedMath.latex }).run()
+									: chain?.insertInlineMath({ latex: pastedMath.latex }).run();
+							if (!succeeded) {
+								toast.error(m.editor_math_insert_failed());
+							}
+							return true;
+						}
+
 						if (!looksLikeMarkdown(text)) return false;
 
 						const rendered = marked.parse(text, {
@@ -503,11 +904,16 @@
 					}
 				},
 				attributes: {
-					class:
-						'tiptap min-h-full w-full px-4 py-6 text-base text-zinc-800 outline-none dark:text-zinc-100 sm:px-8 lg:px-[14%]'
+					class: editorRootClass
 				}
 			},
 			onUpdate: ({ editor }) => {
+				if (readOnly) {
+					return;
+				}
+				if (!isNormalizingMathInput && normalizeMarkdownMathInput(editor)) {
+					return;
+				}
 				const nextContent = editor.getJSON();
 				lastSyncedContent = serializeDoc(nextContent);
 				onContentChange?.(nextContent);
@@ -518,14 +924,59 @@
 			}
 		});
 
+		const reconcileCollaborationContent = async () => {
+			if (!editor || !collaboration?.doc) {
+				return;
+			}
+
+			if (!hasSeededCollaborationContent) {
+				hasSeededCollaborationContent = true;
+				const currentDoc = normalizeDoc(editor.getJSON());
+				if (!hasMeaningfulContent(currentDoc) && hasMeaningfulContent(content)) {
+					lastSyncedContent = serializeDoc(content);
+					editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
+				}
+			}
+
+			if (hasHydratedManagedImages || !hydrateManagedContent) {
+				return;
+			}
+
+			hasHydratedManagedImages = true;
+			const currentDoc = normalizeDoc(editor.getJSON());
+			const hydrated = await hydrateManagedContent(currentDoc);
+			if (serializeDoc(hydrated) === serializeDoc(currentDoc)) {
+				return;
+			}
+
+			lastSyncedContent = serializeDoc(hydrated);
+			editor.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
+		};
+
+		const handleSynced = ({ state }: { state: boolean }) => {
+			if (state) {
+				void reconcileCollaborationContent();
+			}
+		};
+
+		if (collaboration?.provider) {
+			collaboration.provider.on('synced', handleSynced);
+			if (collaboration.provider.synced) {
+				void reconcileCollaborationContent();
+			}
+		} else if (collaboration?.doc) {
+			void reconcileCollaborationContent();
+		}
+
 		return () => {
+			collaboration?.provider?.off('synced', handleSynced);
 			editor?.destroy();
 			editor = null;
 		};
 	});
 
 	$effect(() => {
-		if (!editor) {
+		if (!editor || collaboration?.doc) {
 			return;
 		}
 
@@ -631,6 +1082,13 @@
 		if (!editor || !editor.isActive('link')) return '';
 		const attrs = editor.getAttributes('link');
 		return typeof attrs.href === 'string' ? attrs.href : '';
+	}
+
+	function currentInlineMathLatex() {
+		editorRevision;
+		if (!editor || !editor.isActive('inlineMath')) return '';
+		const attrs = editor.getAttributes('inlineMath');
+		return typeof attrs.latex === 'string' ? attrs.latex : '';
 	}
 
 	function applyImageWidth(width: string) {
@@ -765,6 +1223,34 @@
 		editorRevision += 1;
 	}
 
+	function applyInlineMathLatex(latexInput: string) {
+		if (!editor) return;
+		const latex = latexInput.trim();
+
+		if (latex === '') {
+			if (editor.isActive('inlineMath')) {
+				editor.chain().focus().deleteInlineMath().run();
+				editorRevision += 1;
+			}
+			return;
+		}
+
+		const succeeded = editor.isActive('inlineMath')
+			? editor.chain().focus().updateInlineMath({ latex }).run()
+			: editor.chain().focus().insertInlineMath({ latex }).run();
+		if (!succeeded) {
+			toast.error('公式插入失败');
+			return;
+		}
+		editorRevision += 1;
+	}
+
+	function removeInlineMath() {
+		if (!editor || !editor.isActive('inlineMath')) return;
+		editor.chain().focus().deleteInlineMath().run();
+		editorRevision += 1;
+	}
+
 	const activeToggleClass = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 	const inactiveToggleClass =
 		'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800';
@@ -773,21 +1259,35 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-		<div class="overflow-visible">
-			<div
-				class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
-			>
-			<button
-				type="button"
-				title={m.editor_toolbar_save_with_shortcut()}
-				aria-label={m.editor_toolbar_save_with_shortcut()}
-				disabled={isSaving || !hasUnsavedChanges}
-				onclick={() => onSave?.()}
+	{#if !readOnly}
+		<div class="relative z-10 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+			<div class="overflow-visible">
+				<div
+					class="mx-auto flex w-full max-w-6xl flex-nowrap items-center justify-start gap-2 overflow-x-auto whitespace-nowrap scrollbar-none md:justify-center"
+				>
+				<button
+					type="button"
+					title={m.editor_toolbar_save_with_shortcut()}
+					aria-label={m.editor_toolbar_save_with_shortcut()}
+					disabled={isSaving || !hasUnsavedChanges}
+					onclick={() => onSave?.()}
+					class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+				>
+					<FloppyDisk class="h-4 w-4" />
+				</button>
+				<ExportControls
+					onAction={(action) => {
+						void onExportAction?.(action);
+					}}
+				/>
+			<a
+				href={`/view/documents/${documentId}`}
+				title={m.editor_toolbar_open_reader_mode()}
+				aria-label={m.editor_toolbar_open_reader_mode()}
 				class={`${iconButtonBaseClass} text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800`}
 			>
-				<FloppyDisk class="h-4 w-4" />
-			</button>
+				<Eye class="h-4 w-4" />
+			</a>
 			<button
 				type="button"
 				title={m.editor_toolbar_undo_with_shortcut()}
@@ -915,6 +1415,23 @@
 			>
 				<Minus class="h-4 w-4" />
 			</button>
+			<InlineMathControls
+				latex={currentInlineMathLatex()}
+				isActive={isActive('inlineMath')}
+				onSave={applyInlineMathLatex}
+				onRemove={removeInlineMath}
+			/>
+			<button
+				type="button"
+				title={m.editor_math_block_title()}
+				aria-label={m.editor_math_block_title()}
+				class={`rounded-md px-2 py-1 text-[11px] font-medium leading-none transition-colors ${
+					isActive('blockMath') ? activeToggleClass : inactiveToggleClass
+				}`}
+				onclick={() => openMathDialog('block')}
+			>
+				math
+			</button>
 			<div class="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700 md:mx-1"></div>
 			<button
 				type="button"
@@ -992,22 +1509,38 @@
 						instance.chain().focus().deleteTable().run();
 					})}
 				/>
+				</div>
 			</div>
 		</div>
-	</div>
+	{/if}
 
 	<div class="h-full w-full overflow-y-auto">
 		<div bind:this={editorElement} class="h-full w-full"></div>
 	</div>
 </div>
 
-<ImageInsertDialog
-	bind:open={isImageInsertDialogOpen}
-	accept={imageUploadAccept}
-	isUploading={uploadingImageCount > 0}
-	currentTargetLabel={currentImageTargetLabel}
-	onFilesSelected={(files) => {
-		void uploadAndInsertImages(files, 'picker');
-	}}
-	onInsertLink={async (src) => insertExternalImage(src)}
+{#if !readOnly}
+	<ImageInsertDialog
+		bind:open={isImageInsertDialogOpen}
+		accept={imageUploadAccept}
+		isUploading={uploadingImageCount > 0}
+		isUpdatingTarget={isUpdatingImageTarget}
+		currentTargetId={currentImageTargetId}
+		currentTargetLabel={currentImageTargetLabel}
+		targetOptions={imageTargetOptions}
+		onTargetChange={(targetId) => onImageTargetChange?.(targetId)}
+		onFilesSelected={(files) => {
+			void uploadAndInsertImages(files, 'picker');
+		}}
+		onInsertLink={async (src) => insertExternalImage(src)}
+	/>
+{/if}
+
+<MathInputDialog
+	bind:open={isMathDialogOpen}
+	mode={mathDialogMode}
+	initialValue={mathDialogValue}
+	showDelete={mathDialogMode === 'block' && editingMathPosition !== null}
+	onSubmit={submitMathDialog}
+	onDelete={deleteMathDialogTarget}
 />

@@ -18,10 +18,10 @@
 	},
 	"devDependencies": {
 		"@iconify-json/ph": "^1.2.2",
-		"@inlang/cli": "^3.1.6",
-		"@inlang/paraglide-js": "^2.13.2",
+		"@inlang/cli": "^3.1.9",
+		"@inlang/paraglide-js": "^2.15.1",
 		"@sveltejs/adapter-auto": "^7.0.1",
-		"@sveltejs/kit": "^2.53.4",
+		"@sveltejs/kit": "^2.55.0",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@tailwindcss/typography": "^0.5.19",
 		"@types/node": "^25.3.5",
@@ -36,19 +36,36 @@
 		"vite": "^7.3.1"
 	},
 	"dependencies": {
+		"@hocuspocus/provider": "^3.4.4",
 		"@tiptap/core": "^3.20.4",
+		"@tiptap/extension-collaboration": "^3.21.0",
+		"@tiptap/extension-collaboration-cursor": "3.0.0-next.6",
 		"@tiptap/extension-image": "^3.20.4",
 		"@tiptap/extension-link": "^3.20.4",
+		"@tiptap/extension-mathematics": "^3.21.0",
 		"@tiptap/extension-placeholder": "^3.20.4",
 		"@tiptap/extension-table": "^3.20.4",
 		"@tiptap/extension-table-cell": "^3.20.4",
 		"@tiptap/extension-table-header": "^3.20.4",
 		"@tiptap/extension-table-row": "^3.20.4",
-		"@tiptap/pm": "^3.20.4",
 		"@tiptap/starter-kit": "^3.20.4",
+		"@tiptap/y-tiptap": "^3.0.2",
+		"katex": "^0.16.44",
 		"marked": "^17.0.4",
-		"phosphor-svelte": "^3.1.0",
 		"svelte-easy-crop": "^5.0.0",
-		"svelte-sonner": "^1.0.8"
+		"svelte-sonner": "^1.0.8",
+		"y-protocols": "^1.0.7",
+		"yjs": "^13.6.30"
+	},
+	"pnpm": {
+		"overrides": {
+			"@tiptap/extension-collaboration-cursor": "3.0.0-next.6",
+			"kysely": ">=0.28.14",
+			"cookie@<0.7.0": "0.7.0",
+			"devalue@<5.6.4": "5.6.4",
+			"picomatch@<2.3.2": "2.3.2",
+			"picomatch@>=4.0.0 <4.0.4": "4.0.4",
+			"anymatch>picomatch": "4.0.4"
+		}
 	}
 }

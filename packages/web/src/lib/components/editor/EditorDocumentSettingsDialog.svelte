@@ -3,12 +3,19 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
-	import { updateDocumentTitle } from '$lib/api/workspace';
+	import {
+		updateDocumentExcerpt,
+		updateDocumentPublicAccess,
+		updateDocumentTitle
+	} from '$lib/api/workspace';
+	import DocumentCollaborationSettings from '$lib/components/editor/DocumentCollaborationSettings.svelte';
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import FileText from '~icons/ph/file-text';
 	import ImageSquare from '~icons/ph/image-square';
 	import LockKey from '~icons/ph/lock-key';
+	import Copy from '~icons/ph/copy';
+	import Check from '~icons/ph/check';
 	import SlidersHorizontal from '~icons/ph/sliders-horizontal';
 	import X from '~icons/ph/x';
 
@@ -17,12 +24,21 @@
 	type Props = {
 		documentId: string;
 		documentTitle?: string;
+		documentManualExcerpt?: string;
 		documentType?: string;
 		currentTargetId: string;
 		options: DocumentImageTargetOption[];
+		canEditBasic?: boolean;
+		canManageMembers?: boolean;
+		canEditImageSettings?: boolean;
+		canManagePublic?: boolean;
+		publicAccess?: 'private' | 'authenticated' | 'public' | string;
+		publicUrl?: string;
 		isUpdating?: boolean;
 		onSelect: (targetId: string) => void | Promise<unknown>;
 		onTitleChange?: (title: string) => void;
+		onManualExcerptChange?: (excerpt: string) => void;
+		onPublicAccessChange?: (publicAccess: string, publicUrl: string) => void;
 	};
 
 	type DesignSection = {
@@ -45,24 +61,58 @@
 	let {
 		documentId,
 		documentTitle = '',
+		documentManualExcerpt = '',
 		documentType = 'rich_text',
 		currentTargetId,
 		options,
+		canEditBasic = true,
+		canManageMembers = true,
+		canEditImageSettings = true,
+		canManagePublic = false,
+		publicAccess = 'private',
+		publicUrl = '',
 		isUpdating = false,
 		onSelect,
-		onTitleChange
+		onTitleChange,
+		onManualExcerptChange,
+		onPublicAccessChange
 	}: Props = $props();
+
+	const visibleSections = $derived(
+		sections.filter((section) => {
+			switch (section.id) {
+				case 'basic':
+					return canEditBasic;
+				case 'permissions':
+					return canManageMembers;
+				case 'image':
+					return canEditImageSettings;
+				default:
+					return false;
+			}
+		})
+	);
 
 	let open = $state(false);
 	let activeSection = $state<DesignSectionId>('basic');
 	let isEditingTitle = $state(false);
 	let draftTitle = $state('');
+	let draftExcerpt = $state('');
+	let isSavingExcerpt = $state(false);
+	let isSavingPublicAccess = $state(false);
+	let copiedPublicURL = $state(false);
 	let titleInput: HTMLInputElement | null = $state(null);
 	let contentArea: HTMLElement | null = $state(null);
 	let basicSection: HTMLElement | null = $state(null);
 	let permissionsSection: HTMLElement | null = $state(null);
 	let imageSection: HTMLElement | null = $state(null);
 	let sectionObserver: IntersectionObserver | null = null;
+
+	$effect(() => {
+		if (!open || !isSavingPublicAccess) {
+			draftPublicAccess = publicAccess;
+		}
+	});
 
 	function getSectionElement(id: DesignSectionId): HTMLElement | null {
 		switch (id) {
@@ -76,6 +126,7 @@
 				return null;
 		}
 	}
+	let draftPublicAccess = $state<'private' | 'authenticated' | 'public' | string>('private');
 
 	$effect(() => {
 		if (!browser) return;
@@ -92,8 +143,14 @@
 	});
 
 	$effect(() => {
+		if (!open || !isSavingExcerpt) {
+			draftExcerpt = documentManualExcerpt;
+		}
+	});
+
+	$effect(() => {
 		if (!open) {
-			activeSection = 'basic';
+			activeSection = (visibleSections[0]?.id ?? 'basic') as DesignSectionId;
 			isEditingTitle = false;
 		}
 	});
@@ -120,7 +177,7 @@
 			}
 		);
 
-		for (const section of sections) {
+		for (const section of visibleSections) {
 			const el = getSectionElement(section.id);
 			if (el) {
 				sectionObserver.observe(el);
@@ -159,6 +216,7 @@
 	}
 
 	async function startEditingTitle() {
+		if (!canEditBasic) return;
 		draftTitle = documentTitle;
 		isEditingTitle = true;
 		await tick();
@@ -171,6 +229,7 @@
 	}
 
 	async function saveTitle() {
+		if (!canEditBasic) return;
 		const nextTitle = draftTitle.trim();
 		if (!nextTitle || nextTitle === documentTitle) {
 			isEditingTitle = false;
@@ -186,6 +245,91 @@
 		} catch (error) {
 			console.error('Failed to update title:', error);
 			toast.error(m.editor_topbar_title_update_failed());
+		}
+	}
+
+	async function saveExcerpt() {
+		if (!canEditBasic) return;
+		if (isSavingExcerpt) return;
+
+		const nextExcerpt = draftExcerpt.trim();
+		const currentExcerpt = documentManualExcerpt.trim();
+		if (nextExcerpt === currentExcerpt) {
+			draftExcerpt = documentManualExcerpt;
+			return;
+		}
+
+		isSavingExcerpt = true;
+		try {
+			const response = await updateDocumentExcerpt(documentId, nextExcerpt);
+			onManualExcerptChange?.(response.manualExcerpt);
+			draftExcerpt = response.manualExcerpt;
+			toast.success(m.editor_document_settings_description_updated());
+		} catch (error) {
+			console.error('Failed to update excerpt:', error);
+			toast.error(
+				error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_document_settings_description_update_failed()
+			);
+		} finally {
+			isSavingExcerpt = false;
+		}
+	}
+
+	function resolvePublicAccessURL() {
+		const current = publicUrl.trim();
+		const fallbackPath = `/view/documents/${documentId}`;
+		const target = current !== '' ? current : fallbackPath;
+		try {
+			return new URL(target, window.location.origin).toString();
+		} catch {
+			return target;
+		}
+	}
+
+	async function savePublicAccess() {
+		if (!canManagePublic || isSavingPublicAccess) return;
+		if (draftPublicAccess === publicAccess) return;
+		isSavingPublicAccess = true;
+		try {
+			const response = await updateDocumentPublicAccess(documentId, draftPublicAccess);
+			draftPublicAccess = response.publicAccess;
+			onPublicAccessChange?.(response.publicAccess, response.publicUrl);
+			toast.success(
+				response.publicAccess === 'private'
+					? m.editor_document_settings_public_disabled()
+					: m.editor_document_settings_public_enabled()
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error && error.message.trim() !== ''
+					? error.message
+					: m.editor_document_settings_public_update_failed()
+			);
+		} finally {
+			isSavingPublicAccess = false;
+		}
+	}
+
+	async function handlePublicAccessSelect(event: Event) {
+		const nextValue = (event.currentTarget as HTMLSelectElement).value;
+		draftPublicAccess = nextValue;
+		await savePublicAccess();
+	}
+
+	async function copyPublicURL() {
+		const targetURL = resolvePublicAccessURL();
+		if (!targetURL) return;
+		try {
+			await navigator.clipboard.writeText(targetURL);
+			copiedPublicURL = true;
+			setTimeout(() => {
+				copiedPublicURL = false;
+			}, 1200);
+			toast.success(m.editor_document_settings_public_copy_success());
+		} catch {
+			toast.error(m.editor_document_settings_public_copy_failed());
 		}
 	}
 
@@ -207,7 +351,7 @@
 	class="grid h-8 w-8 shrink-0 place-content-center rounded-full text-zinc-500 transition-colors hover:bg-black/10 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-200"
 	title={m.editor_topbar_image_target_settings()}
 	aria-label={m.editor_topbar_image_target_settings()}
-	disabled={isUpdating}
+	disabled={isUpdating || visibleSections.length === 0}
 	onclick={() => (open = true)}
 >
 	<SlidersHorizontal class="h-5 w-5" />
@@ -257,7 +401,7 @@
 				<div class="flex min-h-0 flex-1 flex-col md:flex-row">
 					<aside class="border-b border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40 md:w-56 md:shrink-0 md:border-b-0 md:border-r">
 						<nav class="flex gap-1 overflow-x-auto p-3 md:h-full md:flex-col md:overflow-y-auto md:p-4">
-							{#each sections as section (section.id)}
+							{#each visibleSections as section (section.id)}
 								<button
 									type="button"
 									class={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition md:w-full ${
@@ -276,11 +420,12 @@
 
 					<section bind:this={contentArea} class="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
 						<div class="max-w-2xl space-y-10 pb-12">
-							<section
-								bind:this={basicSection}
-								data-section-id="basic"
-								class="scroll-mt-6 space-y-6"
-							>
+							{#if canEditBasic}
+								<section
+									bind:this={basicSection}
+									data-section-id="basic"
+									class="scroll-mt-6 space-y-6"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_basic_title()}
@@ -290,7 +435,7 @@
 									</p>
 								</div>
 
-								<div class="space-y-3">
+									<div class="space-y-3">
 									<label for="document-title-input" class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
 										{m.editor_document_settings_title_label()}
 									</label>
@@ -306,15 +451,15 @@
 											class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
 											placeholder={m.document_name_placeholder()}
 										/>
-										<div class="flex gap-2">
-											<button
-												type="button"
-												class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-												onclick={() => void saveTitle()}
-											>
-												{m.common_save()}
-											</button>
-											{#if isEditingTitle}
+										{#if isEditingTitle}
+											<div class="flex gap-2">
+												<button
+													type="button"
+													class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+													onclick={() => void saveTitle()}
+												>
+													{m.common_save()}
+												</button>
 												<button
 													type="button"
 													class="rounded-lg bg-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
@@ -322,35 +467,98 @@
 												>
 													{m.common_cancel()}
 												</button>
-											{/if}
-										</div>
+											</div>
+										{/if}
 									</div>
-								</div>
+									</div>
 
-								<div class="space-y-3">
-									<label
-										for="document-design-description"
-										class="text-xs font-medium text-zinc-500 dark:text-zinc-400"
-									>
-										{m.editor_document_settings_description_label()}
-									</label>
+									<div class="space-y-3">
+									<div class="flex items-center justify-between gap-3">
+										<label
+											for="document-design-description"
+											class="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+										>
+											{m.editor_document_settings_description_label()}
+										</label>
+										{#if draftExcerpt.trim() !== documentManualExcerpt.trim()}
+											<button
+												type="button"
+												class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+												onclick={() => void saveExcerpt()}
+												disabled={isSavingExcerpt}
+											>
+												{isSavingExcerpt ? m.common_saving() : m.common_save()}
+											</button>
+										{/if}
+									</div>
 									<textarea
 										id="document-design-description"
 										rows="3"
+										bind:value={draftExcerpt}
 										class="w-full resize-none rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
 										placeholder={m.editor_document_settings_description_placeholder()}
 									></textarea>
 									<p class="text-xs leading-6 text-zinc-400 dark:text-zinc-500">
 										{m.editor_document_settings_description_hint()}
 									</p>
-								</div>
-							</section>
+									</div>
 
-							<section
-								bind:this={permissionsSection}
-								data-section-id="permissions"
-								class="scroll-mt-6 space-y-5"
-							>
+									{#if canManagePublic}
+										<div class="space-y-3">
+											<div class="flex items-center justify-between gap-3">
+												<div>
+													<p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+														{m.editor_document_settings_public_label()}
+													</p>
+													<p class="text-xs text-zinc-500 dark:text-zinc-400">
+														{m.editor_document_settings_public_hint()}
+													</p>
+												</div>
+												<div class="flex items-center gap-2">
+													<select
+														class="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
+														bind:value={draftPublicAccess}
+														disabled={isSavingPublicAccess}
+														onchange={(event) => void handlePublicAccessSelect(event)}
+													>
+														<option value="private">{m.editor_document_settings_public_option_private()}</option>
+														<option value="authenticated">{m.editor_document_settings_public_option_authenticated()}</option>
+														<option value="public">{m.editor_document_settings_public_option_public()}</option>
+													</select>
+												</div>
+											</div>
+											<div class="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+												<input
+													type="text"
+													readonly
+													value={resolvePublicAccessURL()}
+													class="min-w-0 flex-1 bg-transparent text-xs text-zinc-700 outline-none dark:text-zinc-300"
+												/>
+												<button
+													type="button"
+													class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+													onclick={() => void copyPublicURL()}
+													aria-label={m.editor_document_settings_public_copy_action()}
+													title={m.editor_document_settings_public_copy_action()}
+												>
+													{#if copiedPublicURL}
+														<Check class="h-3.5 w-3.5" />
+													{:else}
+														<Copy class="h-3.5 w-3.5" />
+													{/if}
+												</button>
+											</div>
+										</div>
+									{/if}
+								</section>
+							{/if}
+
+							{#if canManageMembers}
+								<section
+									bind:this={permissionsSection}
+									data-section-id="permissions"
+									class="scroll-mt-6 space-y-5"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_permissions_title()}
@@ -360,18 +568,19 @@
 									</p>
 								</div>
 
-								<div class="rounded-xl bg-zinc-50/80 p-4 dark:bg-zinc-900/70">
-									<div class="flex min-h-28 items-center justify-center text-sm text-zinc-400 dark:text-zinc-500">
-										{m.editor_document_settings_permissions_placeholder()}
-									</div>
-								</div>
-							</section>
+									<DocumentCollaborationSettings
+										{documentId}
+										enabled={open && activeSection === 'permissions'}
+									/>
+								</section>
+							{/if}
 
-							<section
-								bind:this={imageSection}
-								data-section-id="image"
-								class="scroll-mt-6 space-y-5"
-							>
+							{#if canEditImageSettings}
+								<section
+									bind:this={imageSection}
+									data-section-id="image"
+									class="scroll-mt-6 space-y-5"
+								>
 								<div>
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{m.editor_document_settings_image_title()}
@@ -411,7 +620,8 @@
 										</p>
 									</div>
 								</div>
-							</section>
+								</section>
+							{/if}
 						</div>
 					</section>
 				</div>

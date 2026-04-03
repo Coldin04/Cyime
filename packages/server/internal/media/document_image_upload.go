@@ -72,6 +72,7 @@ type UploadDocumentImageRequest struct {
 	DocumentID uuid.UUID
 	UserID     uuid.UUID
 	FileHeader *multipart.FileHeader
+	TargetID   string
 }
 
 type UploadDocumentImageResult struct {
@@ -114,7 +115,7 @@ type genericImageBedUploader struct {
 
 func (u *genericImageBedUploader) Upload(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 
 	variables, err := buildProviderVariables(u.provider, u.config)
@@ -466,45 +467,52 @@ func parseProviderConfigJSON(raw *string) map[string]string {
 		}
 		return values
 	}
-
-	var legacy map[string]any
-	if err := json.Unmarshal([]byte(*raw), &legacy); err != nil {
-		return map[string]string{}
-	}
-
-	values := map[string]string{}
-	if storage, exists := legacy["storageId"]; exists {
-		stringified := strings.TrimSpace(stringifyAny(storage))
-		stringified = strings.TrimSuffix(stringified, ".0")
-		if stringified != "" {
-			values["storageId"] = stringified
-		}
-	}
-	if strategy, exists := legacy["strategyId"]; exists {
-		stringified := strings.TrimSpace(stringifyAny(strategy))
-		if stringified != "" {
-			values["strategyId"] = stringified
-		}
-	}
-	return values
+	// Legacy flat config payload is intentionally unsupported.
+	return map[string]string{}
 }
 
 func getDocumentImageUploadTargetID(userID, documentID uuid.UUID) (string, error) {
 	document, err := acl.CanEditDocument(database.DB, userID, documentID)
 	if err != nil {
+		return "", ErrDocumentNotAccessible
+	}
+
+	targetID := strings.TrimSpace(document.PreferredImageTargetID)
+
+	var preference models.DocumentImageTargetPreference
+	if err := database.DB.
+		Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", documentID, userID).
+		First(&preference).Error; err == nil {
+		targetID = strings.TrimSpace(preference.TargetID)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
 	}
 
-	switch strings.TrimSpace(document.PreferredImageTargetID) {
-	case "":
+	switch targetID {
+	case "", documentImageTargetManagedR2:
 		return documentImageTargetManagedR2, nil
-	case documentImageTargetManagedR2:
-		return document.PreferredImageTargetID, nil
 	default:
-		if _, err := uuid.Parse(strings.TrimSpace(document.PreferredImageTargetID)); err != nil {
-			return "", newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
+		configID, err := uuid.Parse(targetID)
+		if err != nil {
+			return documentImageTargetManagedR2, nil
 		}
-		return strings.TrimSpace(document.PreferredImageTargetID), nil
+		if _, err := getUserImageBedConfig(userID, configID); err != nil {
+			return documentImageTargetManagedR2, nil
+		}
+		return targetID, nil
+	}
+}
+
+func normalizeDocumentImageTargetID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "", documentImageTargetManagedR2:
+		return documentImageTargetManagedR2
+	default:
+		if _, err := uuid.Parse(trimmed); err == nil {
+			return trimmed
+		}
+		return ""
 	}
 }
 
@@ -561,12 +569,19 @@ func stringPtrValue(value *string) string {
 
 func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*UploadDocumentImageResult, error) {
 	if req.FileHeader == nil {
-		return nil, errors.New("file is required")
+		return nil, ErrFileRequired
 	}
 
-	targetID, err := getDocumentImageUploadTargetID(req.UserID, req.DocumentID)
-	if err != nil {
-		return nil, err
+	targetID := normalizeDocumentImageTargetID(req.TargetID)
+	if targetID == "" {
+		return nil, newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
+	}
+	if strings.TrimSpace(req.TargetID) == "" {
+		var err error
+		targetID, err = getDocumentImageUploadTargetID(req.UserID, req.DocumentID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	uploader, err := newDocumentImageUploader(req.UserID, targetID)

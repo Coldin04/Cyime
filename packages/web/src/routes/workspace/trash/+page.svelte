@@ -8,9 +8,9 @@
 	import Folder from '~icons/ph/folder';
 	import File from '~icons/ph/file';
 	import FolderListItemSkeleton from '$lib/components/workspace/FolderListItemSkeleton.svelte';
-	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { toast } from 'svelte-sonner';
+	import CaretLeft from '~icons/ph/caret-left';
 	import ClockClockwise from '~icons/ph/clock-clockwise';
 	import TrashSimple from '~icons/ph/trash-simple';
 	import * as m from '$paraglide/messages';
@@ -88,24 +88,35 @@ async function confirmEmptyTrash() {
   <title>{m.page_title_trash()}</title>
 </svelte:head>
 
-<div>
-	<GreetingHeader mode="trash" />
-
-	<div class="flex items-center justify-between">
-		<div>
-			<h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{m.trash_title()}</h1>
-			<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-				{m.trash_description()}
-			</p>
-		</div>
-		<button
-			onclick={handleEmptyTrash}
-			disabled={items.length === 0}
-			class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+<div class="space-y-6">
+	<header class="space-y-3">
+		<a
+			href="/workspace"
+			class="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 		>
-			<span>{m.trash_empty_button()}</span>
-		</button>
-	</div>
+			<CaretLeft class="h-4 w-4" />
+			<span>{m.topbar_back_to_workspace()}</span>
+		</a>
+
+		<div class="flex items-start justify-between gap-4">
+			<div class="flex min-w-0 items-start gap-3">
+				<div class="grid h-10 w-10 shrink-0 place-content-center rounded-xl bg-red-50 text-red-500 dark:bg-red-950/40 dark:text-red-300">
+					<TrashSimple class="h-5 w-5" />
+				</div>
+				<div class="min-w-0">
+					<h1 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.trash_title()}</h1>
+					<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{m.trash_description()}</p>
+				</div>
+			</div>
+			<button
+				onclick={handleEmptyTrash}
+				disabled={items.length === 0}
+				class="inline-flex h-10 items-center gap-2 rounded-lg bg-red-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+			>
+				<span>{m.trash_empty_button()}</span>
+			</button>
+		</div>
+	</header>
 
 	<div class="my-6 border-t border-zinc-200 dark:border-zinc-700">
 		{#if isLoading}
