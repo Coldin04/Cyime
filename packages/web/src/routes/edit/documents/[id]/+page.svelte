@@ -39,6 +39,7 @@
 		getDocumentImageTargetOptions
 	} from '$lib/components/editor/documentImageTargets';
 	import {
+		buildExportAssetFilename,
 		collectImageNodes,
 		collectManagedImages,
 		cloneContentJson,
@@ -189,21 +190,6 @@
 		return trimmed === '' ? 'Untitled Export' : `${trimmed} (Export)`;
 	}
 
-	function buildExportFileName(assetId: string, mimeType: string, fallbackLabel?: string | null): string {
-		const rawLabel = (fallbackLabel ?? '').trim() || `asset-${assetId}`;
-		const safeLabel = rawLabel.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
-		const extension = mimeType === 'image/png'
-			? 'png'
-			: mimeType === 'image/jpeg'
-				? 'jpg'
-				: mimeType === 'image/webp'
-					? 'webp'
-					: mimeType === 'image/gif'
-						? 'gif'
-						: 'bin';
-		return `${safeLabel || `asset-${assetId}`}.${extension}`;
-	}
-
 	async function performExport(action: ExportAction, exportContent: JSONContent) {
 		try {
 			if (action === 'download-pdf') {
@@ -230,7 +216,7 @@
 				return;
 			}
 			if (action === 'copy-bbcode' && result === 'copied') {
-				toast.success('BBCode 已复制');
+				toast.success(m.editor_export_bbcode_copied());
 			}
 		} catch (error) {
 			console.error('[Export] Failed to export document:', error);
@@ -239,7 +225,7 @@
 				return;
 			}
 			if (error instanceof Error && error.message === 'copy_bbcode_failed') {
-				toast.error('复制 BBCode 失败');
+				toast.error(m.editor_export_bbcode_copy_failed());
 				return;
 			}
 			toast.error(m.editor_export_failed());
@@ -251,12 +237,13 @@
 			throw new Error('Missing document id');
 		}
 
-		const managedImages = collectManagedImages(content);
+		const contentSnapshot = cloneContentJson(content);
+		const managedImages = collectManagedImages(contentSnapshot);
 		if (managedImages.length === 0) {
-			return cloneContentJson(content);
+			return contentSnapshot;
 		}
 
-		toast.loading(`正在准备导出图片（0/${managedImages.length}）...`, {
+		toast.loading(m.editor_export_prepare_images({ current: 0, total: managedImages.length }), {
 			id: 'export-private-images',
 			duration: Infinity
 		});
@@ -266,7 +253,7 @@
 
 			for (let index = 0; index < managedImages.length; index += 1) {
 				const item = managedImages[index];
-				toast.loading(`正在准备导出图片（${index + 1}/${managedImages.length}）...`, {
+				toast.loading(m.editor_export_prepare_images({ current: index + 1, total: managedImages.length }), {
 					id: 'export-private-images',
 					duration: Infinity
 				});
@@ -282,14 +269,14 @@
 				const mimeType = blob.type || 'application/octet-stream';
 				const file = new File(
 					[blob],
-					buildExportFileName(item.assetId, mimeType, item.title ?? item.alt),
+					buildExportAssetFilename(item.assetId, mimeType, item.title ?? item.alt),
 					{ type: mimeType }
 				);
 				const uploaded = await pasteDocumentImage(documentId, file, { targetId });
 				publicURLByAssetID.set(item.assetId, uploaded.url);
 			}
 
-			return replaceManagedImagesWithPublicURLs(content, publicURLByAssetID);
+			return replaceManagedImagesWithPublicURLs(contentSnapshot, publicURLByAssetID);
 		} finally {
 			toast.dismiss('export-private-images');
 		}
@@ -372,7 +359,7 @@
 		}
 
 		if (exportImageTargetOptions.length === 0) {
-			toast.error('文档包含私有图片，请先配置并启用图床后再导出。');
+			toast.error(m.editor_export_private_images_config_required());
 			return;
 		}
 

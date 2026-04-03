@@ -880,7 +880,7 @@
 									? chain?.insertBlockMath({ latex: pastedMath.latex }).run()
 									: chain?.insertInlineMath({ latex: pastedMath.latex }).run();
 							if (!succeeded) {
-								toast.error('公式插入失败');
+								toast.error(m.editor_math_insert_failed());
 							}
 							return true;
 						}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { clickOutside } from '$lib/actions/clickOutside';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
+	import * as m from '$paraglide/messages';
 
 	let {
 		open = false,
@@ -42,7 +43,7 @@
 		<div
 			role="dialog"
 			aria-modal="true"
-			aria-label="导出私有图片处理"
+			aria-label={m.editor_export_private_images_dialog_label()}
 			tabindex="-1"
 			class="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
 			use:clickOutside={{
@@ -51,14 +52,14 @@
 			}}
 		>
 			<h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-				私有图片无法直接导出
+				{m.editor_export_private_images_dialog_title()}
 			</h3>
 			<p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-				当前文档包含 {imageCount} 张私有图片。Markdown 和 HTML 导出无法稳定访问这些签名链接，请先上传到图床再继续导出。
+				{m.editor_export_private_images_dialog_message({ count: imageCount })}
 			</p>
 
 			<label class="mt-4 flex flex-col gap-2">
-				<span class="text-sm font-medium text-zinc-800 dark:text-zinc-200">导出时上传到</span>
+				<span class="text-sm font-medium text-zinc-800 dark:text-zinc-200">{m.editor_export_private_images_dialog_target()}</span>
 				<select
 					class="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
 					value={selectedTargetId}
@@ -72,7 +73,7 @@
 			</label>
 
 			<p class="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-				“另存为”会复制一份新文档并替换图片链接；“替换”会直接修改当前文档内容和图片上传偏好，然后继续导出。
+				{m.editor_export_private_images_dialog_help()}
 			</p>
 
 			<div class="mt-5 flex justify-end gap-2">
@@ -82,7 +83,7 @@
 					disabled={busy}
 					onclick={() => onCancel?.()}
 				>
-					取消
+					{m.common_cancel()}
 				</button>
 				<button
 					type="button"
@@ -90,7 +91,7 @@
 					disabled={busy}
 					onclick={() => onSaveAs?.()}
 				>
-					{busy ? '处理中...' : '另存为'}
+					{busy ? m.common_processing() : m.common_save_as()}
 				</button>
 				<button
 					type="button"
@@ -98,7 +99,7 @@
 					disabled={busy}
 					onclick={() => onReplace?.()}
 				>
-					{busy ? '处理中...' : '替换'}
+					{busy ? m.common_processing() : m.common_replace()}
 				</button>
 			</div>
 		</div>

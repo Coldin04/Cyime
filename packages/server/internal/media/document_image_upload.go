@@ -576,7 +576,7 @@ func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*
 	if targetID == "" {
 		return nil, newDocumentImageError(DocumentImageErrUnsupportedTarget, "document image target is not supported")
 	}
-	if req.TargetID == "" {
+	if strings.TrimSpace(req.TargetID) == "" {
 		var err error
 		targetID, err = getDocumentImageUploadTargetID(req.UserID, req.DocumentID)
 		if err != nil {

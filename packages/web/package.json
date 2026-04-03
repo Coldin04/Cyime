@@ -49,6 +49,7 @@
 		"@tiptap/extension-table-header": "^3.20.4",
 		"@tiptap/extension-table-row": "^3.20.4",
 		"@tiptap/starter-kit": "^3.20.4",
+		"@tiptap/y-tiptap": "^3.0.2",
 		"katex": "^0.16.44",
 		"marked": "^17.0.4",
 		"svelte-easy-crop": "^5.0.0",

@@ -106,6 +106,25 @@ export function buildExportFilename(title: string, extension: 'html' | 'md'): st
 	return `${safeTitle || 'cyimewrite-export'}.${extension}`;
 }
 
+export function buildExportAssetFilename(
+	assetId: string,
+	mimeType: string,
+	fallbackLabel?: string | null
+): string {
+	const rawLabel = (fallbackLabel ?? '').trim() || `asset-${assetId}`;
+	const safeLabel = rawLabel.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+	const extension = mimeType === 'image/png'
+		? 'png'
+		: mimeType === 'image/jpeg'
+			? 'jpg'
+			: mimeType === 'image/webp'
+				? 'webp'
+				: mimeType === 'image/gif'
+					? 'gif'
+					: 'bin';
+	return `${safeLabel || `asset-${assetId}`}.${extension}`;
+}
+
 export async function runExportAction(action: ExportAction, options: {
 	title: string;
 	contentJson: JSONContent;
