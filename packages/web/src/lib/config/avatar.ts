@@ -11,4 +11,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 }
 
 export const avatarMaxBytes = parsePositiveInt(PUBLIC_AVATAR_MAX_BYTES, DEFAULT_AVATAR_MAX_BYTES);
-export const avatarOutputSize = parsePositiveInt(PUBLIC_AVATAR_OUTPUT_SIZE, DEFAULT_AVATAR_OUTPUT_SIZE);
+export const avatarOutputSize = parsePositiveInt(
+	PUBLIC_AVATAR_OUTPUT_SIZE,
+	DEFAULT_AVATAR_OUTPUT_SIZE
+);
