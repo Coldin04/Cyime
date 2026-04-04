@@ -8,7 +8,7 @@
 	},
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"build": "node ./scripts/build-target.mjs",
 		"build:cloudflare": "DEPLOY_TARGET=cloudflare vite build",
 		"build:edgeone": "DEPLOY_TARGET=edgeone vite build",
 		"preview": "vite preview",

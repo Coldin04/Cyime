@@ -7,25 +7,50 @@
 - 仓库根目录：`/`
 - 前端项目目录：`packages/web`
 - Node 版本：`20`
-- 构建期公开环境变量：`PUBLIC_API_BASE_URL`
-- 可选公开环境变量：`PUBLIC_AVATAR_MAX_BYTES`、`PUBLIC_AVATAR_OUTPUT_SIZE`
+- Pages / EdgeOne 部署时都建议先保存配置，再重新触发一次完整部署
+
+## 环境变量约定
+
+当前 `web` 端统一使用运行时公开变量：
+
+- `PUBLIC_API_BASE_URL`
+- `PUBLIC_AVATAR_MAX_BYTES`
+- `PUBLIC_AVATAR_OUTPUT_SIZE`
+
+这些变量用于 SSR 运行时与浏览器端公开配置读取，不要求写进仓库，也不要求用户修改 `wrangler.toml`。
 
 ## Cloudflare Pages
 
-- Framework preset：`SvelteKit`
 - Root directory：`packages/web`
-- Build command：`pnpm install --frozen-lockfile && pnpm run build:cloudflare`
+- Build command：`pnpm install --frozen-lockfile && pnpm run build`
 - Build output directory：`.svelte-kit/cloudflare`
 - 仓库内已提供 `packages/web/wrangler.toml`，默认包含：
   - `name = "cyimewrite-web"`
   - `pages_build_output_dir = ".svelte-kit/cloudflare"`
+  - `compatibility_date = "2026-04-04"`
   - `compatibility_flags = ["nodejs_compat"]`
 
-推荐同时配置：
+### Cloudflare 操作步骤
+
+1. 选择仓库后，手动填写 `Root directory = packages/web`
+2. 手动填写 `Build command = pnpm install --frozen-lockfile && pnpm run build`
+3. `Build output directory` 填 `.svelte-kit/cloudflare`
+4. 在项目环境变量里填写：
 
 - `PUBLIC_API_BASE_URL=https://你的后端域名`
 - `PUBLIC_AVATAR_MAX_BYTES=2097152`
 - `PUBLIC_AVATAR_OUTPUT_SIZE=512`
+
+5. 如果 Dashboard 提示当前项目由 `wrangler.toml` 管理，普通变量不可直接编辑：
+   - 可以将上述变量以相同名字作为加密变量填写
+   - 对当前场景也能正常工作，因为这些值本身就是前端公开配置
+6. 保存后重新部署
+
+### Cloudflare 说明
+
+- `pnpm run build` 会自动识别 `CF_PAGES=1`，并切到 Cloudflare 适配构建
+- `wrangler.toml` 只保留固定兼容配置，不存放每个用户自己的后端域名
+- 如果修改了环境变量，请重新触发部署，不要只依赖历史部署缓存
 
 ## EdgeOne Pages
 
@@ -34,17 +59,26 @@
 - Build command：`pnpm run build:edgeone`
 - Output directory：`.edgeone/output`
 
-推荐同时配置：
+### EdgeOne 操作步骤
+
+1. 选择仓库后，手动填写 `Root directory = packages/web`
+2. 安装命令填写 `pnpm install --frozen-lockfile`
+3. 构建命令填写 `pnpm run build:edgeone`
+4. 输出目录填写 `.edgeone/output`
+5. 在环境变量里填写：
 
 - `PUBLIC_API_BASE_URL=https://你的后端域名`
 - `PUBLIC_AVATAR_MAX_BYTES=2097152`
 - `PUBLIC_AVATAR_OUTPUT_SIZE=512`
+
+6. 保存后重新部署
 
 ## 本地验证
 
 在 `packages/web` 目录下执行：
 
 ```bash
+pnpm run build
 pnpm run build:cloudflare
 pnpm run build:edgeone
 ```

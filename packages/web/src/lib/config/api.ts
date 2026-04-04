@@ -1,6 +1,6 @@
-import { PUBLIC_API_BASE_URL } from '$env/static/public';
+import { env } from '$env/dynamic/public';
 
-const rawApiBaseUrl = (PUBLIC_API_BASE_URL ?? '').trim();
+const rawApiBaseUrl = (env.PUBLIC_API_BASE_URL ?? '').trim();
 
 if (!rawApiBaseUrl) {
 	throw new Error('PUBLIC_API_BASE_URL is required');

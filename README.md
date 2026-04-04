@@ -34,12 +34,12 @@
 
 常用构建命令：
 
-- Cloudflare Pages：`pnpm install --frozen-lockfile && pnpm run build:cloudflare`
+- Cloudflare Pages：`pnpm install --frozen-lockfile && pnpm run build`
 - EdgeOne Pages：`pnpm run build:edgeone`
 
-Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提供 [packages/web/wrangler.toml](/home/coldin04/CyimeWrite/packages/web/wrangler.toml)，默认启用 `nodejs_compat`。
+Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提供 [packages/web/wrangler.toml](/home/coldin04/CyimeWrite/packages/web/wrangler.toml)，默认启用 `nodejs_compat`，并且 `pnpm run build` 会自动识别 `CF_PAGES=1` 切到 Cloudflare 构建。
 
-这些 `PUBLIC_*` 变量会在前端构建时注入，适合在 Pages / EdgeOne 的项目环境变量里配置。
+这些 `PUBLIC_*` 变量统一按运行时公开变量处理，适合在 Pages / EdgeOne 的项目环境变量里配置。
 
 更完整的平台配置说明请参阅 [Web 部署说明](docs/web_deployment.md)。
 
