@@ -4,13 +4,13 @@
 	"version": "0.0.1",
 	"type": "module",
 	"engines": {
-		"node": ">=20"
+		"node": ">=22.17.1"
 	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "node ./scripts/build-target.mjs",
-		"build:cloudflare": "DEPLOY_TARGET=cloudflare vite build",
-		"build:edgeone": "DEPLOY_TARGET=edgeone vite build",
+		"build:cloudflare": "node ./scripts/build-target.mjs cloudflare",
+		"build:edgeone": "node ./scripts/build-target.mjs edgeone",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

@@ -35,9 +35,10 @@
 常用构建命令：
 
 - Cloudflare Pages：`pnpm install --frozen-lockfile && pnpm run build`
+- EdgeOne Pages 安装：`pnpm install --frozen-lockfile --config.node-linker=hoisted`
 - EdgeOne Pages：`pnpm run build:edgeone`
 
-Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提供 [packages/web/wrangler.toml](/home/coldin04/CyimeWrite/packages/web/wrangler.toml)，默认启用 `nodejs_compat`，并且 `pnpm run build` 会自动识别 `CF_PAGES=1` 切到 Cloudflare 构建。
+Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提供 [packages/web/wrangler.toml](packages/web/wrangler.toml)，默认启用 `nodejs_compat`，并且 `pnpm run build` 会自动识别 `CF_PAGES=1` 切到 Cloudflare 构建。
 
 这些 `PUBLIC_*` 变量统一按运行时公开变量处理，适合在 Pages / EdgeOne 的项目环境变量里配置。
 
@@ -86,7 +87,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 
 1.  **环境准备**:
     -   确保您已安装 Go (1.22+)。
-    -   确保您已安装 Node.js (18+) 和 `pnpm`。
+    -   确保您已安装 Node.js (22.17.1+) 和 `pnpm`。
 
 2.  **启动后端服务**:
     ```bash
@@ -117,7 +118,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 
 ### 关键环境变量
 
-完整示例见根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)。下面只列当前最常用的配置项。
+完整示例见根目录 [`.env.example`](.env.example)。下面只列当前最常用的配置项。
 
 - 认证与会话
   - `JWT_SECRET_KEY`：JWT 与部分签名逻辑依赖的密钥，生产环境必须配置。

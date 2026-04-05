@@ -6,7 +6,7 @@
 
 - 仓库根目录：`/`
 - 前端项目目录：`packages/web`
-- Node 版本：`20`
+- Node 版本：`22`（建议固定为 `22.17.1`）
 - Pages / EdgeOne 部署时都建议先保存配置，再重新触发一次完整部署
 
 ## 环境变量约定
@@ -62,7 +62,7 @@
   - `installCommand = pnpm install --frozen-lockfile --config.node-linker=hoisted`
   - `buildCommand = pnpm run build:edgeone`
   - `outputDirectory = .edgeone/assets`
-  - `nodeVersion = 20.18.0`
+  - `nodeVersion = 22.17.1`
 
 ### EdgeOne 操作步骤
 
