@@ -57,14 +57,19 @@
 - Root directory：`packages/web`
 - Install command：`pnpm install --frozen-lockfile`
 - Build command：`pnpm run build:edgeone`
-- Output directory：`.edgeone/output`
+- Output directory：`.edgeone/assets`
+- 仓库内已提供 `packages/web/edgeone.json`，默认固定：
+  - `installCommand = pnpm install --frozen-lockfile`
+  - `buildCommand = pnpm run build:edgeone`
+  - `outputDirectory = .edgeone/assets`
+  - `nodeVersion = 20.18.0`
 
 ### EdgeOne 操作步骤
 
 1. 选择仓库后，手动填写 `Root directory = packages/web`
-2. 安装命令填写 `pnpm install --frozen-lockfile`
-3. 构建命令填写 `pnpm run build:edgeone`
-4. 输出目录填写 `.edgeone/output`
+2. 如果控制台未自动读取 `edgeone.json`，安装命令填写 `pnpm install --frozen-lockfile`
+3. 如果控制台未自动读取 `edgeone.json`，构建命令填写 `pnpm run build:edgeone`
+4. 如果控制台未自动读取 `edgeone.json`，输出目录填写 `.edgeone/assets`
 5. 在环境变量里填写：
 
 - `PUBLIC_API_BASE_URL=https://你的后端域名`
