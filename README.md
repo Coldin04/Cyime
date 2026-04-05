@@ -5,6 +5,52 @@
 [![deepwiki](https://img.shields.io/badge/Ask_DeepWiki-_.svg?style=for-the-badge&color=00b0aa&labelColor=000000&logoColor=ffffff)](https://deepwiki.com/Coldin04/CyimeWrite)
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=for-the-badge&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/Coldin04/CyimeWrite)
 
+---
+
+## 如何部署
+
+当前推荐的部署方式是前后端分离：
+
+- `packages/web` 单独部署到 Cloudflare Pages 或 EdgeOne Pages，保留 SvelteKit SSR。
+- `packages/server` 与 `packages/realtime` 独立部署，适合后续统一放进 Docker Compose。
+
+### Web 部署
+
+当前已支持以下前端 SSR 目标：
+
+- Cloudflare Pages
+- EdgeOne Pages
+
+前端部署时只需要导入当前仓库，并将项目根目录设置为 `packages/web`。
+
+最小必填环境变量：
+
+- `PUBLIC_API_BASE_URL=https://你的后端域名`
+
+可选公开环境变量：
+
+- `PUBLIC_AVATAR_MAX_BYTES=2097152`
+- `PUBLIC_AVATAR_OUTPUT_SIZE=512`
+
+常用构建命令：
+
+- Cloudflare Pages：`pnpm install --frozen-lockfile && pnpm run build`
+- EdgeOne Pages 安装：`pnpm install --frozen-lockfile --config.node-linker=hoisted`
+- EdgeOne Pages：`pnpm run build:edgeone`
+
+Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提供 [packages/web/wrangler.toml](packages/web/wrangler.toml)，默认启用 `nodejs_compat`，并且 `pnpm run build` 会自动识别 `CF_PAGES=1` 切到 Cloudflare 构建。
+
+这些 `PUBLIC_*` 变量统一按运行时公开变量处理，适合在 Pages / EdgeOne 的项目环境变量里配置。
+
+更完整的平台配置说明请参阅 [Web 部署说明](docs/web_deployment.md)。
+
+### Server 与 Realtime
+
+- `packages/server` 是 Go API 服务。
+- `packages/realtime` 是独立的实时协作服务。
+- 当前建议两者保持独立部署，避免把 WebSocket 与前端平台运行时耦合在一起。
+- 后续可以统一收敛到 Docker Compose 做一键启动。
+
 
 ## 仓库说明
 
@@ -41,7 +87,7 @@
 
 1.  **环境准备**:
     -   确保您已安装 Go (1.22+)。
-    -   确保您已安装 Node.js (18+) 和 `pnpm`。
+    -   确保您已安装 Node.js (20+) 和 `pnpm`，建议使用 `22+`。
 
 2.  **启动后端服务**:
     ```bash
@@ -72,7 +118,7 @@
 
 ### 关键环境变量
 
-完整示例见根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)。下面只列当前最常用的配置项。
+完整示例见根目录 [`.env.example`](.env.example)。下面只列当前最常用的配置项。
 
 - 认证与会话
   - `JWT_SECRET_KEY`：JWT 与部分签名逻辑依赖的密钥，生产环境必须配置。

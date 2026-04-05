@@ -50,3 +50,5 @@ AGENT.md
 GEMINI.md
 .gemini/
 .geminiignore
+.tools/
+.wrangler/
