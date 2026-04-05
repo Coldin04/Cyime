@@ -1,5 +1,5 @@
 {
-	"installCommand": "pnpm install --frozen-lockfile",
+	"installCommand": "pnpm install --frozen-lockfile --config.node-linker=hoisted",
 	"buildCommand": "pnpm run build:edgeone",
 	"outputDirectory": ".edgeone/assets",
 	"nodeVersion": "22.17.1"

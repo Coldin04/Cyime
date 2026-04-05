@@ -55,11 +55,11 @@
 ## EdgeOne Pages
 
 - Root directory：`packages/web`
-- Install command：`pnpm install --frozen-lockfile`
+- Install command：`pnpm install --frozen-lockfile --config.node-linker=hoisted`
 - Build command：`pnpm run build:edgeone`
 - Output directory：`.edgeone/assets`
 - 仓库内已提供 `packages/web/edgeone.json`，默认固定：
-  - `installCommand = pnpm install --frozen-lockfile`
+  - `installCommand = pnpm install --frozen-lockfile --config.node-linker=hoisted`
   - `buildCommand = pnpm run build:edgeone`
   - `outputDirectory = .edgeone/assets`
   - `nodeVersion = 20.18.0`
@@ -67,7 +67,7 @@
 ### EdgeOne 操作步骤
 
 1. 选择仓库后，手动填写 `Root directory = packages/web`
-2. 如果控制台未自动读取 `edgeone.json`，安装命令填写 `pnpm install --frozen-lockfile`
+2. 如果控制台未自动读取 `edgeone.json`，安装命令填写 `pnpm install --frozen-lockfile --config.node-linker=hoisted`
 3. 如果控制台未自动读取 `edgeone.json`，构建命令填写 `pnpm run build:edgeone`
 4. 如果控制台未自动读取 `edgeone.json`，输出目录填写 `.edgeone/assets`
 5. 在环境变量里填写：
@@ -77,6 +77,11 @@
 - `PUBLIC_AVATAR_OUTPUT_SIZE=512`
 
 6. 保存后重新部署
+
+### EdgeOne 说明
+
+- EdgeOne 的 SSR 函数运行时对 `pnpm` 默认依赖链接布局可能不够稳定，因此这里显式使用 `node-linker=hoisted`
+- 如果后续仍出现 `ERR_MODULE_NOT_FOUND`，优先检查控制台实际使用的安装命令是否与 `edgeone.json` 一致
 
 ## 本地验证
 
