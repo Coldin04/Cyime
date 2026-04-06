@@ -107,6 +107,14 @@
 
 	const documentId = $derived($page.params?.id);
 	const canOpenEditor = $derived(myRole !== 'viewer');
+	const headTitle = $derived(title.trim() || m.editor_document_settings_untitled());
+	const headDescription = $derived(
+		(manualExcerpt ?? '').replace(/\s+/g, ' ').trim() ||
+			(title.trim() !== ''
+				? m.meta_document_preview_with_title({ title: title.trim() })
+				: m.meta_document_preview_fallback())
+	);
+	const canonicalUrl = $derived($page.url.href);
 
 	async function loadViewDocument(nextDocumentId: string) {
 		const [details, data] = await Promise.all([
@@ -156,7 +164,15 @@
 </script>
 
 <svelte:head>
-	<title>{m.page_title_view_document({ title })}</title>
+	<title>{m.page_title_view_document({ title: headTitle })}</title>
+	<meta name="description" content={headDescription} />
+	<meta property="og:title" content={headTitle} />
+	<meta property="og:description" content={headDescription} />
+	<meta property="og:url" content={canonicalUrl} />
+	<meta property="og:type" content="article" />
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:title" content={headTitle} />
+	<meta name="twitter:description" content={headDescription} />
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">

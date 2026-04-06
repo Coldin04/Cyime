@@ -4,6 +4,12 @@
 
 <svelte:head>
   <title>{m.page_title_homepage()}</title>
+  <meta name="description" content={m.homepage_meta_description()} />
+  <meta name="keywords" content={m.homepage_meta_keywords()} />
+  <meta property="og:title" content={m.page_title_homepage()} />
+  <meta property="og:description" content={m.homepage_meta_description()} />
+  <meta name="twitter:title" content={m.page_title_homepage()} />
+  <meta name="twitter:description" content={m.homepage_meta_description()} />
 </svelte:head>
 
 <div
