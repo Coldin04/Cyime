@@ -39,46 +39,6 @@
 	</div>
 </div>
 
-<section class="bg-white px-6 py-14 dark:bg-slate-800 sm:px-8">
-	<div class="mx-auto max-w-5xl">
-		<div class="rounded-3xl border border-riptide-100 bg-riptide-50/70 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 sm:p-8">
-			<p class="text-xs font-semibold uppercase tracking-[0.24em] text-riptide-600 dark:text-riptide-300">
-				{m.homepage_intro_eyebrow()}
-			</p>
-			<h2 class="mt-3 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-				{m.homepage_intro_title()}
-			</h2>
-			<p class="mt-4 max-w-3xl text-sm leading-7 text-gray-600 dark:text-gray-300 sm:text-base">
-				{m.homepage_intro_description()}
-			</p>
-			<div class="mt-6 flex flex-wrap gap-3">
-				<span class="rounded-full bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm dark:bg-slate-800 dark:text-gray-200">{m.homepage_capability_sync()}</span>
-				<span class="rounded-full bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm dark:bg-slate-800 dark:text-gray-200">{m.homepage_capability_collab()}</span>
-				<span class="rounded-full bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm dark:bg-slate-800 dark:text-gray-200">{m.homepage_capability_share()}</span>
-				<span class="rounded-full bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm dark:bg-slate-800 dark:text-gray-200">{m.homepage_capability_assets()}</span>
-			</div>
-			<div class="mt-8 grid gap-4 md:grid-cols-2">
-				<div class="rounded-2xl bg-white px-5 py-4 shadow-sm dark:bg-slate-800">
-					<p class="text-xs font-medium uppercase tracking-wide text-gray-400">{m.homepage_attribute_product_label()}</p>
-					<p class="mt-2 text-sm font-medium text-gray-800 dark:text-gray-100">{m.homepage_attribute_product_value()}</p>
-				</div>
-				<div class="rounded-2xl bg-white px-5 py-4 shadow-sm dark:bg-slate-800">
-					<p class="text-xs font-medium uppercase tracking-wide text-gray-400">{m.homepage_attribute_editor_label()}</p>
-					<p class="mt-2 text-sm font-medium text-gray-800 dark:text-gray-100">{m.homepage_attribute_editor_value()}</p>
-				</div>
-				<div class="rounded-2xl bg-white px-5 py-4 shadow-sm dark:bg-slate-800">
-					<p class="text-xs font-medium uppercase tracking-wide text-gray-400">{m.homepage_attribute_collab_label()}</p>
-					<p class="mt-2 text-sm font-medium text-gray-800 dark:text-gray-100">{m.homepage_attribute_collab_value()}</p>
-				</div>
-				<div class="rounded-2xl bg-white px-5 py-4 shadow-sm dark:bg-slate-800">
-					<p class="text-xs font-medium uppercase tracking-wide text-gray-400">{m.homepage_attribute_sharing_label()}</p>
-					<p class="mt-2 text-sm font-medium text-gray-800 dark:text-gray-100">{m.homepage_attribute_sharing_value()}</p>
-				</div>
-			</div>
-		</div>
-	</div>
-</section>
-
 <!-- Features Section -->
 <div id="features" class="space-y-16 py-16 md:space-y-28 md:py-28">
 	<!-- Feature 1: Online Sync -->
