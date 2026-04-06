@@ -164,7 +164,7 @@
 </script>
 
 <svelte:head>
-	<title>{m.page_title_view_document({ title })}</title>
+	<title>{m.page_title_view_document({ title: headTitle })}</title>
 	<meta name="description" content={headDescription} />
 	<meta property="og:title" content={headTitle} />
 	<meta property="og:description" content={headDescription} />
