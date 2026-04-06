@@ -1,0 +1,30 @@
+{
+	"name": "CyimeWrite",
+	"short_name": "CyimeWrite",
+	"description": "CyimeWrite is a lightweight cloud writing workspace with online editing, real-time collaboration, public sharing, and multi-device access.",
+	"start_url": "/workspace",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#f0fdfa",
+	"theme_color": "#14b8a6",
+	"icons": [
+		{
+			"src": "/icons/icon-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/icon-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/icon-512-maskable.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}

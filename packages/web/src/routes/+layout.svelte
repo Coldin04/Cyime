@@ -28,6 +28,9 @@
 	<link rel="icon" href="{favicon}" />
 	<meta name="application-name" content={m.meta_site_name()} />
 	<meta name="apple-mobile-web-app-title" content={m.meta_project_short_name()} />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	<meta name="author" content={m.meta_project_author()} />
 	<meta name="keywords" content={m.meta_site_keywords()} />
 	<meta name="description" content={m.meta_site_description()} />
