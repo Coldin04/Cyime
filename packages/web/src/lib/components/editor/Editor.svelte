@@ -598,6 +598,8 @@
 		switch (apiError?.code) {
 			case 'DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE':
 				return m.editor_paste_only_support_image_files();
+			case 'DOCUMENT_IMAGE_FILE_TOO_LARGE':
+				return m.editor_image_file_too_large();
 			case 'DOCUMENT_IMAGE_PROVIDER_NOT_CONFIGURED':
 			case 'DOCUMENT_IMAGE_TARGET_NOT_SUPPORTED':
 				return m.common_unknown_error();
@@ -717,7 +719,16 @@
 		}
 	}
 
-	onMount(() => {
+	let editorCleanup: (() => void) | null = null;
+
+	function destroyEditor() {
+		editorCleanup?.();
+		editorCleanup = null;
+		editor?.destroy();
+		editor = null;
+	}
+
+	function createEditor() {
 		if (!editorElement) {
 			return;
 		}
@@ -807,7 +818,7 @@
 			.filter(Boolean)
 			.join(' ');
 
-		editor = new Editor({
+		const editorInstance = new Editor({
 			element: editorElement,
 			editable: !readOnly,
 			extensions,
@@ -924,17 +935,19 @@
 			}
 		});
 
+		editor = editorInstance;
+
 		const reconcileCollaborationContent = async () => {
-			if (!editor || !collaboration?.doc) {
+			if (editor !== editorInstance || !collaboration?.doc) {
 				return;
 			}
 
 			if (!hasSeededCollaborationContent) {
 				hasSeededCollaborationContent = true;
-				const currentDoc = normalizeDoc(editor.getJSON());
+				const currentDoc = normalizeDoc(editorInstance.getJSON());
 				if (!hasMeaningfulContent(currentDoc) && hasMeaningfulContent(content)) {
 					lastSyncedContent = serializeDoc(content);
-					editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
+					editorInstance.commands.setContent(toTiptapContent(content), { emitUpdate: false });
 				}
 			}
 
@@ -943,14 +956,14 @@
 			}
 
 			hasHydratedManagedImages = true;
-			const currentDoc = normalizeDoc(editor.getJSON());
+			const currentDoc = normalizeDoc(editorInstance.getJSON());
 			const hydrated = await hydrateManagedContent(currentDoc);
-			if (serializeDoc(hydrated) === serializeDoc(currentDoc)) {
+			if (editor !== editorInstance || serializeDoc(hydrated) === serializeDoc(currentDoc)) {
 				return;
 			}
 
 			lastSyncedContent = serializeDoc(hydrated);
-			editor.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
+			editorInstance.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
 		};
 
 		const handleSynced = ({ state }: { state: boolean }) => {
@@ -959,20 +972,61 @@
 			}
 		};
 
-		if (collaboration?.provider) {
-			collaboration.provider.on('synced', handleSynced);
-			if (collaboration.provider.synced) {
+		const provider = collaboration?.provider;
+		if (provider) {
+			provider.on('synced', handleSynced);
+			if (provider.synced) {
 				void reconcileCollaborationContent();
 			}
 		} else if (collaboration?.doc) {
 			void reconcileCollaborationContent();
 		}
 
-		return () => {
-			collaboration?.provider?.off('synced', handleSynced);
-			editor?.destroy();
-			editor = null;
+		editorCleanup = () => {
+			provider?.off('synced', handleSynced);
 		};
+	}
+
+	function getCollaborationKey() {
+		return collaboration?.doc ? `collab:${documentId}` : `local:${documentId}`;
+	}
+
+	onMount(() => {
+		previousCollaborationKey = getCollaborationKey();
+		createEditor();
+
+		return () => {
+			destroyEditor();
+		};
+	});
+
+	// Handle collaboration mode changes by recreating the editor
+	let previousCollaborationKey = '';
+
+	$effect(() => {
+		const currentKey = getCollaborationKey();
+		if (currentKey === previousCollaborationKey || !editorElement) {
+			previousCollaborationKey = currentKey;
+			return;
+		}
+
+		// Save current content before destroying the editor
+		if (editor) {
+			const currentContent = editor.getJSON();
+			if (serializeDoc(currentContent) !== lastSyncedContent) {
+				lastSyncedContent = serializeDoc(currentContent);
+				onContentChange?.(currentContent);
+			}
+		}
+
+		// Destroy old editor
+		destroyEditor();
+		hasSeededCollaborationContent = false;
+		hasHydratedManagedImages = false;
+		previousCollaborationKey = currentKey;
+
+		// Recreate editor with new collaboration state
+		createEditor();
 	});
 
 	$effect(() => {

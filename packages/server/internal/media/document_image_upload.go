@@ -29,7 +29,8 @@ const (
 	documentImageModeManagedAsset = "managed_asset"
 	documentImageModeExternalURL  = "external_url"
 
-	documentImageTargetManagedR2 = "managed-r2"
+	documentImageTargetManagedR2       = "managed-r2"
+	defaultDocumentImageMaxBytes int64 = 5 * 1024 * 1024
 )
 
 type DocumentImageErrorCode string
@@ -40,6 +41,7 @@ const (
 	DocumentImageErrProviderConfig     DocumentImageErrorCode = "provider_config_invalid"
 	DocumentImageErrProviderNotReady   DocumentImageErrorCode = "provider_not_configured"
 	DocumentImageErrProviderUploadFail DocumentImageErrorCode = "provider_upload_failed"
+	DocumentImageErrFileTooLarge       DocumentImageErrorCode = "file_too_large"
 )
 
 type DocumentImageError struct {
@@ -571,6 +573,13 @@ func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*
 	if req.FileHeader == nil {
 		return nil, ErrFileRequired
 	}
+	maxBytes := documentImageMaxBytes()
+	if req.FileHeader.Size > 0 && req.FileHeader.Size > maxBytes {
+		return nil, newDocumentImageError(
+			DocumentImageErrFileTooLarge,
+			fmt.Sprintf("document image file too large: max %d bytes", maxBytes),
+		)
+	}
 
 	targetID := normalizeDocumentImageTargetID(req.TargetID)
 	if targetID == "" {
@@ -590,4 +599,16 @@ func UploadDocumentImage(ctx context.Context, req UploadDocumentImageRequest) (*
 	}
 
 	return uploader.Upload(ctx, req)
+}
+
+func documentImageMaxBytes() int64 {
+	raw := strings.TrimSpace(os.Getenv("MEDIA_DOCUMENT_IMAGE_MAX_BYTES"))
+	if raw == "" {
+		return defaultDocumentImageMaxBytes
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed <= 0 {
+		return defaultDocumentImageMaxBytes
+	}
+	return parsed
 }

@@ -236,6 +236,7 @@
   "editor_image_insert_link_submit": "插入链接",
   "editor_image_insert_current_target": "当前默认上传目标：{target}",
   "editor_image_insert_upload_failed": "上传图片失败",
+  "editor_image_file_too_large": "图片过大",
   "editor_image_replace_success": "图片替换完成",
   "editor_image_replace_failed": "替换图片失败",
   "editor_topbar_image_target_settings": "文档设置",
