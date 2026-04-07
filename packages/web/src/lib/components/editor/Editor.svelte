@@ -112,7 +112,7 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
-	const LOCAL_CURSOR_COLOR = '#16a34a';
+	const LOCAL_CURSOR_COLOR = '#06b6d4';
 	const remoteCursorPalette = [
 		'#2563eb',
 		'#9333ea',
@@ -159,7 +159,7 @@
 		const isLocal = user.id === localUserId;
 		const effectiveColor = isLocal
 			? LOCAL_CURSOR_COLOR
-			: getRemoteCursorColor(user.id ?? user.name ?? 'remote-user');
+			: (user.color ?? getRemoteCursorColor(user.id ?? user.name ?? 'remote-user'));
 		cursor.style.setProperty('--user-color', effectiveColor);
 
 		const label = document.createElement('span');

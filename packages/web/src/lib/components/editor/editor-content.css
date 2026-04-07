@@ -12,6 +12,9 @@
 	--editor-table-head: rgb(244 244 245);
 	--editor-link: rgb(13 148 136);
 	--editor-selected-cell: rgb(13 148 136 / 0.12);
+	--editor-collab-local-caret: #06b6d4;
+	--editor-collab-selection-mix: 20%;
+	--editor-collab-selection-alpha: 24%;
 	color: var(--editor-text);
 	line-height: 2.1;
 	min-height: 100%;
@@ -32,7 +35,16 @@
 		--editor-table-head: rgb(39 39 42);
 		--editor-link: rgb(45 212 191);
 		--editor-selected-cell: rgb(45 212 191 / 0.18);
+		--editor-collab-local-caret: #67e8f9;
+		--editor-collab-selection-mix: 32%;
+		--editor-collab-selection-alpha: 18%;
 	}
+}
+
+.dark .tiptap {
+	--editor-collab-local-caret: #67e8f9;
+	--editor-collab-selection-mix: 32%;
+	--editor-collab-selection-alpha: 18%;
 }
 
 .tiptap:focus {
@@ -40,7 +52,7 @@
 }
 
 .tiptap.cw-collab-mode {
-	caret-color: #16a34a;
+	caret-color: var(--editor-collab-local-caret);
 }
 
 .tiptap p.is-editor-empty:first-child::before {
@@ -333,7 +345,19 @@
 }
 
 .tiptap .collaboration-cursor__selection {
-	background: color-mix(in srgb, var(--user-color) 28%, transparent);
+	background: color-mix(
+		in srgb,
+		var(--user-color) var(--editor-collab-selection-mix),
+		transparent
+	);
+}
+
+.dark .tiptap .collaboration-cursor__selection {
+	background: color-mix(
+		in srgb,
+		white var(--editor-collab-selection-alpha),
+		var(--user-color)
+	);
 }
 
 .tiptap .cw-cursor-label {
