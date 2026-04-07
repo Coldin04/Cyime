@@ -881,6 +881,8 @@
 					}
 					collaboration = null;
 					updateCollaborationIndicator();
+
+					await startCollaboration(documentId, 'presence');
 					console.log('[Load] Title loaded:', title);
 					isLoading = false;
 
@@ -889,7 +891,6 @@
 							presenceCount = await fetchCollaborationPresence(documentId);
 							updateCollaborationIndicator();
 							await connectPresenceSocket(documentId);
-							await startCollaboration(documentId, 'presence');
 						} catch (presenceError) {
 							console.error('[Collaboration] Failed to fetch presence:', presenceError);
 							presenceCount = 0;
