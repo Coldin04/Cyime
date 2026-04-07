@@ -112,7 +112,8 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
-	const LOCAL_CURSOR_COLOR = '#16a34a';
+	const LOCAL_CURSOR_COLOR_LIGHT = '#06b6d4';
+	const LOCAL_CURSOR_COLOR_DARK = '#67e8f9';
 	const remoteCursorPalette = [
 		'#2563eb',
 		'#9333ea',
@@ -134,6 +135,16 @@
 		return hash;
 	}
 
+	function getLocalCursorColor() {
+		if (typeof document === 'undefined') {
+			return LOCAL_CURSOR_COLOR_LIGHT;
+		}
+
+		return document.documentElement.classList.contains('dark')
+			? LOCAL_CURSOR_COLOR_DARK
+			: LOCAL_CURSOR_COLOR_LIGHT;
+	}
+
 	function getCollaborationUser() {
 		const authState = $auth;
 		const id = authState.user?.id ?? collaboration?.provider?.awareness?.clientID?.toString() ?? 'unknown';
@@ -141,7 +152,7 @@
 			authState.user?.displayName?.trim() ||
 			authState.user?.email?.trim() ||
 			`协作者 ${id.slice(0, 6)}`;
-		const color = LOCAL_CURSOR_COLOR;
+		const color = getLocalCursorColor();
 
 		return { id, name, color };
 	}
@@ -158,7 +169,7 @@
 		cursor.classList.add('collaboration-cursor__caret');
 		const isLocal = user.id === localUserId;
 		const effectiveColor = isLocal
-			? LOCAL_CURSOR_COLOR
+			? getLocalCursorColor()
 			: getRemoteCursorColor(user.id ?? user.name ?? 'remote-user');
 		cursor.style.setProperty('--user-color', effectiveColor);
 
