@@ -1028,24 +1028,22 @@
 						<p>{m.edit_document_editor_under_construction()}</p>
 					</div>
 				{:else}
-					{#key collaboration?.doc ? `collab:${documentId}` : `local:${documentId}`}
-						<Editor
-							documentId={documentId!}
-							{content}
-							currentImageTargetId={preferredImageTargetId}
-							currentImageTargetLabel={currentImageTargetLabel}
-							imageTargetOptions={availableImageTargets}
-							{collaboration}
-							{isUpdatingImageTarget}
-							{isSaving}
-							{hasUnsavedChanges}
-							onImageTargetChange={handleImageTargetChange}
-							hydrateManagedContent={refreshSignedImageSources}
-							onSave={saveContent}
-							onExportAction={handleExportAction}
-							onContentChange={handleContentChange}
-						/>
-					{/key}
+					<Editor
+						documentId={documentId!}
+						{content}
+						currentImageTargetId={preferredImageTargetId}
+						currentImageTargetLabel={currentImageTargetLabel}
+						imageTargetOptions={availableImageTargets}
+						{collaboration}
+						{isUpdatingImageTarget}
+						{isSaving}
+						{hasUnsavedChanges}
+						onImageTargetChange={handleImageTargetChange}
+						hydrateManagedContent={refreshSignedImageSources}
+						onSave={saveContent}
+						onExportAction={handleExportAction}
+						onContentChange={handleContentChange}
+					/>
 				{/if}
 			{:else}
 				<div class="prose dark:prose-invert">

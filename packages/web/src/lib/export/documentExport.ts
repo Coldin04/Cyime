@@ -256,6 +256,16 @@ export function exportMarkdown(contentJson: JSONContent): string {
 				lines.push('$$');
 				lines.push('');
 				return;
+			case 'image': {
+				const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+				if (src) {
+					const title = typeof node.attrs?.title === 'string' ? node.attrs.title : '';
+					const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : title;
+					lines.push(`![${escapeMarkdown(alt)}](${src})`);
+					lines.push('');
+				}
+				return;
+			}
 			default: {
 				const inline = renderInline(node.content ?? []);
 				if (inline.trim() !== '') {
@@ -418,6 +428,14 @@ export function exportBBCode(contentJson: JSONContent): string {
 			case 'table':
 				renderTable(node);
 				return;
+			case 'image': {
+				const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+				if (src) {
+					lines.push(`[img]${src}[/img]`);
+					lines.push('');
+				}
+				return;
+			}
 			default: {
 				const inline = renderInline(node.content ?? []);
 				if (inline.trim() !== '') {
