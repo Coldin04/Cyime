@@ -236,6 +236,7 @@
   "editor_image_insert_link_submit": "Insert Link",
   "editor_image_insert_current_target": "Default upload target: {target}",
   "editor_image_insert_upload_failed": "Image upload failed",
+  "editor_image_file_too_large": "Image is too large",
   "editor_image_replace_success": "Image replaced",
   "editor_image_replace_failed": "Failed to replace image",
   "editor_topbar_image_target_settings": "Document Settings",

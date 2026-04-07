@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
@@ -760,6 +761,9 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 			case DocumentImageErrProviderUploadFail:
 				status = fiber.StatusBadGateway
 				code = "DOCUMENT_IMAGE_PROVIDER_UPLOAD_FAILED"
+			case DocumentImageErrFileTooLarge:
+				status = fiber.StatusRequestEntityTooLarge
+				code = "DOCUMENT_IMAGE_FILE_TOO_LARGE"
 			}
 		case errors.Is(err, context.Canceled):
 			status = fiber.StatusRequestTimeout
@@ -767,6 +771,9 @@ func UploadDocumentImageHandler(c *fiber.Ctx) error {
 		case errors.As(err, &unsupported):
 			status = fiber.StatusBadRequest
 			code = "DOCUMENT_IMAGE_UNSUPPORTED_FILE_TYPE"
+		case strings.Contains(err.Error(), "request body too large") || strings.Contains(err.Error(), "413"):
+			status = fiber.StatusRequestEntityTooLarge
+			code = "DOCUMENT_IMAGE_FILE_TOO_LARGE"
 		}
 		return c.Status(status).JSON(ErrorResponse{
 			Error:   "Upload Failed",

@@ -60,6 +60,7 @@ export type UploadDocumentImageResponse = {
 
 export type EditorAPIError = Error & {
 	code?: string;
+	status?: number;
 };
 
 async function parseJSONResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
@@ -179,6 +180,13 @@ export async function pasteDocumentImage(
 	});
 
 	if (!response.ok) {
+		if (response.status === 413) {
+			const apiError = new Error('Image is too large') as EditorAPIError;
+			apiError.code = 'DOCUMENT_IMAGE_FILE_TOO_LARGE';
+			apiError.status = response.status;
+			throw apiError;
+		}
+
 		const error = await parseJSONResponse<{ message?: string; code?: string }>(
 			response,
 			'Failed to upload pasted image'
@@ -187,6 +195,7 @@ export async function pasteDocumentImage(
 			error.message || 'Failed to upload pasted image'
 		) as EditorAPIError;
 		apiError.code = error.code;
+		apiError.status = response.status;
 		throw apiError;
 	}
 

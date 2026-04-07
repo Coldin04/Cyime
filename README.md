@@ -32,6 +32,8 @@
 - `PUBLIC_AVATAR_MAX_BYTES=2097152`
 - `PUBLIC_AVATAR_OUTPUT_SIZE=512`
 
+服务端媒体相关环境变量里，文档图片上传上限可通过 `MEDIA_DOCUMENT_IMAGE_MAX_BYTES` 配置；当前默认值为 `5242880`（5MB）。
+
 常用构建命令：
 
 - Cloudflare Pages：`pnpm install --frozen-lockfile && pnpm run build`
