@@ -483,12 +483,58 @@ func (p *localStorageProvider) ProviderName() string {
 	return "local"
 }
 
-func (p *localStorageProvider) PutObject(_ context.Context, input PutObjectInput) (*PutObjectResult, error) {
-	if input.ObjectKey == "" {
-		return nil, errors.New("object key is required")
+// errLocalStorageEscape is returned when an object key would resolve outside
+// of rootDir. Exposed as a package-level sentinel so tests can assert on it.
+var errLocalStorageEscape = errors.New("local storage: object key escapes root directory")
+
+// safePath resolves objectKey relative to rootDir and guarantees the result
+// stays inside rootDir. It rejects:
+//   - empty keys and keys with embedded NUL bytes
+//   - absolute paths (any filesystem volume)
+//   - keys that walk above rootDir via "..", even after Clean normalization
+//
+// Today every caller generates object keys server-side (buildObjectKey,
+// buildThumbnailObjectKey, buildUserAvatarObjectKey) so the guard is purely
+// defense-in-depth — but it is cheap and catches future bugs where a caller
+// forwards user input unchecked.
+func (p *localStorageProvider) safePath(objectKey string) (string, error) {
+	if objectKey == "" {
+		return "", errors.New("object key is required")
+	}
+	if strings.ContainsRune(objectKey, 0) {
+		return "", errLocalStorageEscape
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(objectKey))
+	if filepath.IsAbs(cleaned) {
+		return "", errLocalStorageEscape
+	}
+	// Reject the pure "escape" forms early so we don't have to rely on the
+	// filepath.Rel heuristic below for the obvious cases.
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", errLocalStorageEscape
 	}
 
-	dstPath := filepath.Join(p.rootDir, filepath.FromSlash(input.ObjectKey))
+	rootAbs, err := filepath.Abs(p.rootDir)
+	if err != nil {
+		return "", err
+	}
+	joined := filepath.Join(rootAbs, cleaned)
+	rel, err := filepath.Rel(rootAbs, joined)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errLocalStorageEscape
+	}
+	return joined, nil
+}
+
+func (p *localStorageProvider) PutObject(_ context.Context, input PutObjectInput) (*PutObjectResult, error) {
+	dstPath, err := p.safePath(input.ObjectKey)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return nil, err
 	}
@@ -512,11 +558,11 @@ func (p *localStorageProvider) PutObject(_ context.Context, input PutObjectInput
 }
 
 func (p *localStorageProvider) GetObject(_ context.Context, objectKey string) (*GetObjectResult, error) {
-	if objectKey == "" {
-		return nil, errors.New("object key is required")
+	filePath, err := p.safePath(objectKey)
+	if err != nil {
+		return nil, err
 	}
 
-	filePath := filepath.Join(p.rootDir, filepath.FromSlash(objectKey))
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -535,11 +581,11 @@ func (p *localStorageProvider) GetObject(_ context.Context, objectKey string) (*
 }
 
 func (p *localStorageProvider) DeleteObject(_ context.Context, objectKey string) error {
-	if objectKey == "" {
-		return errors.New("object key is required")
+	filePath, err := p.safePath(objectKey)
+	if err != nil {
+		return err
 	}
 
-	filePath := filepath.Join(p.rootDir, filepath.FromSlash(objectKey))
 	if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

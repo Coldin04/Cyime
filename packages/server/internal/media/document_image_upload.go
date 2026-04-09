@@ -60,13 +60,40 @@ func newDocumentImageError(code DocumentImageErrorCode, message string) error {
 	}
 }
 
+// imageBedHTTPClient forwards user-configured image bed requests. Because
+// the target URL comes from tenant config (and may be edited by any user
+// with image bed access) the client MUST be hardened against SSRF:
+//
+//  1. DialContext uses safeDialContext, which resolves the hostname and
+//     refuses to connect to loopback / private / link-local / cloud
+//     metadata IPs. Dialing is then performed by literal IP to prevent
+//     DNS-rebinding bypass.
+//  2. CheckRedirect caps the redirect chain and re-applies the scheme
+//     allowlist so a public entrypoint cannot bounce us into an internal
+//     URL. The DialContext guard is enough on its own, but capping keeps
+//     request budgets sane and makes error messages more actionable.
 var imageBedHTTPClient = &http.Client{
 	Timeout: 30 * time.Second,
 	Transport: &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		// Indirect through the package-level imageBedDialContext variable so
+		// tests can install a loopback-friendly dialer. Production still
+		// runs safeDialContext — see ssrf_guard.go.
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return imageBedDialContext(ctx, network, addr)
+		},
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return fmt.Errorf("too many redirects (%d)", len(via))
+		}
+		scheme := strings.ToLower(req.URL.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("redirect to unsupported scheme %q blocked", scheme)
+		}
+		return nil
 	},
 }
 
