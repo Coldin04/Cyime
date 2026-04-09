@@ -201,6 +201,11 @@ func (dbd *DocumentBody) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 // DocumentBody stores current canonical editor content for a document.
+//
+// YjsVersion is an optimistic-concurrency token bumped on every successful
+// PUT /api/v1/realtime/documents/:id/state. Writers must echo the version
+// they last observed; mismatches are rejected as 409 Conflict so a stale
+// or malicious client cannot blindly overwrite a fresher CRDT state.
 type DocumentBody struct {
 	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
 	DocumentID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
@@ -209,6 +214,7 @@ type DocumentBody struct {
 	ContentVersion int64          `gorm:"not null;default:1"`
 	YjsState       string         `gorm:"type:text"`
 	YjsStateVector string         `gorm:"type:text"`
+	YjsVersion     int64          `gorm:"not null;default:1"`
 	UpdatedBy      uuid.UUID      `gorm:"not null"`
 	CreatedAt      time.Time      `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time      `gorm:"autoUpdateTime"`

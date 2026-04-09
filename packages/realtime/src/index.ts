@@ -38,6 +38,43 @@ interface RealtimeContext {
 	documentId: string;
 	acl: UserACL;
 	socketId?: string;
+	// yjsVersion is the optimistic-concurrency token for this document; the
+	// realtime server tracks the version it last persisted and echoes it on
+	// the next save so the Go API can reject stale or racing writes.
+	yjsVersion: number;
+}
+
+// ACL re-validation cache. We can't trust the ACL captured at connect time —
+// the document owner may revoke access mid-session. A 30s TTL keeps the cost
+// down (one fetch per document per 30s per user) while still bounding how
+// long a revoked user can keep editing.
+const ACL_CACHE_TTL_MS = 30_000;
+const aclCache = new Map<string, { acl: UserACL; expiresAt: number }>();
+
+function aclCacheKey(documentId: string, userId: string): string {
+	return `${userId}:${documentId}`;
+}
+
+async function getUserACLFresh(
+	documentId: string,
+	userId: string,
+	token: string
+): Promise<UserACL | null> {
+	const key = aclCacheKey(documentId, userId);
+	const cached = aclCache.get(key);
+	const now = Date.now();
+	if (cached && cached.expiresAt > now) {
+		return cached.acl;
+	}
+	const acl = await getUserACL(documentId, token);
+	if (acl) {
+		aclCache.set(key, { acl, expiresAt: now + ACL_CACHE_TTL_MS });
+	}
+	return acl;
+}
+
+function invalidateACLCache(documentId: string, userId: string): void {
+	aclCache.delete(aclCacheKey(documentId, userId));
 }
 
 const collaborationSockets = new Map<string, Set<string>>();
@@ -84,7 +121,7 @@ async function getUserACL(documentId: string, token: string): Promise<UserACL | 
 async function loadYjsState(
 	documentId: string,
 	token: string
-): Promise<{ yjsState: string; yjsStateVector: string }> {
+): Promise<{ yjsState: string; yjsStateVector: string; yjsVersion: number }> {
 	try {
 		const response = await axios.get(`${GO_API_URL}/realtime/documents/${documentId}/state`, {
 			headers: {
@@ -92,10 +129,34 @@ async function loadYjsState(
 			},
 			timeout: 5000
 		});
-		return response.data;
+		const data = response.data ?? {};
+		return {
+			yjsState: typeof data.yjsState === 'string' ? data.yjsState : '',
+			yjsStateVector: typeof data.yjsStateVector === 'string' ? data.yjsStateVector : '',
+			// New rows from a freshly-migrated DB have yjs_version = 1; the
+			// "no row exists yet" path is signalled by a 404 (caught below)
+			// and we return 0 so the first save can create the row.
+			yjsVersion: typeof data.yjsVersion === 'number' ? data.yjsVersion : 0
+		};
 	} catch (error) {
-		console.error(`Failed to load Yjs state for doc ${documentId}:`, error);
-		return { yjsState: '', yjsStateVector: '' };
+		// 404 means the row does not exist yet; that's a normal "fresh
+		// document" state and the first save should create it. For any other
+		// error we still return zeros, but log loudly so it's not silent.
+		const status =
+			error && typeof error === 'object' && 'response' in error
+				? (error as { response?: { status?: number } }).response?.status
+				: undefined;
+		if (status !== 404) {
+			console.error(`Failed to load Yjs state for doc ${documentId}:`, error);
+		}
+		return { yjsState: '', yjsStateVector: '', yjsVersion: 0 };
+	}
+}
+
+class YjsSaveConflictError extends Error {
+	constructor(public currentVersion: number) {
+		super(`yjs version conflict (current ${currentVersion})`);
+		this.name = 'YjsSaveConflictError';
 	}
 }
 
@@ -103,24 +164,56 @@ async function saveYjsState(
 	documentId: string,
 	token: string,
 	yjsState: string,
-	yjsStateVector: string
-): Promise<void> {
+	yjsStateVector: string,
+	expectedYjsVersion: number
+): Promise<number> {
 	try {
-		await axios.put(
+		const response = await axios.put(
 			`${GO_API_URL}/realtime/documents/${documentId}/state`,
 			{
 				yjsState,
-				yjsStateVector
+				yjsStateVector,
+				expectedYjsVersion
 			},
 			{
 				headers: {
 					Authorization: `Bearer ${token}`
 				},
-				timeout: 5000
+				timeout: 5000,
+				// Treat 4xx as a value, not a thrown error, so we can branch on
+				// 409 without losing the response body.
+				validateStatus: (status) => status >= 200 && status < 500
 			}
 		);
+
+		if (response.status === 409) {
+			const current =
+				typeof response.data?.currentYjsVersion === 'number'
+					? response.data.currentYjsVersion
+					: expectedYjsVersion;
+			throw new YjsSaveConflictError(current);
+		}
+		if (response.status >= 400) {
+			const body = response.data ? JSON.stringify(response.data) : '';
+			throw new Error(`Yjs save failed with status ${response.status}: ${body}`);
+		}
+
+		const newVersion =
+			typeof response.data?.yjsVersion === 'number'
+				? response.data.yjsVersion
+				: expectedYjsVersion + 1;
+		return newVersion;
 	} catch (error) {
-		console.error(`Failed to save Yjs state for doc ${documentId}:`, error);
+		// Re-throw so Hocuspocus marks the document as still-dirty and retries
+		// on the next debounce window. Swallowing the error here is what made
+		// the previous version silently lose edits.
+		if (error instanceof YjsSaveConflictError) {
+			throw error;
+		}
+		if (error instanceof Error) {
+			throw error;
+		}
+		throw new Error(`Yjs save failed: ${String(error)}`);
 	}
 }
 
@@ -275,7 +368,10 @@ const server = new Server({
 			throw new Error('Missing document ID');
 		}
 
-		const acl = await getUserACL(documentId, token);
+		// Force a fresh fetch on connect so the cache cannot replay a stale
+		// "canEdit" decision from a previous session.
+		invalidateACLCache(documentId, payload.sub);
+		const acl = await getUserACLFresh(documentId, payload.sub, token);
 		if (!acl?.canRead) {
 			const error = new Error('No read permission for this document') as Error & {
 				reason?: string;
@@ -291,8 +387,9 @@ const server = new Server({
 			token,
 			documentId,
 			acl,
-			socketId: data?.socketId
-		};
+			socketId: data?.socketId,
+			yjsVersion: 0
+		} satisfies RealtimeContext;
 	},
 
 	// 连接建立前，认证上下文尚未写入；这里只保留轻量日志。
@@ -332,9 +429,16 @@ const server = new Server({
 		const state = await loadYjsState(documentId, token);
 		if (state.yjsState) {
 			Y.applyUpdate(document, Buffer.from(state.yjsState, 'base64'));
-			console.log(`[DOC:${documentId}] Loaded Yjs state from database`);
+			console.log(
+				`[DOC:${documentId}] Loaded Yjs state from database (version ${state.yjsVersion})`
+			);
 		} else {
 			console.log(`[DOC:${documentId}] No existing Yjs state found, starting fresh`);
+		}
+		// Stash the version on the connection context so the next save can
+		// echo it back as the optimistic-concurrency token.
+		if (context) {
+			context.yjsVersion = state.yjsVersion;
 		}
 	},
 
@@ -345,24 +449,65 @@ const server = new Server({
 		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
 		const userId = context?.userId;
 		const token = context?.token;
-		const acl = context?.acl;
 
-		if (!acl?.canEdit) {
-			console.warn(
-				`[DOC:${documentId}] User ${userId ?? 'unknown'} attempted write without edit permission`
-			);
-			return;
-		}
-
-		if (!documentId || !token) {
+		if (!documentId || !token || !userId || !context) {
 			console.warn('Missing context for storing document');
 			return;
 		}
 
+		// Re-validate ACL on every save. The captured-at-connect ACL is stale
+		// the moment the document owner removes the editor. A 30s TTL keeps
+		// the cost down without leaving a wide window for revoked users.
+		const freshACL = await getUserACLFresh(documentId, userId, token);
+		if (!freshACL?.canEdit) {
+			console.warn(
+				`[DOC:${documentId}] User ${userId} lost edit permission; refusing to persist (had role ${context.acl.myRole})`
+			);
+			// Update the cached context so subsequent reads also see the
+			// downgraded permission, and bubble up so Hocuspocus knows the
+			// store didn't succeed.
+			if (freshACL) {
+				context.acl = freshACL;
+			}
+			throw new Error('edit permission revoked');
+		}
+		// Keep the context in sync with the latest ACL view.
+		context.acl = freshACL;
+
 		const yjsState = Buffer.from(Y.encodeStateAsUpdate(document)).toString('base64');
 		const yjsStateVector = Buffer.from(Y.encodeStateVector(document)).toString('base64');
 
-		await saveYjsState(documentId, token, yjsState, yjsStateVector);
+		try {
+			const newVersion = await saveYjsState(
+				documentId,
+				token,
+				yjsState,
+				yjsStateVector,
+				context.yjsVersion
+			);
+			context.yjsVersion = newVersion;
+		} catch (error) {
+			if (error instanceof YjsSaveConflictError) {
+				// Someone else (or a racing save) bumped the version. Re-load
+				// the latest state, merge it into our in-memory doc via
+				// Yjs CRDT semantics, and let Hocuspocus retry on the next
+				// debounce. Throwing keeps the doc marked dirty so the retry
+				// actually happens.
+				console.warn(
+					`[DOC:${documentId}] Yjs save conflict (had ${context.yjsVersion}, server ${error.currentVersion}); reloading`
+				);
+				const fresh = await loadYjsState(documentId, token);
+				if (fresh.yjsState) {
+					try {
+						Y.applyUpdate(document, Buffer.from(fresh.yjsState, 'base64'));
+					} catch (mergeErr) {
+						console.error(`[DOC:${documentId}] Failed to merge fresh state:`, mergeErr);
+					}
+				}
+				context.yjsVersion = fresh.yjsVersion;
+			}
+			throw error;
+		}
 	},
 
 	async onDisconnect(data: any) {

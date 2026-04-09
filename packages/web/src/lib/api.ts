@@ -2,9 +2,21 @@ import { auth } from '$lib/stores/auth';
 import { resolveApiUrl } from '$lib/config/api';
 import { get } from 'svelte/store';
 
-// A simple flag to prevent multiple concurrent refresh attempts.
-// A more robust solution would use a promise-based lock.
-let isRefreshing = false;
+// In-flight refresh promise. When N concurrent requests all see a 401, only
+// the first triggers the refresh; the rest await the same promise and reuse
+// the new token. The previous boolean-flag approach made the second-Nth request
+// silently fall through and return the original 401, which surfaced as random
+// UI errors during the refresh window.
+let refreshPromise: Promise<string | null> | null = null;
+
+function refreshTokenOnce(): Promise<string | null> {
+	if (!refreshPromise) {
+		refreshPromise = auth.refreshToken().finally(() => {
+			refreshPromise = null;
+		});
+	}
+	return refreshPromise;
+}
 
 /**
  * A custom fetch wrapper that automatically adds the Authorization header
@@ -32,32 +44,21 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
 	// Make the initial request.
 	let response = await fetch(resolvedUrl, options);
 
-	// If the response is a 401 Unauthorized, and we haven't already started a refresh,
-	// try to refresh the token and retry the request.
-	if (response.status === 401 && !isRefreshing) {
-		isRefreshing = true;
+	// If the response is a 401 Unauthorized, share a single refresh attempt
+	// across all concurrent callers and retry exactly once.
+	if (response.status === 401) {
 		try {
-			// Attempt to refresh the token. The auth store handles the actual API call.
-			// If this fails, it will throw an error and the user will be logged out by the store.
-			const newAccessToken = await auth.refreshToken();
-
-			// If refresh was successful, update the header with the new token...
+			const newAccessToken = await refreshTokenOnce();
 			if (newAccessToken) {
 				headers.set('Authorization', `Bearer ${newAccessToken}`);
 				options.headers = headers;
-
-				// ...and retry the original request.
-				console.log('Retrying original request with new token.');
 				response = await fetch(resolvedUrl, options);
 			}
 		} catch (error) {
-			// The refresh failed, the auth store will handle logout.
-			// We just return the original 401 response.
+			// The refresh failed; auth store has already triggered logout. Return
+			// the original 401 to the caller so the UI can react.
 			console.error('Failed to retry request after token refresh.', error);
 			return response;
-		} finally {
-			// Reset the flag regardless of outcome.
-			isRefreshing = false;
 		}
 	}
 
