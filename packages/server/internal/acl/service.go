@@ -22,6 +22,15 @@ const (
 	ActionOwnerOnly     = "owner_only"
 )
 
+// ErrDocumentNotFoundOrForbidden is returned whenever the caller either (a)
+// references a document that does not exist or (b) lacks the role required
+// for the requested action. Both branches deliberately collapse to a single
+// sentinel so handlers cannot accidentally disclose existence information
+// via different error messages. Downstream packages (e.g. internal/content)
+// use errors.Is to separate "benign no-op" cases from real DB failures that
+// must propagate instead of being swallowed.
+var ErrDocumentNotFoundOrForbidden = errors.New("文档不存在或无权访问")
+
 func ResolveDocumentRole(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, string, error) {
 	type documentRoleRow struct {
 		models.Document
@@ -39,7 +48,7 @@ func ResolveDocumentRole(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Doc
 		Where("documents.id = ? AND documents.deleted_at IS NULL", documentID).
 		Take(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", errors.New("文档不存在或无权访问")
+			return nil, "", ErrDocumentNotFoundOrForbidden
 		}
 		return nil, "", err
 	}
@@ -50,7 +59,7 @@ func ResolveDocumentRole(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Doc
 	}
 
 	if row.PermissionRole == nil || *row.PermissionRole == "" {
-		return nil, "", errors.New("文档不存在或无权访问")
+		return nil, "", ErrDocumentNotFoundOrForbidden
 	}
 
 	document := row.Document
@@ -63,7 +72,7 @@ func AuthorizeDocumentAction(tx *gorm.DB, userID, documentID uuid.UUID, action s
 		return nil, "", err
 	}
 	if !RoleAllowsAction(role, action) {
-		return nil, "", errors.New("文档不存在或无权访问")
+		return nil, "", ErrDocumentNotFoundOrForbidden
 	}
 	return document, role, nil
 }
@@ -96,12 +105,12 @@ func CanAccessDocumentOwnerOnlyUnscoped(tx *gorm.DB, userID, documentID uuid.UUI
 	var document models.Document
 	if err := tx.Unscoped().Where("id = ?", documentID).First(&document).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("文档不存在或无权访问")
+			return nil, ErrDocumentNotFoundOrForbidden
 		}
 		return nil, err
 	}
 	if document.OwnerUserID != userID {
-		return nil, errors.New("文档不存在或无权访问")
+		return nil, ErrDocumentNotFoundOrForbidden
 	}
 	return &document, nil
 }

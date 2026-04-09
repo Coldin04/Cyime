@@ -1,7 +1,6 @@
 package media
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -168,17 +167,27 @@ func (p *s3CompatibleProvider) ProviderName() string {
 	return p.name
 }
 
+// unsignedPayloadHash is the magic value AWS SigV4 accepts in place of the
+// real SHA256 hash of the request body. Using it means the body no longer has
+// to be buffered in memory just to compute a hash — the Go HTTP transport can
+// stream directly from the source io.Reader. See AWS docs "Unsigned payload
+// option" for the specification; R2 / COS / MinIO all honour the same header.
+const unsignedPayloadHash = "UNSIGNED-PAYLOAD"
+
 func (p *s3CompatibleProvider) PutObject(ctx context.Context, input PutObjectInput) (*PutObjectResult, error) {
 	if input.ObjectKey == "" {
 		return nil, errors.New("object key is required")
 	}
-
-	bodyBytes, err := io.ReadAll(input.Body)
-	if err != nil {
-		return nil, err
+	if input.Body == nil {
+		return nil, errors.New("object body is required")
 	}
 
-	req, err := p.newSignedRequest(ctx, http.MethodPut, input.ObjectKey, bodyBytes, input.ContentType)
+	// Stream the body straight through the signed request instead of
+	// buffering the whole payload just to compute a SHA256. Before this
+	// change every PUT held (up to) thumbnail_source_max_bytes + file size
+	// in RAM simultaneously; a single 25 MiB upload therefore peaked at
+	// ~50 MiB including the upstream service.go copy.
+	req, err := p.newSignedRequest(ctx, http.MethodPut, input.ObjectKey, input.Body, unsignedPayloadHash, input.ContentType)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +199,7 @@ func (p *s3CompatibleProvider) PutObject(ctx context.Context, input PutObjectInp
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(resp.Body)
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("s3 put object failed: status=%d body=%s", resp.StatusCode, string(msg))
 	}
 
@@ -206,7 +215,7 @@ func (p *s3CompatibleProvider) GetObject(ctx context.Context, objectKey string) 
 		return nil, errors.New("object key is required")
 	}
 
-	req, err := p.newSignedRequest(ctx, http.MethodGet, objectKey, nil, "")
+	req, err := p.newSignedRequest(ctx, http.MethodGet, objectKey, nil, emptyPayloadSHA256, "")
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +226,7 @@ func (p *s3CompatibleProvider) GetObject(ctx context.Context, objectKey string) 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		msg, _ := io.ReadAll(resp.Body)
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("s3 get object failed: status=%d body=%s", resp.StatusCode, string(msg))
 	}
 
@@ -236,7 +245,7 @@ func (p *s3CompatibleProvider) DeleteObject(ctx context.Context, objectKey strin
 		return errors.New("object key is required")
 	}
 
-	req, err := p.newSignedRequest(ctx, http.MethodDelete, objectKey, nil, "")
+	req, err := p.newSignedRequest(ctx, http.MethodDelete, objectKey, nil, emptyPayloadSHA256, "")
 	if err != nil {
 		return err
 	}
@@ -248,7 +257,7 @@ func (p *s3CompatibleProvider) DeleteObject(ctx context.Context, objectKey strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(resp.Body)
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("s3 delete object failed: status=%d body=%s", resp.StatusCode, string(msg))
 	}
 
@@ -319,7 +328,20 @@ func (p *s3CompatibleProvider) PresignGetObject(_ context.Context, input Presign
 	}, nil
 }
 
-func (p *s3CompatibleProvider) newSignedRequest(ctx context.Context, method string, objectKey string, body []byte, contentType string) (*http.Request, error) {
+// newSignedRequest builds an SigV4-signed request. For GET/HEAD/DELETE we
+// pass body=nil and payloadHash=emptyPayloadSHA256 (the hash of the zero-
+// length body, required by SigV4 when the body itself isn't streamed).
+// For PUT we pass the raw source reader and payloadHash=unsignedPayloadHash,
+// which tells S3 to skip payload integrity verification so the body can be
+// streamed through the transport without buffering.
+func (p *s3CompatibleProvider) newSignedRequest(
+	ctx context.Context,
+	method string,
+	objectKey string,
+	body io.Reader,
+	payloadHash string,
+	contentType string,
+) (*http.Request, error) {
 	endpointURL, err := url.Parse(p.endpoint)
 	if err != nil {
 		return nil, err
@@ -333,7 +355,9 @@ func (p *s3CompatibleProvider) newSignedRequest(ctx context.Context, method stri
 	canonicalURI := "/" + strings.TrimPrefix(objectPath, "/")
 	requestURL := p.endpoint + canonicalURI
 
-	payloadHash := calculatePayloadHash(method, body)
+	if payloadHash == "" {
+		payloadHash = emptyPayloadSHA256
+	}
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
@@ -356,11 +380,7 @@ func (p *s3CompatibleProvider) newSignedRequest(ctx context.Context, method stri
 	signature := hex.EncodeToString(hmacSHA256(signingKey(p.secretKey, dateStamp, p.region, "s3"), stringToSign))
 	authorization := "AWS4-HMAC-SHA256 Credential=" + p.accessKeyID + "/" + scope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature
 
-	var bodyReader io.Reader
-	if len(body) > 0 {
-		bodyReader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -398,18 +418,11 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func calculatePayloadHash(method string, body []byte) string {
-	upperMethod := strings.ToUpper(strings.TrimSpace(method))
-	if len(body) == 0 && (upperMethod == http.MethodGet || upperMethod == http.MethodHead || upperMethod == http.MethodDelete) {
-		// For header-signed GET/HEAD/DELETE requests, S3-compatible services generally expect
-		// the SHA256 hash of empty payload instead of UNSIGNED-PAYLOAD.
-		return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	}
-	if len(body) == 0 {
-		return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	}
-	return sha256Hex(body)
-}
+// emptyPayloadSHA256 is the SHA256 hex of a zero-length payload. SigV4 uses
+// this value in x-amz-content-sha256 for requests that have no body (GET,
+// HEAD, DELETE). Extracted as a constant so PutObject can unambiguously opt
+// into unsignedPayloadHash instead.
+const emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 func canonicalizeQuery(q url.Values) string {
 	if len(q) == 0 {
