@@ -39,13 +39,53 @@ func Connect() {
 	if err := os.MkdirAll(dbPath, os.ModePerm); err != nil {
 		log.Fatalf("Failed to create database directory: %v", err)
 	}
-	dsn := filepath.Join(dbPath, "cyimewrite.db")
+	// SQLite DSN with safe defaults:
+	//   _journal_mode=WAL       — readers don't block writers and vice versa.
+	//   _busy_timeout=5000      — wait up to 5s on locked db before SQLITE_BUSY.
+	//   _foreign_keys=1         — enforce ON DELETE CASCADE declared in models.
+	//   _synchronous=NORMAL     — durability/perf trade-off appropriate for WAL.
+	//   _txlock=immediate       — acquire RESERVED lock on BEGIN to avoid
+	//                             SQLITE_BUSY on transaction promotion.
+	dsn := filepath.Join(dbPath, "cyimewrite.db") +
+		"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1&_synchronous=NORMAL&_txlock=immediate"
 
 	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// SQLite serializes writers; opening multiple write connections only causes
+	// SQLITE_BUSY contention. Pin the pool to a single connection so GORM does
+	// not silently fan out under load.
+	sqlDB, err := DB.DB()
+	if err != nil {
+		log.Fatalf("Failed to access underlying *sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(0)
+
+	// Verify foreign keys are actually enabled. mattn/go-sqlite3 will silently
+	// ignore the DSN flag if compiled without the FK feature, and the rest of
+	// the schema relies on ON DELETE CASCADE for cleanup, so refuse to boot if
+	// they are off.
+	var fkEnabled int
+	if err := DB.Raw("PRAGMA foreign_keys").Scan(&fkEnabled).Error; err != nil {
+		log.Fatalf("Failed to read foreign_keys pragma: %v", err)
+	}
+	if fkEnabled != 1 {
+		log.Fatalf("SQLite foreign keys are not enabled (got %d); refusing to start", fkEnabled)
+	}
+
+	// Verify WAL is active so we don't silently fall back to rollback journal.
+	var journalMode string
+	if err := DB.Raw("PRAGMA journal_mode").Scan(&journalMode).Error; err != nil {
+		log.Fatalf("Failed to read journal_mode pragma: %v", err)
+	}
+	if journalMode != "wal" && journalMode != "WAL" {
+		log.Printf("Warning: SQLite journal_mode=%q (expected wal); concurrent reads may block writers", journalMode)
 	}
 
 	log.Println("Database connection established.")

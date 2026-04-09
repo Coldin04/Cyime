@@ -22,6 +22,13 @@ import (
 func main() {
 	_ = config.LoadDotEnv(".env")
 
+	// Validate critical secrets BEFORE touching the database. If JWT_SECRET_KEY
+	// is missing, weak, or set to a known insecure default, refuse to start so
+	// the operator notices instead of silently shipping forgeable tokens.
+	if _, err := auth.LoadJWTSecret(); err != nil {
+		log.Fatalf("Auth configuration invalid: %v", err)
+	}
+
 	// Initialize database
 	database.Connect()
 	log.Println("Database initialization complete.")
