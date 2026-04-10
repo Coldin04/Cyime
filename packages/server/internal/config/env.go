@@ -75,3 +75,22 @@ func GetRealtimeWSURL() string {
 	}
 	return strings.TrimSpace(url)
 }
+
+// GetDocumentImageMaxBytes returns the configured max upload size for document
+// image uploads. Empty, invalid, or non-positive values fall back to the
+// server's current default of 5 MiB so the client can mirror backend checks.
+func GetDocumentImageMaxBytes() int64 {
+	const fallback int64 = 5 * 1024 * 1024
+
+	raw := strings.TrimSpace(os.Getenv("MEDIA_DOCUMENT_IMAGE_MAX_BYTES"))
+	if raw == "" {
+		return fallback
+	}
+
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+
+	return value
+}
