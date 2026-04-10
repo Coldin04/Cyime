@@ -21,6 +21,10 @@ import (
 
 func setupAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	// LoadJWTSecret enforces a minimum length and rejects known defaults; this
+	// value is long enough and not on the blocklist so the auth handlers can
+	// construct a TokenService without touching the operator-facing env.
+	t.Setenv("JWT_SECRET_KEY", "test-secret-please-rotate-aaaaaaaaaaaaaaaa")
 	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {

@@ -787,7 +787,7 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 	// Create the document in a transaction
 	var document *models.Document
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		limit, err := user.GetEffectiveDocumentQuota(userID)
+		limit, err := user.GetEffectiveDocumentQuotaWithDB(tx, userID)
 		if err != nil {
 			return err
 		}

@@ -3,7 +3,6 @@ package media
 import (
 	"context"
 	"errors"
-	"io"
 	"log"
 	"strings"
 	"time"
@@ -376,7 +375,11 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 			Message: err.Error(),
 		})
 	}
-	defer obj.Body.Close()
+	// NOTE: do NOT `defer obj.Body.Close()` — fasthttp reads from the
+	// stream *after* the handler returns, and will call Close() on the
+	// stream itself once it has finished writing the response. A deferred
+	// close here fires too early and the reader is dead by the time
+	// fasthttp actually serialises the body.
 
 	contentType := blob.MimeType
 	if contentType == "" {
@@ -385,14 +388,12 @@ func GetAssetContentHandler(c *fiber.Ctx) error {
 	c.Set("Content-Type", contentType)
 	c.Set("Cache-Control", "private, max-age=60")
 
-	data, err := io.ReadAll(obj.Body)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to read asset content",
-		})
-	}
-	return c.Send(data)
+	// Stream the object body straight to the response. The previous
+	// implementation did io.ReadAll(obj.Body) then c.Send(data), which held
+	// the full blob (up to 25 MiB for thumbnails, arbitrary for videos) in
+	// memory per in-flight request. SendStream hands the reader to fasthttp
+	// which writes chunked-transfer output without buffering.
+	return c.SendStream(obj.Body)
 }
 
 func GetAssetThumbnailHandler(c *fiber.Ctx) error {
@@ -462,7 +463,8 @@ func GetAssetThumbnailHandler(c *fiber.Ctx) error {
 			Message: err.Error(),
 		})
 	}
-	defer obj.Body.Close()
+	// No defer Close here — fasthttp closes the stream after flushing.
+	// See GetAssetContentHandler.
 
 	if contentType == "" {
 		contentType = obj.ContentType
@@ -470,14 +472,8 @@ func GetAssetThumbnailHandler(c *fiber.Ctx) error {
 	c.Set("Content-Type", contentType)
 	c.Set("Cache-Control", "private, max-age=60")
 
-	data, err := io.ReadAll(obj.Body)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to read asset thumbnail",
-		})
-	}
-	return c.Send(data)
+	// See GetAssetContentHandler for the rationale on SendStream.
+	return c.SendStream(obj.Body)
 }
 
 func GetAssetReferencesHandler(c *fiber.Ctx) error {

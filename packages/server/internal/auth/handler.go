@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -139,7 +140,10 @@ func AuthLogin(c *fiber.Ctx) error {
 		Scopes:       strings.Split(dbProvider.Scopes, " "),
 	}
 
-	state := generateState(c)
+	state, err := generateState(c)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to initialize oauth state"})
+	}
 	return c.Redirect(oauth2Config.AuthCodeURL(state), fiber.StatusTemporaryRedirect)
 }
 
@@ -458,26 +462,53 @@ func getEndpointFromProvider(ctx context.Context, provider *models.AuthProvider)
 	}
 }
 
-func generateState(c *fiber.Ctx) string {
+// generateState creates a cryptographically random OAuth/OIDC state value,
+// stores it in a cookie scoped to the auth endpoints, and returns the value
+// for insertion into the authorization URL. The previous version ignored
+// errors from crypto/rand.Read and omitted the Secure flag; both gaps are
+// closed here.
+func generateState(c *fiber.Ctx) (string, error) {
 	stateBytes := make([]byte, 32)
-	rand.Read(stateBytes)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", fmt.Errorf("generate oauth state: %w", err)
+	}
 	state := base64.URLEncoding.EncodeToString(stateBytes)
 	c.Cookie(&fiber.Cookie{
 		Name:     "oidc_state",
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
 		SameSite: "Lax",
+		// Scope to the auth endpoints so the cookie isn't sent on unrelated
+		// paths. The login and callback URLs both live under /api/v1/auth.
+		Path: "/api/v1/auth",
 	})
-	return state
+	return state, nil
 }
 
+// verifyState checks the callback state against the cookie using a
+// constant-time comparison and, on success, immediately invalidates the
+// cookie so it cannot be replayed on a second callback.
 func verifyState(c *fiber.Ctx) error {
 	stateFromCookie := c.Cookies("oidc_state")
 	stateFromQuery := c.Query("state")
-	if stateFromCookie == "" || stateFromQuery == "" || stateFromCookie != stateFromQuery {
-		return fmt.Errorf("无效的 state 参数")
+	if stateFromCookie == "" || stateFromQuery == "" {
+		return errors.New("无效的 state 参数")
 	}
+	if subtle.ConstantTimeCompare([]byte(stateFromCookie), []byte(stateFromQuery)) != 1 {
+		return errors.New("无效的 state 参数")
+	}
+	// Expire the cookie now that it has been consumed.
+	c.Cookie(&fiber.Cookie{
+		Name:     "oidc_state",
+		Value:    "",
+		Expires:  time.Now().Add(-time.Hour),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+		Path:     "/api/v1/auth",
+	})
 	return nil
 }
 

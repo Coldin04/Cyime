@@ -70,10 +70,25 @@ func GetUserByID(userID uuid.UUID) (*models.User, error) {
 	return &user, nil
 }
 
+func getUserByIDWithDB(db *gorm.DB, userID uuid.UUID) (*models.User, error) {
+	var user models.User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetEffectiveDocumentQuota resolves the effective document limit for one user.
 // 优先使用用户自己的配额；如果用户没有单独配置，则回退到全局默认值；都没有时表示无限制。
 func GetEffectiveDocumentQuota(userID uuid.UUID) (*int, error) {
-	currentUser, err := GetUserByID(userID)
+	return GetEffectiveDocumentQuotaWithDB(database.DB, userID)
+}
+
+// GetEffectiveDocumentQuotaWithDB resolves the effective document limit using the
+// provided handle so callers inside a transaction do not deadlock by re-entering
+// the global single-connection SQLite pool.
+func GetEffectiveDocumentQuotaWithDB(db *gorm.DB, userID uuid.UUID) (*int, error) {
+	currentUser, err := getUserByIDWithDB(db, userID)
 	if err != nil {
 		return nil, err
 	}

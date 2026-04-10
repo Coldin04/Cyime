@@ -800,6 +800,18 @@
 		}
 	}
 
+	function shouldUseHttpAutoSave(): boolean {
+		// When realtime collaboration is actually connected, the Hocuspocus/Yjs
+		// pipeline already debounces persistence on the collaboration server.
+		// Keeping the legacy HTTP autosave interval enabled at the same time
+		// causes redundant writes and visible save-state jitter in the editor UI.
+		//
+		// We only suppress the interval while collaboration is healthy. If
+		// realtime is unavailable or disconnects, the page falls back to the
+		// classic HTTP autosave path so single-user editing still has a safety net.
+		return !(collaboration?.provider && isYjsConnected);
+	}
+
 	async function handleSaveAndLeave() {
 		const saved = await saveContent();
 		if (!saved) {
@@ -878,22 +890,24 @@
 					clearCollaborationListeners();
 					if (documentId) {
 						yjsProvider.destroyProvider(documentId);
-					}
-					collaboration = null;
-					updateCollaborationIndicator();
+						}
+						collaboration = null;
+						updateCollaborationIndicator();
+						console.log('[Load] Title loaded:', title);
+						isLoading = false;
 
-					await startCollaboration(documentId, 'presence');
-					console.log('[Load] Title loaded:', title);
-					isLoading = false;
-
-					void (async () => {
-						try {
-							presenceCount = await fetchCollaborationPresence(documentId);
-							updateCollaborationIndicator();
-							await connectPresenceSocket(documentId);
-						} catch (presenceError) {
-							console.error('[Collaboration] Failed to fetch presence:', presenceError);
-							presenceCount = 0;
+						void (async () => {
+							try {
+								presenceCount = await fetchCollaborationPresence(documentId);
+								updateCollaborationIndicator();
+								await connectPresenceSocket(documentId);
+								// Collaboration bootstrap stays in the background on purpose:
+								// local content must render first so a down realtime service
+								// degrades to single-user editing instead of blanking the editor.
+								await startCollaboration(documentId, 'presence');
+							} catch (presenceError) {
+								console.error('[Collaboration] Failed to fetch presence:', presenceError);
+								presenceCount = 0;
 							presenceConnected = false;
 							hasAttemptedPresence = true;
 							collaborationError = 'presence-disconnected';
@@ -943,11 +957,11 @@
 	});
 
 	$effect(() => {
-		if (!browser || !documentId || isLoading || !autoSaveEnabled) {
+		if (!browser || !documentId || isLoading || !autoSaveEnabled || !shouldUseHttpAutoSave()) {
 			return;
 		}
 
-		// 自动保存只负责兜底落盘，不额外维护独立状态指示。
+		// 自动保存只负责非 realtime 模式下的兜底落盘，不额外维护独立状态指示。
 		const timer = window.setInterval(() => {
 			if (!hasUnsavedChanges || isSaving) {
 				return;

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"os"
 	"strings"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
@@ -16,11 +15,10 @@ func jwtKeyFunc(token *jwt.Token) (interface{}, error) {
 			"unexpected signing method: "+token.Header["alg"].(string),
 		)
 	}
-	secret := os.Getenv("JWT_SECRET_KEY")
-	if secret == "" {
-		secret = "insecure-default-secret-for-dev-only"
-	}
-	return []byte(secret), nil
+	// Single source of truth — no inline fallback. If JWT_SECRET_KEY is missing
+	// or weak, every request fails fast with the same error the token issuer
+	// would have raised at startup.
+	return auth.LoadJWTSecret()
 }
 
 func parseJWTFromRequest(c *fiber.Ctx) (*auth.JWTClaims, error) {

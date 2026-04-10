@@ -185,10 +185,20 @@ func CreateInitialContent(tx *gorm.DB, documentID, userID uuid.UUID, contentJSON
 }
 
 // DeleteContentByDocumentID soft deletes the content row for a document.
+//
+// The ACL check mirrors the caller's earlier check as defense in depth. The
+// previous implementation swallowed every error (including raw DB failures)
+// as nil, which left orphaned document_bodies rows whenever the defense-in-
+// depth lookup itself hit a transient DB problem. We now treat
+// acl.ErrDocumentNotFoundOrForbidden as a benign no-op and propagate every
+// other error.
 func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	document, _, err := acl.CanAccessDocumentOwnerOnly(tx, userID, documentID)
 	if err != nil {
-		return nil
+		if errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return nil
+		}
+		return err
 	}
 
 	if err := tx.Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {
@@ -199,10 +209,14 @@ func DeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error 
 }
 
 // RestoreContentByDocumentID restores the content row for a document.
+// See DeleteContentByDocumentID for the rationale around error handling.
 func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID)
 	if err != nil {
-		return nil
+		if errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return nil
+		}
+		return err
 	}
 
 	if err := tx.Unscoped().
@@ -229,10 +243,14 @@ func RestoreContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error
 }
 
 // PermanentDeleteContentByDocumentID permanently deletes the content row for a document.
+// See DeleteContentByDocumentID for the rationale around error handling.
 func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUID) error {
 	document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, documentID)
 	if err != nil {
-		return nil
+		if errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return nil
+		}
+		return err
 	}
 
 	if err := tx.Unscoped().Where("document_id = ?", documentID).Delete(&models.DocumentBody{}).Error; err != nil {

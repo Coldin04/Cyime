@@ -40,6 +40,12 @@ func GetDocumentACLHandler(c *fiber.Ctx) error {
 
 	_, role, err := acl.ResolveDocumentRole(database.DB, userID, documentID)
 	if err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to resolve document permissions",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
@@ -90,6 +96,12 @@ func GetYjsStateHandler(c *fiber.Ctx) error {
 
 	_, err = acl.CanReadDocument(database.DB, userID, documentID)
 	if err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to authorize document read",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
@@ -113,12 +125,27 @@ func GetYjsStateHandler(c *fiber.Ctx) error {
 	response := GetYjsStateResponse{
 		YjsState:       docBody.YjsState,
 		YjsStateVector: docBody.YjsStateVector,
+		YjsVersion:     docBody.YjsVersion,
 	}
 
 	return c.JSON(response)
 }
 
-// UpdateYjsStateHandler handles PUT /api/v1/realtime/documents/:id/state
+// UpdateYjsStateHandler handles PUT /api/v1/realtime/documents/:id/state.
+//
+// The handler is the persistence layer for the realtime collaboration server,
+// which mediates Yjs CRDT updates in memory. To prevent two classes of bugs:
+//
+//  1. Silent loss when the document_bodies row does not exist yet (the original
+//     code blindly issued an UPDATE and ignored RowsAffected, returning 200
+//     while writing nothing).
+//  2. Last-writer-wins overwrite by stale or malicious clients (no merge, no
+//     concurrency control).
+//
+// the handler now (a) creates the row when missing and (b) requires callers to
+// echo the YjsVersion they last observed; mismatches yield 409 Conflict so the
+// client can re-load and retry. ExpectedYjsVersion <= 0 is permitted only when
+// no row exists yet (initial create).
 func UpdateYjsStateHandler(c *fiber.Ctx) error {
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
@@ -153,32 +180,105 @@ func UpdateYjsStateHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	_, err = acl.CanEditDocument(database.DB, userID, documentID)
-	if err != nil {
+	if _, err = acl.CanEditDocument(database.DB, userID, documentID); err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to authorize document edit",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
 		})
 	}
 
-	// Update document body with new Yjs state
-	if err := database.DB.Model(&models.DocumentBody{}).
-		Where("document_id = ?", documentID).
-		Updates(map[string]interface{}{
-			"yjs_state":        req.YjsState,
-			"yjs_state_vector": req.YjsStateVector,
-			"updated_by":       userID,
-		}).Error; err != nil {
+	var newVersion int64
+	txErr := database.DB.Transaction(func(tx *gorm.DB) error {
+		var existing models.DocumentBody
+		err := tx.Where("document_id = ?", documentID).First(&existing).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// First save for this document. The realtime client has nothing
+			// to echo back yet; create the row at version 1.
+			newVersion = 1
+			body := &models.DocumentBody{
+				ID:             uuid.New(),
+				DocumentID:     documentID,
+				ContentJSON:    `{"type":"doc","content":[{"type":"paragraph"}]}`,
+				PlainText:      "",
+				ContentVersion: 1,
+				YjsState:       req.YjsState,
+				YjsStateVector: req.YjsStateVector,
+				YjsVersion:     newVersion,
+				UpdatedBy:      userID,
+			}
+			return tx.Create(body).Error
+
+		case err != nil:
+			return err
+		}
+
+		// Row exists. Apply optimistic concurrency control: refuse the write
+		// unless the caller proves it last saw the current version. The check
+		// lives in the WHERE clause so a concurrent writer racing the same
+		// transaction cannot squeeze through.
+		if req.ExpectedYjsVersion != existing.YjsVersion {
+			return &yjsVersionConflictError{current: existing.YjsVersion}
+		}
+
+		newVersion = existing.YjsVersion + 1
+		result := tx.Model(&models.DocumentBody{}).
+			Where("document_id = ? AND yjs_version = ?", documentID, req.ExpectedYjsVersion).
+			Updates(map[string]any{
+				"yjs_state":        req.YjsState,
+				"yjs_state_vector": req.YjsStateVector,
+				"yjs_version":      newVersion,
+				"updated_by":       userID,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			// Another writer bumped the version between our SELECT and UPDATE.
+			// Re-read so we can return the latest current version.
+			var fresh models.DocumentBody
+			if err := tx.Select("yjs_version").Where("document_id = ?", documentID).First(&fresh).Error; err != nil {
+				return err
+			}
+			return &yjsVersionConflictError{current: fresh.YjsVersion}
+		}
+		return nil
+	})
+
+	if txErr != nil {
+		var conflict *yjsVersionConflictError
+		if errors.As(txErr, &conflict) {
+			return c.Status(fiber.StatusConflict).JSON(YjsStateConflictResponse{
+				Error:          "Conflict",
+				Message:        "Yjs state version is stale; reload and retry",
+				CurrentVersion: conflict.current,
+			})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Internal Server Error",
 			Message: "Failed to update Yjs state",
 		})
 	}
 
-	response := GetYjsStateResponse{
+	return c.JSON(GetYjsStateResponse{
 		YjsState:       req.YjsState,
 		YjsStateVector: req.YjsStateVector,
-	}
+		YjsVersion:     newVersion,
+	})
+}
 
-	return c.JSON(response)
+// yjsVersionConflictError carries the latest stored YjsVersion back to the
+// outer transaction handler so it can be reported to the client.
+type yjsVersionConflictError struct {
+	current int64
+}
+
+func (e *yjsVersionConflictError) Error() string {
+	return "yjs version conflict"
 }

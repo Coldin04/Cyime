@@ -45,14 +45,12 @@ type SessionInfo struct {
 }
 
 // NewTokenService creates a new token service, reading configuration from environment variables.
+// JWT_SECRET_KEY is required and validated by LoadJWTSecret; there is no fallback to a hardcoded
+// default. Callers should treat any error returned here as a fatal configuration error.
 func NewTokenService() (*TokenService, error) {
-	secret := os.Getenv("JWT_SECRET_KEY")
-	if secret == "" {
-		// For development, we can use a default insecure key.
-		// In production, this should cause a fatal error.
-		// For this project, we'll allow a default for ease of setup.
-		secret = "insecure-default-secret-for-dev-only"
-		fmt.Println("WARNING: JWT_SECRET_KEY not set, using insecure default key. DO NOT use in production.")
+	secret, err := LoadJWTSecret()
+	if err != nil {
+		return nil, err
 	}
 
 	accessTokenLifetimeMinutes, err := strconv.Atoi(os.Getenv("ACCESS_TOKEN_LIFETIME_MINUTES"))
@@ -66,7 +64,7 @@ func NewTokenService() (*TokenService, error) {
 	}
 
 	return &TokenService{
-		jwtSecret:              []byte(secret),
+		jwtSecret:              secret,
 		accessTokenLifetime:    time.Duration(accessTokenLifetimeMinutes) * time.Minute,
 		refreshTokenLifetime:   time.Duration(refreshTokenLifetimeHours) * time.Hour,
 		refreshTokenByteLength: 32,

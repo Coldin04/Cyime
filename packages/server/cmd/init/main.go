@@ -68,19 +68,53 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 
-	// Ask if user wants to configure an OAuth provider
-	fmt.Println("是否要配置 OAuth/SSO 登录提供商？")
+	fmt.Println("请选择 OAuth/SSO 登录提供商管理操作：")
+	fmt.Println("1. 新增登录提供商")
+	fmt.Println("2. 列出当前登录提供商")
+	fmt.Println("3. 删除单个登录提供商")
+	fmt.Println("4. 清空全部登录提供商")
+	fmt.Println("5. 跳过（退出）")
+	fmt.Print("请选择 (1-5): ")
+
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "1":
+		handleCreateProvider(reader)
+	case "2":
+		if err := listProviders(); err != nil {
+			log.Fatalf("列出提供商失败：%v", err)
+		}
+	case "3":
+		if err := deleteProviderInteractive(reader); err != nil {
+			log.Fatalf("删除提供商失败：%v", err)
+		}
+	case "4":
+		if err := clearProvidersInteractive(reader); err != nil {
+			log.Fatalf("清空提供商失败：%v", err)
+		}
+	case "5":
+		fmt.Println("已退出。你可以稍后重新运行初始化向导。")
+	default:
+		fmt.Println("无效的选择，已退出。")
+	}
+}
+
+func handleCreateProvider(reader *bufio.Reader) {
+	fmt.Println()
+	fmt.Println("请选择要新增的登录提供商类型：")
 	fmt.Println("1. GitHub")
 	fmt.Println("2. Google")
 	fmt.Println("3. 自定义 OIDC 提供商")
-	fmt.Println("4. 跳过（稍后手动配置）")
+	fmt.Println("4. 取消")
 	fmt.Print("请选择 (1-4): ")
 
 	choice, _ := reader.ReadString('\n')
 	choice = strings.TrimSpace(choice)
 
 	if choice == "4" {
-		fmt.Println("已跳过配置。你可以稍后在数据库中手动添加提供商配置。")
+		fmt.Println("已取消新增提供商。")
 		return
 	}
 
@@ -94,7 +128,7 @@ func main() {
 	case "3":
 		provider = configureCustomProvider(reader)
 	default:
-		fmt.Println("无效的选择，已跳过配置。")
+		fmt.Println("无效的选择，已取消新增提供商。")
 		return
 	}
 
@@ -106,20 +140,127 @@ func main() {
 		provider.ClientSecretEncrypted = encryptedSecret
 	}
 
-	// Save to database
 	if err := database.DB.Create(&provider).Error; err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			fmt.Printf("⚠️  提供商 '%s' 已存在，跳过创建。\n", provider.Name)
 		} else {
 			log.Fatalf("保存提供商配置失败：%v", err)
 		}
-	} else {
-		fmt.Printf("✅ 成功配置 %s 登录提供商！\n", provider.Name)
-		fmt.Println()
-		fmt.Println("下一步:")
-		fmt.Println("1. 启动服务器：go run cmd/server/main.go")
-		fmt.Println("2. 访问 http://localhost:8080 进行测试")
+		return
 	}
+
+	fmt.Printf("✅ 成功配置 %s 登录提供商！\n", provider.Name)
+	fmt.Println()
+	fmt.Println("下一步:")
+	fmt.Println("1. 启动服务器：go run cmd/server/main.go")
+	fmt.Println("2. 访问 http://localhost:8080 进行测试")
+}
+
+func listProviders() error {
+	var providers []models.AuthProvider
+	if err := database.DB.Order("name ASC").Find(&providers).Error; err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("当前登录提供商：")
+	if len(providers) == 0 {
+		fmt.Println("  (无)")
+		return nil
+	}
+
+	for _, provider := range providers {
+		status := "禁用"
+		if provider.IsActive {
+			status = "启用"
+		}
+		fmt.Printf("- %s [%s] client_id=%s status=%s\n", provider.Name, provider.ProtocolType, provider.ClientID, status)
+	}
+	return nil
+}
+
+func deleteProviderInteractive(reader *bufio.Reader) error {
+	if err := listProviders(); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Print("输入要删除的提供商名称: ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSpace(name)
+	if name == "" {
+		fmt.Println("未输入提供商名称，已取消。")
+		return nil
+	}
+
+	var provider models.AuthProvider
+	if err := database.DB.Where("name = ?", name).First(&provider).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			fmt.Printf("未找到提供商 '%s'。\n", name)
+			return nil
+		}
+		return err
+	}
+
+	var identityCount int64
+	if err := database.DB.Model(&models.UserIdentityProvider{}).Where("provider_name = ?", name).Count(&identityCount).Error; err != nil {
+		return err
+	}
+
+	fmt.Printf("即将删除提供商 '%s'，并清理 %d 条用户身份映射。输入 yes 确认: ", name, identityCount)
+	confirm, _ := reader.ReadString('\n')
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	if confirm != "yes" {
+		fmt.Println("已取消删除。")
+		return nil
+	}
+
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("provider_name = ?", name).Delete(&models.UserIdentityProvider{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("name = ?", name).Delete(&models.AuthProvider{}).Error; err != nil {
+			return err
+		}
+		fmt.Printf("✅ 已删除提供商 '%s'。\n", name)
+		return nil
+	})
+}
+
+func clearProvidersInteractive(reader *bufio.Reader) error {
+	var providerCount int64
+	if err := database.DB.Model(&models.AuthProvider{}).Count(&providerCount).Error; err != nil {
+		return err
+	}
+
+	var identityCount int64
+	if err := database.DB.Model(&models.UserIdentityProvider{}).Count(&identityCount).Error; err != nil {
+		return err
+	}
+
+	if providerCount == 0 && identityCount == 0 {
+		fmt.Println("当前没有可清理的登录配置。")
+		return nil
+	}
+
+	fmt.Printf("即将清空 %d 个登录提供商，并删除 %d 条用户身份映射。输入 yes 确认: ", providerCount, identityCount)
+	confirm, _ := reader.ReadString('\n')
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	if confirm != "yes" {
+		fmt.Println("已取消清空。")
+		return nil
+	}
+
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.UserIdentityProvider{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.AuthProvider{}).Error; err != nil {
+			return err
+		}
+		fmt.Println("✅ 已清空全部登录提供商配置。")
+		return nil
+	})
 }
 
 func configureGitHubProvider(reader *bufio.Reader) models.AuthProvider {

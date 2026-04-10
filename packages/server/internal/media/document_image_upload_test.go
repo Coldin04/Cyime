@@ -104,6 +104,7 @@ func TestUploadDocumentImage_FallsBackToManagedR2WhenSharedTargetBelongsToAnothe
 }
 
 func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
+	allowInsecureImageBedDialsForTesting(t)
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	if err := db.Create(&models.User{ID: userID}).Error; err != nil {
@@ -176,6 +177,7 @@ func TestUploadDocumentImage_UsesSeeForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
+	allowInsecureImageBedDialsForTesting(t)
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,6 +254,7 @@ func TestUploadDocumentImage_UsesLskyForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
+	allowInsecureImageBedDialsForTesting(t)
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +329,7 @@ func TestUploadDocumentImage_UsesImgBBForUserConfigTargets(t *testing.T) {
 }
 
 func TestUploadDocumentImage_UsesCheveretoForUserConfigTargets(t *testing.T) {
+	allowInsecureImageBedDialsForTesting(t)
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

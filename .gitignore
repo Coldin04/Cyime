@@ -52,3 +52,4 @@ GEMINI.md
 .geminiignore
 .tools/
 .wrangler/
+.zread/

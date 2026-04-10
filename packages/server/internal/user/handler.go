@@ -3,7 +3,6 @@ package user
 import (
 	"context"
 	"errors"
-	"io"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
@@ -413,15 +412,16 @@ func GetAvatarContentHandler(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
 	}
-	defer obj.Body.Close()
+	// No defer Close — fasthttp closes the stream after flushing the
+	// response. A deferred Close here would fire before the reader is
+	// actually drained and the handler would emit a half-read body or
+	// "file already closed" errors in tests.
 
 	c.Set("Content-Type", obj.ContentType)
 	c.Set("Cache-Control", "private, max-age=60")
-	data, err := io.ReadAll(obj.Body)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to read avatar content"})
-	}
-	return c.Send(data)
+	// Stream the avatar body straight to the response instead of buffering
+	// it in memory (previous io.ReadAll + c.Send peak = 2 × avatar size).
+	return c.SendStream(obj.Body)
 }
 
 func imageBedConfigToDTO(config ImageBedConfig) ImageBedConfigDTO {

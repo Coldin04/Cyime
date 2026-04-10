@@ -4,6 +4,7 @@ import { writable } from 'svelte/store';
 
 interface RealtimeConfig {
 	realtimeWsUrl: string;
+	documentImageMaxBytes: number;
 }
 
 interface RealtimeStore {

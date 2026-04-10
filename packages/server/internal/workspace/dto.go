@@ -264,10 +264,25 @@ type DocumentACLResponse struct {
 type GetYjsStateResponse struct {
 	YjsState       string `json:"yjsState"`
 	YjsStateVector string `json:"yjsStateVector"`
+	YjsVersion     int64  `json:"yjsVersion"`
 }
 
-// UpdateYjsStateRequest represents the request to update Yjs state
+// UpdateYjsStateRequest represents the request to update Yjs state.
+//
+// ExpectedYjsVersion is the version the caller last observed. The handler
+// only writes when it matches the current row, providing optimistic
+// concurrency control. A value <= 0 is treated as "I have no version yet"
+// and only succeeds when no row exists for the document (initial create).
 type UpdateYjsStateRequest struct {
-	YjsState       string `json:"yjsState"`
-	YjsStateVector string `json:"yjsStateVector"`
+	YjsState           string `json:"yjsState"`
+	YjsStateVector     string `json:"yjsStateVector"`
+	ExpectedYjsVersion int64  `json:"expectedYjsVersion"`
+}
+
+// YjsStateConflictResponse is returned when ExpectedYjsVersion mismatches the
+// stored row, so the client can re-fetch the latest state and retry.
+type YjsStateConflictResponse struct {
+	Error          string `json:"error"`
+	Message        string `json:"message"`
+	CurrentVersion int64  `json:"currentYjsVersion"`
 }

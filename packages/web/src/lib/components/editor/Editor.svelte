@@ -42,6 +42,8 @@
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 	import type { ExportAction } from '$lib/export/exportActions';
 	import { auth } from '$lib/stores/auth';
+	import { realtimeConfig } from '$lib/stores/realtime';
+	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
 	import type { ProviderInstance } from '$lib/utils/yjsProvider';
@@ -593,6 +595,21 @@
 		toast.dismiss(imageUploadToastId);
 	}
 
+	function getDocumentImageMaxBytes(): number | null {
+		const value = get(realtimeConfig).config?.documentImageMaxBytes;
+		return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+	}
+
+	function formatBytes(value: number): string {
+		if (value < 1024) {
+			return `${value} B`;
+		}
+		if (value < 1024 * 1024) {
+			return `${(value / 1024).toFixed(1)} KB`;
+		}
+		return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
 	function resolveImageUploadErrorMessage(error: unknown): string {
 		const apiError = error as EditorAPIError | undefined;
 		switch (apiError?.code) {
@@ -619,6 +636,11 @@
 			showUnsupportedImageUploadToast(file);
 			return false;
 		}
+		const maxBytes = getDocumentImageMaxBytes();
+		if (maxBytes !== null && file.size > maxBytes) {
+			toast.error(`图片过大：${formatBytes(file.size)}，当前上限为 ${formatBytes(maxBytes)}`);
+			return false;
+		}
 		beginImageUpload();
 		try {
 			const uploaded = await pasteDocumentImage(documentId, file);
@@ -630,7 +652,17 @@
 			return true;
 		} catch (error) {
 			console.error(`[${source === 'paste' ? 'Paste' : 'Upload'}] Failed to upload image:`, error);
-			toast.error(resolveImageUploadErrorMessage(error));
+			if (
+				maxBytes !== null &&
+				error instanceof TypeError &&
+				error.message.includes('NetworkError')
+			) {
+				toast.error(
+					`图片上传失败。若文件接近或超过后端限制，请控制在 ${formatBytes(maxBytes)} 以内。`
+				);
+			} else {
+				toast.error(resolveImageUploadErrorMessage(error));
+			}
 			return false;
 		} finally {
 			endImageUpload();
