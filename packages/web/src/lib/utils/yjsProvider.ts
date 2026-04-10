@@ -25,6 +25,12 @@ interface ProviderInstance {
 
 class YjsProviderManager {
 	private instances = new Map<string, ProviderInstance>();
+	// Keep a bounded wait here so "realtime is down" still degrades into the
+	// pre-collaboration local editor path. If we return immediately after
+	// constructing a provider object, the editor switches into collaboration
+	// mode before any sync ever happens and the server-fetched content never
+	// hydrates, which looks like a blank editor when realtime is unavailable.
+	private readonly CONNECTION_TIMEOUT = 10000;
 
 	async createProvider(config: ProviderConfig): Promise<ProviderInstance> {
 		const docId = config.documentId;
@@ -93,6 +99,7 @@ class YjsProviderManager {
 				instance.isConnected = false;
 				console.error(`[Yjs] Websocket connect failed for ${docId}: ${errorMsg}`);
 			});
+			await this.waitForConnection(provider, this.CONNECTION_TIMEOUT);
 
 			return instance;
 		} catch (error) {
@@ -121,6 +128,42 @@ class YjsProviderManager {
 			this.instances.set(docId, instance);
 			return instance;
 		}
+	}
+
+	private async waitForConnection(provider: HocuspocusProvider, timeout: number): Promise<void> {
+		if (provider.configuration.websocketProvider.status === 'connected') {
+			return;
+		}
+
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				cleanup();
+				console.warn(`[Yjs] Websocket timed out for ${provider.configuration.name}`);
+				reject(new Error('WebSocket connection timeout'));
+			}, timeout);
+
+			const handleStatus = ({ status }: { status: string }) => {
+				if (status === 'connected') {
+					cleanup();
+					resolve();
+				}
+			};
+
+			const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
+				cleanup();
+				console.warn(`[Yjs] Authentication rejected for ${provider.configuration.name}: ${reason}`);
+				reject(new Error(reason || 'Authentication failed'));
+			};
+
+			const cleanup = () => {
+				clearTimeout(timer);
+				provider.off('status', handleStatus);
+				provider.off('authenticationFailed', handleAuthenticationFailed);
+			};
+
+			provider.on('status', handleStatus);
+			provider.on('authenticationFailed', handleAuthenticationFailed);
+		});
 	}
 
 	private buildWebSocketUrl(baseUrl: string): string {

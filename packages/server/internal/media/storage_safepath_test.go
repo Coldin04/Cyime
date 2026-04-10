@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func TestLocalStorageProvider_PutObjectRejectsEscape(t *testing.T) {
 	rootDir := t.TempDir()
 	p := &localStorageProvider{rootDir: rootDir, baseURL: "/media-files"}
 
-	_, err := p.PutObject(nil, PutObjectInput{
+	_, err := p.PutObject(context.TODO(), PutObjectInput{
 		ObjectKey:   "../evil.png",
 		ContentType: "image/png",
 		Body:        bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47}),
@@ -84,10 +85,10 @@ func TestLocalStorageProvider_GetAndDeleteRejectEscape(t *testing.T) {
 	rootDir := t.TempDir()
 	p := &localStorageProvider{rootDir: rootDir, baseURL: "/media-files"}
 
-	if _, err := p.GetObject(nil, "../../etc/passwd"); !errors.Is(err, errLocalStorageEscape) {
+	if _, err := p.GetObject(context.TODO(), "../../etc/passwd"); !errors.Is(err, errLocalStorageEscape) {
 		t.Fatalf("GetObject should reject escape, got %v", err)
 	}
-	if err := p.DeleteObject(nil, "../../etc/passwd"); !errors.Is(err, errLocalStorageEscape) {
+	if err := p.DeleteObject(context.TODO(), "../../etc/passwd"); !errors.Is(err, errLocalStorageEscape) {
 		t.Fatalf("DeleteObject should reject escape, got %v", err)
 	}
 }
@@ -98,7 +99,7 @@ func TestLocalStorageProvider_PutGetDeleteRoundTrip(t *testing.T) {
 	rootDir := t.TempDir()
 	p := &localStorageProvider{rootDir: rootDir, baseURL: "/media-files"}
 
-	_, err := p.PutObject(nil, PutObjectInput{
+	_, err := p.PutObject(context.TODO(), PutObjectInput{
 		ObjectKey:   "u1/day/obj.png",
 		ContentType: "image/png",
 		Body:        bytes.NewReader([]byte("data")),
@@ -107,7 +108,7 @@ func TestLocalStorageProvider_PutGetDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 
-	obj, err := p.GetObject(nil, "u1/day/obj.png")
+	obj, err := p.GetObject(context.TODO(), "u1/day/obj.png")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestLocalStorageProvider_PutGetDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected body: %q", buf.String())
 	}
 
-	if err := p.DeleteObject(nil, "u1/day/obj.png"); err != nil {
+	if err := p.DeleteObject(context.TODO(), "u1/day/obj.png"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 }

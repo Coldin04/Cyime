@@ -154,9 +154,12 @@ async function loadYjsState(
 }
 
 class YjsSaveConflictError extends Error {
-	constructor(public currentVersion: number) {
+	currentVersion: number;
+
+	constructor(currentVersion: number) {
 		super(`yjs version conflict (current ${currentVersion})`);
 		this.name = 'YjsSaveConflictError';
+		this.currentVersion = currentVersion;
 	}
 }
 
