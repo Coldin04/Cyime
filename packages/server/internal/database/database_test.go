@@ -21,8 +21,8 @@ func TestConnect_AppliesSafeSQLitePragmas(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Connect calls log.Fatalf on failure, which would terminate the test
-	// process. Run it on the goroutine and let it raise; if anything goes
-	// wrong the assertions below catch it before the process exits.
+	// process. This test therefore only exercises the success path and then
+	// proves the resulting DB handle actually has the requested pragmas.
 	Connect()
 	t.Cleanup(func() {
 		if DB != nil {

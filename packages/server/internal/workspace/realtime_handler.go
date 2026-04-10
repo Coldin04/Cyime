@@ -40,6 +40,12 @@ func GetDocumentACLHandler(c *fiber.Ctx) error {
 
 	_, role, err := acl.ResolveDocumentRole(database.DB, userID, documentID)
 	if err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to resolve document permissions",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
@@ -90,6 +96,12 @@ func GetYjsStateHandler(c *fiber.Ctx) error {
 
 	_, err = acl.CanReadDocument(database.DB, userID, documentID)
 	if err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to authorize document read",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),
@@ -169,6 +181,12 @@ func UpdateYjsStateHandler(c *fiber.Ctx) error {
 	}
 
 	if _, err = acl.CanEditDocument(database.DB, userID, documentID); err != nil {
+		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "Internal Server Error",
+				Message: "Failed to authorize document edit",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 			Error:   "Not Found",
 			Message: err.Error(),

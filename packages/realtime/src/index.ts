@@ -55,14 +55,23 @@ function aclCacheKey(documentId: string, userId: string): string {
 	return `${userId}:${documentId}`;
 }
 
+function purgeExpiredACLCache(now: number): void {
+	for (const [key, value] of aclCache) {
+		if (value.expiresAt <= now) {
+			aclCache.delete(key);
+		}
+	}
+}
+
 async function getUserACLFresh(
 	documentId: string,
 	userId: string,
 	token: string
 ): Promise<UserACL | null> {
+	const now = Date.now();
+	purgeExpiredACLCache(now);
 	const key = aclCacheKey(documentId, userId);
 	const cached = aclCache.get(key);
-	const now = Date.now();
 	if (cached && cached.expiresAt > now) {
 		return cached.acl;
 	}

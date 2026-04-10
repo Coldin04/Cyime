@@ -11,7 +11,6 @@ import (
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 func newRealtimeStateTestApp(userID uuid.UUID) *fiber.App {
@@ -235,8 +234,4 @@ func TestUpdateYjsStateHandler_ViewerRoleDenied(t *testing.T) {
 	if stored.YjsState == "PWN" {
 		t.Fatal("viewer write leaked into storage")
 	}
-
-	// Defensively keep the imported gorm package referenced even if test
-	// helpers ever remove their direct usage.
-	_ = gorm.ErrRecordNotFound
 }

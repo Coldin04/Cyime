@@ -12,7 +12,7 @@ import (
 // TestGenerateState_SetsHardenedCookie verifies the P2-#10 fix: the state
 // cookie is HttpOnly, scoped to /api/v1/auth, and uses SameSite=Lax. The
 // Secure attribute is only set on HTTPS, and the in-memory Fiber test uses
-// HTTP, so we don't assert on it here — a separate happy-path exists below.
+// HTTP, so we don't assert on it here.
 func TestGenerateState_SetsHardenedCookie(t *testing.T) {
 	app := fiber.New()
 	app.Get("/login", func(c *fiber.Ctx) error {
