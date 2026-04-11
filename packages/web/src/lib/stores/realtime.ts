@@ -1,8 +1,19 @@
 import { browser } from '$app/environment';
+import { env } from '$env/dynamic/public';
 import { resolveApiUrl } from '$lib/config/api';
 import { writable } from 'svelte/store';
 
+function isEnvEnabled(value: string | undefined): boolean {
+	if (!value || value.trim() === '') {
+		return true;
+	}
+	return ['1', 'true', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
+}
+
+const frontendCollaborationEnabled = isEnvEnabled(env.PUBLIC_COLLABORATION_ENABLED);
+
 interface RealtimeConfig {
+	collaborationEnabled: boolean;
 	realtimeWsUrl: string;
 	documentImageMaxBytes: number;
 }
@@ -40,9 +51,12 @@ function createRealtimeStore() {
 				throw new Error(`Failed to fetch realtime config: ${response.statusText}`);
 			}
 
-			const config: RealtimeConfig = await response.json();
+			const config = (await response.json()) as RealtimeConfig;
 			set({
-				config,
+				config: {
+					...config,
+					collaborationEnabled: frontendCollaborationEnabled && config.collaborationEnabled
+				},
 				loading: false,
 				error: null
 			});

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import CaretLeft from '~icons/ph/caret-left';
 	import UsersThree from '~icons/ph/users-three';
 	import * as m from '$paraglide/messages';
@@ -16,6 +18,7 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import X from '~icons/ph/x';
 	import { portal } from '$lib/actions/portal';
+	import { realtimeConfig } from '$lib/stores/realtime';
 
 	const PAGE_SIZE = 50;
 
@@ -28,8 +31,16 @@
 
 	let manageMembersDoc = $state<{ id: string; title: string } | null>(null);
 	let leaveTargetDoc = $state<SharedDocumentItem | null>(null);
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 
 	$effect(() => {
+		if (!realtimeConfigSignal.loading && !collaborationEnabled) {
+			toast.error('当前已关闭共享与协作功能');
+			void goto('/workspace');
+			return;
+		}
 		void loadInitial();
 	});
 

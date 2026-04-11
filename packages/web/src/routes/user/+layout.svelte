@@ -1,10 +1,12 @@
 <script lang="ts">
 	import * as m from '$paraglide/messages';
+	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import RouteAuthGuard from '$lib/components/auth/RouteAuthGuard.svelte';
 	import TopBar from '$lib/components/workspace/TopBar.svelte';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { auth } from '$lib/stores/auth';
+	import { realtimeConfig } from '$lib/stores/realtime';
 	import House from '~icons/ph/house';
 	import UserCircle from '~icons/ph/user-circle';
 	import ShieldCheck from '~icons/ph/shield-check';
@@ -15,8 +17,11 @@
 
 	let { children } = $props();
 	let mobileNavOpen = $state(false);
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 
-	const navItems = [
+	const allNavItems = [
 		{ href: '/user', label: m.user_nav_overview(), icon: House },
 		{ href: '/user/profile', label: m.user_nav_profile(), icon: UserCircle },
 		{ href: '/user/security', label: m.user_nav_security(), icon: ShieldCheck },
@@ -24,6 +29,9 @@
 		{ href: '/user/image-beds', label: m.user_nav_image_beds(), icon: LinkSimple },
 		{ href: '/user/media', label: m.user_nav_media_library(), icon: ImagesSquare }
 	];
+	const navItems = $derived(
+		allNavItems.filter((item) => collaborationEnabled || item.href !== '/user/sharing')
+	);
 
 	function isActive(pathname: string, href: string): boolean {
 		if (href === '/user') return pathname === href;

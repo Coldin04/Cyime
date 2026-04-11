@@ -3,6 +3,7 @@ package acl
 import (
 	"errors"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -56,6 +57,10 @@ func ResolveDocumentRole(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Doc
 	if row.OwnerUserID == userID {
 		document := row.Document
 		return &document, RoleOwner, nil
+	}
+
+	if !config.GetCollaborationEnabled() {
+		return nil, "", ErrDocumentNotFoundOrForbidden
 	}
 
 	if row.PermissionRole == nil || *row.PermissionRole == "" {
@@ -120,8 +125,14 @@ func RoleAllowsAction(role, action string) bool {
 	case ActionRead:
 		return role == RoleOwner || role == RoleCollaborator || role == RoleEditor || role == RoleViewer
 	case ActionEdit:
+		if !config.GetCollaborationEnabled() {
+			return role == RoleOwner
+		}
 		return role == RoleOwner || role == RoleCollaborator || role == RoleEditor
 	case ActionManageMembers:
+		if !config.GetCollaborationEnabled() {
+			return false
+		}
 		return role == RoleOwner || role == RoleCollaborator
 	case ActionOwnerOnly:
 		return role == RoleOwner
@@ -135,8 +146,14 @@ func AllowedRolesForAction(action string) []string {
 	case ActionRead:
 		return []string{RoleViewer, RoleEditor, RoleCollaborator, RoleOwner}
 	case ActionEdit:
+		if !config.GetCollaborationEnabled() {
+			return []string{RoleOwner}
+		}
 		return []string{RoleEditor, RoleCollaborator, RoleOwner}
 	case ActionManageMembers:
+		if !config.GetCollaborationEnabled() {
+			return []string{}
+		}
 		return []string{RoleCollaborator, RoleOwner}
 	case ActionOwnerOnly:
 		return []string{RoleOwner}

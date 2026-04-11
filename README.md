@@ -52,6 +52,23 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 - `packages/realtime` 是独立的实时协作服务。
 - 当前建议两者保持独立部署，避免把 WebSocket 与前端平台运行时耦合在一起。
 - 后续可以统一收敛到 Docker Compose 做一键启动。
+- 如果你不使用实时协作，建议直接不启动 `packages/realtime`。
+
+实时协作总开关：
+
+- 使用 `COLLABORATION_ENABLED=true|false`
+- 这是服务端配置，不是前端配置
+- `packages/server` 会把该值作为 `collaborationEnabled` 通过 `/api/v1/config` 下发给前端
+- `packages/realtime` 会用同名变量决定是否接受 websocket、presence 和强制持久化请求
+- 如果要完全关闭协作，必须同时在 `packages/server/.env` 和 `packages/realtime/.env` 中设置为 `false`
+- 关闭后，前端编辑页会退回单人保存链路；非 owner 进入编辑页会提示后跳转只读预览页
+- 如果还希望某个前端部署本地就完全不加载协作能力，可额外设置 `packages/web/.env` 中的 `PUBLIC_COLLABORATION_ENABLED=false`
+- 前端最终生效值为：`PUBLIC_COLLABORATION_ENABLED && 后端下发的 collaborationEnabled`
+- 以上两个变量统一记录在根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)
+- 对于单人部署，推荐做法是：
+  - 不启动 `packages/realtime`
+  - `packages/server/.env` 设 `COLLABORATION_ENABLED=false`
+  - `packages/web/.env` 设 `PUBLIC_COLLABORATION_ENABLED=false`
 
 
 ## 仓库说明
@@ -133,6 +150,14 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
   - 留空表示不限制。
   - 用户如果单独配置了 `document_quota`，会优先使用用户自己的值。
   - 后端会在创建文档时校验这个上限。
+
+- 实时协作开关
+  - `COLLABORATION_ENABLED`：是否启用实时协作，默认 `true`
+  - 需要在 `packages/server/.env` 与 `packages/realtime/.env` 保持一致
+  - 前端不会直接读取本地 env，而是读取后端 `/api/v1/config` 下发的 `collaborationEnabled`
+  - 可选前端附加开关：`PUBLIC_COLLABORATION_ENABLED`，默认 `true`
+  - 适用于你想让某个前端部署固定保持单人模式，不去初始化协作 UI / provider
+  - 这两个变量都已统一写在根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)
 
 - 媒体与图床
   - `MEDIA_STORAGE_PROVIDER`：可选 `local | r2 | s3 | cos`，默认 `local`。

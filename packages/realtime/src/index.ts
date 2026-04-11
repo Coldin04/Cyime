@@ -11,6 +11,13 @@ dotenv.config();
 // 配置
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const GO_API_URL = process.env.GO_API_URL || 'http://localhost:8080/api/v1';
+const COLLABORATION_ENABLED = (() => {
+	const raw = (process.env.COLLABORATION_ENABLED || '').trim().toLowerCase();
+	if (raw === '') {
+		return true;
+	}
+	return ['1', 'true', 'yes', 'y', 'on'].includes(raw);
+})();
 const REALTIME_SAVE_DEBOUNCE_MS = Math.max(
 	1000,
 	parseInt(process.env.REALTIME_SAVE_DEBOUNCE_MS || '10000', 10)
@@ -565,6 +572,12 @@ const server = new Server({
 
 	// 认证 - 从 WebSocket URL 或 token 字段提取 JWT
 	async onAuthenticate(data: any) {
+		if (!COLLABORATION_ENABLED) {
+			const error = new Error('collaboration-disabled') as Error & { reason?: string };
+			error.reason = 'collaboration-disabled';
+			throw error;
+		}
+
 		const token = (data?.token as string | undefined) || extractTokenFromUrl(data?.request?.url);
 
 		if (!token) {
@@ -877,6 +890,12 @@ const server = new Server({
 		const isPersistNowRequest = requestURL.pathname === '/api/v1/realtime/persist-now';
 		if (!isPresenceRequest && !isPersistNowRequest) {
 			return;
+		}
+
+		if (!COLLABORATION_ENABLED) {
+			response.writeHead(404, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Collaboration is disabled' }));
+			throw null;
 		}
 
 		const documentId = normalizeDocumentId(requestURL.searchParams.get('documentId') ?? '');

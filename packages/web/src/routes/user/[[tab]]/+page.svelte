@@ -1,14 +1,21 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import * as m from '$paraglide/messages';
+	import { toast } from 'svelte-sonner';
 	import OverviewTab from '$lib/components/user/OverviewTab.svelte';
 	import ProfileTab from '$lib/components/user/ProfileTab.svelte';
 	import SecurityTab from '$lib/components/user/SecurityTab.svelte';
 	import MediaTab from '$lib/components/user/MediaTab.svelte';
 	import ImageBedsTab from '$lib/components/user/ImageBedsTab.svelte';
 	import SharingTab from '$lib/components/user/SharingTab.svelte';
+	import { realtimeConfig } from '$lib/stores/realtime';
 
 	let tab = $derived($page.params.tab || 'overview');
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 
 	const titles: Record<string, any> = {
 		get overview() { return m.user_nav_overview(); },
@@ -27,6 +34,13 @@
 		get media() { return m.user_media_description(); },
 		get sharing() { return m.user_sharing_description(); }
 	};
+
+	$effect(() => {
+		if (tab === 'sharing' && !realtimeConfigSignal.loading && !collaborationEnabled) {
+			toast.error('当前已关闭共享与协作功能');
+			void goto('/user');
+		}
+	});
 </script>
 
 <svelte:head>
@@ -53,7 +67,7 @@
 		<SecurityTab />
 	{:else if tab === 'media'}
 		<MediaTab />
-	{:else if tab === 'sharing'}
+	{:else if tab === 'sharing' && collaborationEnabled}
 		<SharingTab />
 	{/if}
 </section>

@@ -119,6 +119,14 @@
 		resolve: (value: boolean) => void;
 		timer: number;
 	};
+	let pageSignal = $state(get(page));
+	page.subscribe((p) => (pageSignal = p));
+	let authSignal = $state(get(auth));
+	auth.subscribe((state) => (authSignal = state));
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const documentId = $derived(pageSignal.params?.id);
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 	let collaborationSaveWaiters: SaveWaiter[] = [];
 	let editorContentOverrideWaiter: EditorOverrideWaiter | null = null;
 	let nextEditorContentOverrideToken = 0;
@@ -126,7 +134,7 @@
 		if (!documentId || isLoading) {
 			return 'none';
 		}
-		return collaboration?.provider && isYjsConnected ? 'collaboration' : 'local';
+		return collaborationEnabled && collaboration?.provider && isYjsConnected ? 'collaboration' : 'local';
 	});
 	const availableImageTargets = $derived(getDocumentImageTargetOptions(imageBedConfigs));
 	const exportImageTargetOptions = $derived(
@@ -223,7 +231,7 @@
 
 	function sendCollaborationContentSnapshot(snapshotContent: JSONContent): void {
 		const provider = collaboration?.provider;
-		if (!provider || !isYjsConnected || !documentId) {
+		if (!collaborationEnabled || !provider || !isYjsConnected || !documentId) {
 			return;
 		}
 
@@ -241,7 +249,7 @@
 	}
 
 	async function requestImmediateCollaborationPersist(): Promise<boolean> {
-		if (!isYjsConnected || !documentId) {
+		if (!collaborationEnabled || !isYjsConnected || !documentId) {
 			return false;
 		}
 
@@ -270,7 +278,7 @@
 	}
 
 	function scheduleCollaborationContentSnapshot(snapshotContent: JSONContent): void {
-		if (!browser) {
+		if (!browser || !collaborationEnabled) {
 			return;
 		}
 
@@ -490,14 +498,6 @@
 		isExportPrivateImagesDialogOpen = true;
 	}
 
-	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
-	// since this environment is in runes-mode but likely on an older Svelte 5 version.
-	let pageSignal = $state(get(page));
-	page.subscribe((p) => (pageSignal = p));
-	let authSignal = $state(get(auth));
-	auth.subscribe((state) => (authSignal = state));
-	const documentId = $derived(pageSignal.params?.id);
-
 	beforeNavigate((navigation) => {
 		if (documentId && navigation.to?.url) {
 			void unregisterPresenceSession(documentId, { keepalive: true });
@@ -713,6 +713,11 @@
 	}
 
 	function updateCollaborationIndicator() {
+		if (!collaborationEnabled) {
+			collaborationIndicator = null;
+			return;
+		}
+
 		if (presenceCount > 1) {
 			if (isYjsConnected) {
 				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
@@ -767,6 +772,10 @@
 	}
 
 	async function fetchCollaborationPresence(nextDocumentId: string): Promise<number> {
+		if (!collaborationEnabled) {
+			return 0;
+		}
+
 		const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
 			headers: {
 				Authorization: `Bearer ${authSignal.token}`
@@ -792,7 +801,7 @@
 		nextDocumentId: string,
 		options: { keepalive?: boolean } = {}
 	): Promise<void> {
-		if (!browser || !nextDocumentId || !presenceSessionId || !authSignal.token) {
+		if (!collaborationEnabled || !browser || !nextDocumentId || !presenceSessionId || !authSignal.token) {
 			return;
 		}
 
@@ -812,7 +821,7 @@
 	}
 
 	async function connectPresenceSocket(nextDocumentId: string) {
-		if (!browser || presenceHeartbeatTimer !== null) {
+		if (!collaborationEnabled || !browser || presenceHeartbeatTimer !== null) {
 			return;
 		}
 
@@ -869,6 +878,10 @@
 	}
 
 	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+		if (!collaborationEnabled) {
+			throw new Error('collaboration-disabled');
+		}
+
 		const wsUrl = await resolveRealtimeWsUrl();
 		const token = authSignal.token;
 		if (!token) {
@@ -890,6 +903,10 @@
 	}
 
 	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
+		if (!collaborationEnabled) {
+			return;
+		}
+
 		const now = Date.now();
 		if (
 			isInitializingCollaboration ||
@@ -1302,7 +1319,7 @@
 
 	// Load document content when ID becomes available
 	$effect(() => {
-		if (documentId && !authSignal.loading) {
+		if (documentId && !authSignal.loading && !realtimeConfigSignal.loading) {
 			isLoading = true;
 			const loadContent = async () => {
 				try {
@@ -1319,6 +1336,11 @@
 					]);
 
 					if (details.myRole === 'viewer') {
+						await goto(`/view/documents/${documentId}`);
+						return;
+					}
+
+					if (!collaborationEnabled && details.myRole !== 'owner') {
 						await goto(`/view/documents/${documentId}`);
 						return;
 					}
@@ -1361,25 +1383,27 @@
 						console.log('[Load] Title loaded:', title);
 						isLoading = false;
 
-						void (async () => {
-							try {
-								presenceCount = await fetchCollaborationPresence(documentId);
-								updateCollaborationIndicator();
-								await connectPresenceSocket(documentId);
-								// Collaboration bootstrap stays in the background on purpose:
-								// local content must render first so a down realtime service
-								// degrades to single-user editing instead of blanking the editor.
-								await startCollaboration(documentId, 'presence');
-							} catch (presenceError) {
-								console.error('[Collaboration] Failed to fetch presence:', presenceError);
-								presenceCount = 0;
-							presenceConnected = false;
-							hasAttemptedPresence = true;
-							collaborationError = 'presence-disconnected';
-							isYjsConnected = false;
-							updateCollaborationIndicator();
+						if (collaborationEnabled) {
+							void (async () => {
+								try {
+									presenceCount = await fetchCollaborationPresence(documentId);
+									updateCollaborationIndicator();
+									await connectPresenceSocket(documentId);
+									// Collaboration bootstrap stays in the background on purpose:
+									// local content must render first so a down realtime service
+									// degrades to single-user editing instead of blanking the editor.
+									await startCollaboration(documentId, 'presence');
+								} catch (presenceError) {
+									console.error('[Collaboration] Failed to fetch presence:', presenceError);
+									presenceCount = 0;
+									presenceConnected = false;
+									hasAttemptedPresence = true;
+									collaborationError = 'presence-disconnected';
+									isYjsConnected = false;
+									updateCollaborationIndicator();
+								}
+							})();
 						}
-					})();
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
 					collaboration = null;
@@ -1493,6 +1517,7 @@
 				{myRole}
 				{publicAccess}
 				{publicUrl}
+				{collaborationEnabled}
 				{collaborationIndicator}
 				{onlineMembers}
 				readOnly={false}
