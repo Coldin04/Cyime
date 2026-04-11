@@ -183,12 +183,35 @@
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
 		const doc = parser.parseFromString(html, 'text/html');
+		const allowedDataImageMimeTypes = new Set([
+			'image/png',
+			'image/jpeg',
+			'image/webp',
+			'image/gif'
+		]);
+
+		const isAllowedImageSrc = (src: string): boolean => {
+			const value = src.trim();
+			if (!value) return false;
+
+			if (value.startsWith('data:')) {
+				const mimeType = value.slice(5).split(';', 1)[0]?.toLowerCase() ?? '';
+				return allowedDataImageMimeTypes.has(mimeType);
+			}
+
+			try {
+				const parsed = new URL(value, window.location.origin);
+				return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+			} catch {
+				return false;
+			}
+		};
 
 		doc.querySelectorAll('script, style, meta, link').forEach((node) => node.remove());
 
 		doc.querySelectorAll('img').forEach((img) => {
 			const src = img.getAttribute('src')?.trim();
-			if (!src) {
+			if (!src || !isAllowedImageSrc(src)) {
 				img.remove();
 				return;
 			}
@@ -201,6 +224,7 @@
 					attrName === 'style' ||
 					attrName === 'class' ||
 					attrName === 'id' ||
+					attrName.startsWith('on') ||
 					attrName.startsWith('data-') ||
 					attrName.startsWith('aria-');
 				if (isUnsafe) {
