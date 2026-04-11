@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import * as m from '$paraglide/messages';
@@ -14,8 +15,14 @@
 
 	let tab = $derived($page.params.tab || 'overview');
 	let realtimeConfigSignal = $state(get(realtimeConfig));
-	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
 	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
+	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => {
+		realtimeConfigSignal = state;
+	});
+
+	onDestroy(() => {
+		unsubscribeRealtimeConfig();
+	});
 
 	const titles: Record<string, any> = {
 		get overview() { return m.user_nav_overview(); },
@@ -37,7 +44,7 @@
 
 	$effect(() => {
 		if (tab === 'sharing' && !realtimeConfigSignal.loading && !collaborationEnabled) {
-			toast.error('当前已关闭共享与协作功能');
+			toast.error(m.workspace_shared_disabled());
 			void goto('/user');
 		}
 	});

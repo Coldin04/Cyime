@@ -955,7 +955,7 @@ const server = new Server({
 				response.end(
 					JSON.stringify({
 						error: error instanceof Error ? error.message : 'Failed to persist document immediately',
-						details: error instanceof Error && error.stack ? error.stack : null,
+						details: error instanceof Error ? error.stack ?? null : null,
 						documentId
 					})
 				);

@@ -61,7 +61,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 - `packages/server` 会把该值作为 `collaborationEnabled` 通过 `/api/v1/config` 下发给前端
 - `packages/realtime` 会用同名变量决定是否接受 websocket、presence 和强制持久化请求
 - 如果要完全关闭协作，必须同时在 `packages/server/.env` 和 `packages/realtime/.env` 中设置为 `false`
-- 关闭后，前端编辑页会退回单人保存链路；非 owner 进入编辑页会提示后跳转只读预览页
+- 关闭后，前端编辑页会退回单人保存链路；非 owner 访问会按“文档不存在或无权访问”处理
 - 如果还希望某个前端部署本地就完全不加载协作能力，可额外设置 `packages/web/.env` 中的 `PUBLIC_COLLABORATION_ENABLED=false`
 - 前端最终生效值为：`PUBLIC_COLLABORATION_ENABLED && 后端下发的 collaborationEnabled`
 - 以上两个变量统一记录在根目录 [`.env.example`](/home/coldin04/CyimeWrite/.env.example)

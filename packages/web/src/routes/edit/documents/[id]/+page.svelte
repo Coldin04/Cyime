@@ -120,11 +120,11 @@
 		timer: number;
 	};
 	let pageSignal = $state(get(page));
-	page.subscribe((p) => (pageSignal = p));
+	const unsubscribePage = page.subscribe((p) => (pageSignal = p));
 	let authSignal = $state(get(auth));
-	auth.subscribe((state) => (authSignal = state));
+	const unsubscribeAuth = auth.subscribe((state) => (authSignal = state));
 	let realtimeConfigSignal = $state(get(realtimeConfig));
-	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
 	const documentId = $derived(pageSignal.params?.id);
 	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 	let collaborationSaveWaiters: SaveWaiter[] = [];
@@ -720,23 +720,29 @@
 
 		if (presenceCount > 1) {
 			if (isYjsConnected) {
-				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
+				collaborationIndicator = {
+					kind: 'multi',
+					label: m.editor_collaboration_connected_multi({ count: String(presenceCount) })
+				};
 				return;
 			}
 
 			collaborationIndicator = {
 				kind: 'multi-pending',
-				label: `检测到 ${presenceCount} 个会话在线，但协作连接尚未建立`
+				label: m.editor_collaboration_pending_multi({ count: String(presenceCount) })
 			};
 			return;
 		}
 
 		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
-			collaborationIndicator = { kind: 'single-offline', label: '协作连接已断开，当前为单人模式' };
+			collaborationIndicator = {
+				kind: 'single-offline',
+				label: m.editor_collaboration_disconnected_single_mode()
+			};
 			return;
 		}
 
-		collaborationIndicator = { kind: 'single', label: '当前仅你在线编辑' };
+		collaborationIndicator = { kind: 'single', label: m.editor_collaboration_single_online() };
 	}
 
 	function ensurePresenceSessionId() {
@@ -848,8 +854,10 @@
 					const payload = (await response.json()) as { maxSessions?: number };
 					throw new Error(
 						typeof payload.maxSessions === 'number'
-							? `当前文档在线会话已达上限（${payload.maxSessions}）`
-							: '当前文档在线会话已达上限'
+							? m.editor_collaboration_session_limit_reached_with_count({
+									count: String(payload.maxSessions)
+								})
+							: m.editor_collaboration_session_limit_reached()
 					);
 				}
 				if (!response.ok) {
@@ -862,7 +870,11 @@
 				updateCollaborationIndicator();
 			} catch (error) {
 				presenceConnected = false;
-				if (error instanceof Error && error.message.includes('在线会话已达上限')) {
+				if (
+					error instanceof Error &&
+					(error.message.includes(m.editor_collaboration_session_limit_reached()) ||
+						error.message.includes('online session limit'))
+				) {
 					collaborationError = error.message;
 					toast.error(error.message);
 				}
@@ -928,7 +940,7 @@
 			const collaborationInstance = await initializeCollaboration(nextDocumentId);
 			if (collaborationInstance.error || !collaborationInstance.provider) {
 				collaboration = null;
-				collaborationError = collaborationInstance.error || '协作连接失败';
+				collaborationError = collaborationInstance.error || m.editor_collaboration_connect_failed();
 				isYjsConnected = false;
 				updateCollaborationIndicator();
 				yjsProvider.destroyProvider(nextDocumentId);
@@ -944,7 +956,7 @@
 			collaborationError =
 				collaborationInitError instanceof Error
 					? collaborationInitError.message
-					: 'Unknown collaboration error';
+					: m.editor_collaboration_unknown_error();
 			isYjsConnected = false;
 			updateCollaborationIndicator();
 			clearCollaborationListeners();
@@ -963,7 +975,7 @@
 		clearCollaborationListeners();
 
 		if (!instance.provider) {
-			collaborationError = '协作连接已断开';
+			collaborationError = m.editor_collaboration_disconnected();
 			isYjsConnected = false;
 			updateCollaborationIndicator();
 			return;
@@ -999,7 +1011,7 @@
 			}
 
 			if (status === 'disconnected') {
-				collaborationError = '协作连接已断开';
+				collaborationError = m.editor_collaboration_disconnected();
 				isYjsConnected = false;
 				isSaving = false;
 				hasManualSaveRequestInFlight = false;
@@ -1011,7 +1023,7 @@
 		};
 
 		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
-			collaborationError = reason || '协作鉴权失败';
+			collaborationError = reason || m.editor_collaboration_auth_failed();
 			isYjsConnected = false;
 			isSaving = false;
 			hasManualSaveRequestInFlight = false;
@@ -1428,6 +1440,9 @@
 	});
 
 	onDestroy(() => {
+		unsubscribePage();
+		unsubscribeAuth();
+		unsubscribeRealtimeConfig();
 		if (documentId) {
 			void unregisterPresenceSession(documentId, { keepalive: true });
 		}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import * as m from '$paraglide/messages';
 	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
@@ -18,8 +19,14 @@
 	let { children } = $props();
 	let mobileNavOpen = $state(false);
 	let realtimeConfigSignal = $state(get(realtimeConfig));
-	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
 	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
+	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => {
+		realtimeConfigSignal = state;
+	});
+
+	onDestroy(() => {
+		unsubscribeRealtimeConfig();
+	});
 
 	const allNavItems = [
 		{ href: '/user', label: m.user_nav_overview(), icon: House },

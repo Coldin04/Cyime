@@ -32,12 +32,18 @@
 	let manageMembersDoc = $state<{ id: string; title: string } | null>(null);
 	let leaveTargetDoc = $state<SharedDocumentItem | null>(null);
 	let realtimeConfigSignal = $state(get(realtimeConfig));
-	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
 	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 
 	$effect(() => {
+		const unsubscribe = realtimeConfig.subscribe((state) => {
+			realtimeConfigSignal = state;
+		});
+		return unsubscribe;
+	});
+
+	$effect(() => {
 		if (!realtimeConfigSignal.loading && !collaborationEnabled) {
-			toast.error('当前已关闭共享与协作功能');
+			toast.error(m.workspace_shared_disabled());
 			void goto('/workspace');
 			return;
 		}

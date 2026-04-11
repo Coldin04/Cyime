@@ -6,21 +6,23 @@ const envDefaultAutoSaveIntervalSeconds = Number.parseInt(
 );
 
 export const defaultAutoSaveEnabled = true;
-export const defaultAutoSaveIntervalSeconds = Number.isFinite(envDefaultAutoSaveIntervalSeconds)
-	? envDefaultAutoSaveIntervalSeconds
-	: 10;
 export const minAutoSaveIntervalSeconds = 1;
 export const maxAutoSaveIntervalSeconds = 300;
+
+function clampAutoSaveIntervalValue(value: number): number {
+	return Math.min(maxAutoSaveIntervalSeconds, Math.max(minAutoSaveIntervalSeconds, Math.round(value)));
+}
+
+export const defaultAutoSaveIntervalSeconds = Number.isFinite(envDefaultAutoSaveIntervalSeconds)
+	? clampAutoSaveIntervalValue(envDefaultAutoSaveIntervalSeconds)
+	: 10;
 
 export function clampAutoSaveInterval(value: number): number {
 	if (!Number.isFinite(value)) {
 		return defaultAutoSaveIntervalSeconds;
 	}
 
-	return Math.min(
-		maxAutoSaveIntervalSeconds,
-		Math.max(minAutoSaveIntervalSeconds, Math.round(value))
-	);
+	return clampAutoSaveIntervalValue(value);
 }
 
 export function readAutoSaveEnabled(): boolean {
