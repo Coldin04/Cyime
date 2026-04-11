@@ -63,6 +63,29 @@ func resolveDocumentPreferredImageTargetID(value string) string {
 	return LegacyPreferredImageTargetID
 }
 
+func ensureDocumentQuotaWithinLimit(tx *gorm.DB, userID uuid.UUID, additionalDocuments int64) error {
+	limit, err := user.GetEffectiveDocumentQuotaWithDB(tx, userID)
+	if err != nil {
+		return err
+	}
+	if limit == nil {
+		return nil
+	}
+
+	var totalCount int64
+	if err := tx.Unscoped().Model(&models.Document{}).
+		Where("owner_user_id = ?", userID).
+		Count(&totalCount).Error; err != nil {
+		return err
+	}
+
+	if totalCount+additionalDocuments > int64(*limit) {
+		return ErrDocumentQuotaExceeded
+	}
+
+	return nil
+}
+
 func resolveUsableImageTargetForUser(userID uuid.UUID, preferredImageTargetID string) (string, error) {
 	normalized := normalizePreferredImageTargetID(preferredImageTargetID)
 	if normalized == "" || normalized == DefaultPreferredImageTargetID {
@@ -787,20 +810,8 @@ func CreateDocument(userID uuid.UUID, title string, contentJSON string, folderID
 	// Create the document in a transaction
 	var document *models.Document
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		limit, err := user.GetEffectiveDocumentQuotaWithDB(tx, userID)
-		if err != nil {
+		if err := ensureDocumentQuotaWithinLimit(tx, userID, 1); err != nil {
 			return err
-		}
-		if limit != nil {
-			var activeCount int64
-			if err := tx.Model(&models.Document{}).
-				Where("owner_user_id = ? AND deleted_at IS NULL", userID).
-				Count(&activeCount).Error; err != nil {
-				return err
-			}
-			if activeCount >= int64(*limit) {
-				return ErrDocumentQuotaExceeded
-			}
 		}
 
 		// Create document metadata
@@ -1791,6 +1802,14 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		for _, item := range itemsToRestore {
 			if item.Type == "folder" {
+				if err := ensureDocumentQuotaWithinLimit(tx, userID, 0); err != nil {
+					if errors.Is(err, ErrDocumentQuotaExceeded) {
+						failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: err.Error()})
+						continue
+					}
+					return err
+				}
+
 				var folder models.Folder
 				// Find the folder, including soft-deleted ones
 				if err := tx.Unscoped().Where("id = ? AND owner_user_id = ?", item.ID, userID).First(&folder).Error; err != nil {
@@ -1812,6 +1831,14 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 				}
 				restoredCount++
 			} else if item.Type == "document" {
+				if err := ensureDocumentQuotaWithinLimit(tx, userID, 0); err != nil {
+					if errors.Is(err, ErrDocumentQuotaExceeded) {
+						failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: err.Error()})
+						continue
+					}
+					return err
+				}
+
 				document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, item.ID)
 				if err != nil {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "项目不存在。"})

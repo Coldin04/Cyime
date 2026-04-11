@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -618,6 +619,74 @@ func TestLeaveSharedDocument_RemovesPermissionOnly(t *testing.T) {
 	}
 	if doc.DeletedAt.Valid {
 		t.Fatalf("expected document untouched")
+	}
+}
+
+func TestCreateDocument_CountsTrashedDocumentsTowardQuota(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "trashed-doc")
+
+	quota := 1
+	if err := db.Model(&models.User{}).Where("id = ?", ownerID).Update("document_quota", quota).Error; err != nil {
+		t.Fatalf("set document quota: %v", err)
+	}
+	if err := db.Delete(&models.Document{}, "id = ?", docID).Error; err != nil {
+		t.Fatalf("trash document: %v", err)
+	}
+	if err := db.Delete(&models.DocumentBody{}, "document_id = ?", docID).Error; err != nil {
+		t.Fatalf("trash document body: %v", err)
+	}
+
+	_, err := CreateDocument(
+		ownerID,
+		"new-doc",
+		`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"new"}]}]}`,
+		nil,
+		"rich_text",
+		"",
+	)
+	if !errors.Is(err, ErrDocumentQuotaExceeded) {
+		t.Fatalf("expected document quota exceeded, got %v", err)
+	}
+}
+
+func TestRestoreTrashedItems_RejectsWhenQuotaAlreadyExceeded(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "trashed-doc")
+
+	quota := 0
+	if err := db.Model(&models.User{}).Where("id = ?", ownerID).Update("document_quota", quota).Error; err != nil {
+		t.Fatalf("set document quota: %v", err)
+	}
+	if err := db.Delete(&models.Document{}, "id = ?", docID).Error; err != nil {
+		t.Fatalf("trash document: %v", err)
+	}
+	if err := db.Delete(&models.DocumentBody{}, "document_id = ?", docID).Error; err != nil {
+		t.Fatalf("trash document body: %v", err)
+	}
+
+	response, err := RestoreTrashedItems(ownerID, []ItemToRestore{{ID: docID, Type: "document"}})
+	if err != nil {
+		t.Fatalf("restore trashed items: %v", err)
+	}
+	if response.RestoredCount != 0 {
+		t.Fatalf("expected zero restored items, got %d", response.RestoredCount)
+	}
+	if len(response.FailedItems) != 1 {
+		t.Fatalf("expected one failed item, got %+v", response.FailedItems)
+	}
+	if response.FailedItems[0].Reason != ErrDocumentQuotaExceeded.Error() {
+		t.Fatalf("expected quota failure, got %+v", response.FailedItems[0])
+	}
+
+	var document models.Document
+	if err := db.Unscoped().First(&document, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load trashed document: %v", err)
+	}
+	if !document.DeletedAt.Valid {
+		t.Fatal("expected document to remain in trash")
 	}
 }
 
