@@ -1,8 +1,14 @@
 const AUTO_SAVE_ENABLED_KEY = 'cyimewrite.editor.autoSave.enabled';
 const AUTO_SAVE_INTERVAL_KEY = 'cyimewrite.editor.autoSave.intervalSeconds';
+const envDefaultAutoSaveIntervalSeconds = Number.parseInt(
+	import.meta.env.PUBLIC_EDITOR_AUTO_SAVE_INTERVAL_SECONDS || '10',
+	10
+);
 
 export const defaultAutoSaveEnabled = true;
-export const defaultAutoSaveIntervalSeconds = 5;
+export const defaultAutoSaveIntervalSeconds = Number.isFinite(envDefaultAutoSaveIntervalSeconds)
+	? envDefaultAutoSaveIntervalSeconds
+	: 10;
 export const minAutoSaveIntervalSeconds = 1;
 export const maxAutoSaveIntervalSeconds = 300;
 

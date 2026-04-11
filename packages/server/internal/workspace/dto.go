@@ -274,9 +274,10 @@ type GetYjsStateResponse struct {
 // concurrency control. A value <= 0 is treated as "I have no version yet"
 // and only succeeds when no row exists for the document (initial create).
 type UpdateYjsStateRequest struct {
-	YjsState           string `json:"yjsState"`
-	YjsStateVector     string `json:"yjsStateVector"`
-	ExpectedYjsVersion int64  `json:"expectedYjsVersion"`
+	YjsState           string          `json:"yjsState"`
+	YjsStateVector     string          `json:"yjsStateVector"`
+	ExpectedYjsVersion int64           `json:"expectedYjsVersion"`
+	ContentJSON        json.RawMessage `json:"contentJson,omitempty"`
 }
 
 // YjsStateConflictResponse is returned when ExpectedYjsVersion mismatches the
