@@ -1800,14 +1800,20 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 	var failedItems []FailedItem
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		restoreBlockedByQuota := false
+		if err := ensureDocumentQuotaWithinLimit(tx, userID, 0); err != nil {
+			if errors.Is(err, ErrDocumentQuotaExceeded) {
+				restoreBlockedByQuota = true
+			} else {
+				return err
+			}
+		}
+
 		for _, item := range itemsToRestore {
 			if item.Type == "folder" {
-				if err := ensureDocumentQuotaWithinLimit(tx, userID, 0); err != nil {
-					if errors.Is(err, ErrDocumentQuotaExceeded) {
-						failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: err.Error()})
-						continue
-					}
-					return err
+				if restoreBlockedByQuota {
+					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: ErrDocumentQuotaExceeded.Error()})
+					continue
 				}
 
 				var folder models.Folder
@@ -1831,12 +1837,9 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 				}
 				restoredCount++
 			} else if item.Type == "document" {
-				if err := ensureDocumentQuotaWithinLimit(tx, userID, 0); err != nil {
-					if errors.Is(err, ErrDocumentQuotaExceeded) {
-						failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: err.Error()})
-						continue
-					}
-					return err
+				if restoreBlockedByQuota {
+					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: ErrDocumentQuotaExceeded.Error()})
+					continue
 				}
 
 				document, err := acl.CanAccessDocumentOwnerOnlyUnscoped(tx, userID, item.ID)
