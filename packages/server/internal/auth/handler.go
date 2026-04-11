@@ -578,17 +578,17 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 				userName = ghUser.Login
 			}
 			userEmail := strings.TrimSpace(ghUser.Email)
-			if userEmail == "" {
-				fallbackEmail, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
-				if err != nil {
-					return nil, err
-				}
-				userEmail = fallbackEmail
+			verifiedEmail, emailVerified, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
+			if err != nil {
+				return nil, err
+			}
+			if verifiedEmail != "" {
+				userEmail = verifiedEmail
 			}
 			userProfile = UserProfile{
 				Subject:       fmt.Sprintf("%d", ghUser.ID),
 				Email:         userEmail,
-				EmailVerified: userEmail != "",
+				EmailVerified: emailVerified,
 				Name:          userName,
 				Picture:       ghUser.Avatar,
 			}
@@ -622,17 +622,17 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 	return &userProfile, nil
 }
 
-func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, token *oauth2.Token) (string, error) {
+func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, token *oauth2.Token) (string, bool, error) {
 	client := oauth2Config.Client(ctx, token)
 	resp, err := client.Get("https://api.github.com/user/emails")
 	if err != nil {
-		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: %w", err)
+		return "", false, fmt.Errorf("无法获取 GitHub 邮箱信息: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("无法获取 GitHub 邮箱信息: status %d, body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", false, fmt.Errorf("无法获取 GitHub 邮箱信息: status %d, body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var emails []struct {
@@ -641,26 +641,32 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 		Verified bool   `json:"verified"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&emails); err != nil {
-		return "", fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
+		return "", false, fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
 	}
 
+	anyEmail := ""
 	for _, item := range emails {
-		if item.Primary && item.Verified && strings.TrimSpace(item.Email) != "" {
-			return strings.TrimSpace(item.Email), nil
+		email := strings.TrimSpace(item.Email)
+		if email == "" {
+			continue
+		}
+		if anyEmail == "" {
+			anyEmail = email
+		}
+		if item.Primary && item.Verified {
+			return email, true, nil
 		}
 	}
 	for _, item := range emails {
 		if item.Verified && strings.TrimSpace(item.Email) != "" {
-			return strings.TrimSpace(item.Email), nil
+			return strings.TrimSpace(item.Email), true, nil
 		}
 	}
-	for _, item := range emails {
-		if strings.TrimSpace(item.Email) != "" {
-			return strings.TrimSpace(item.Email), nil
-		}
+	if anyEmail != "" {
+		return anyEmail, false, nil
 	}
 
-	return "", nil
+	return "", false, nil
 }
 
 func optionalStringPtr(value string) *string {
