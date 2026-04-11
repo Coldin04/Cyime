@@ -44,6 +44,14 @@ type UpdateContentResult struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+// DocumentBodyPatch carries optional extra fields that should be written
+// alongside canonical content during a single transactional save.
+type DocumentBodyPatch struct {
+	YjsState       *string
+	YjsStateVector *string
+	YjsVersion     *int64
+}
+
 // GetContent retrieves the current content of a document.
 func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
 	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
@@ -72,6 +80,31 @@ func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, erro
 
 // UpdateContent updates the current content of a document in place.
 func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte) (*UpdateContentResult, error) {
+	var result *UpdateContentResult
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		document, err := acl.CanEditDocument(tx, userID, documentID)
+		if err != nil {
+			return ErrDocumentNotFoundOrUnauthorized
+		}
+
+		result, err = PersistCanonicalContent(tx, document, userID, contentJSONRaw, nil)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// PersistCanonicalContent updates the canonical JSON-backed document state and
+// any optional companion fields in a single transaction.
+func PersistCanonicalContent(
+	tx *gorm.DB,
+	document *models.Document,
+	userID uuid.UUID,
+	contentJSONRaw []byte,
+	patch *DocumentBodyPatch,
+) (*UpdateContentResult, error) {
 	contentJSON, err := normalizeContentJSON(contentJSONRaw)
 	if err != nil {
 		return nil, err
@@ -81,74 +114,86 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 		return nil, err
 	}
 
-	var (
-		updatedAt      time.Time
-		contentVersion int64
-	)
+	now := time.Now()
 	plainText := toPlainText(contentJSON)
 	excerpt := buildExcerpt(plainText)
-
-	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		document, err := acl.CanEditDocument(tx, userID, documentID)
-		if err != nil {
-			return ErrDocumentNotFoundOrUnauthorized
+	bodyUpdates := map[string]any{
+		"content_json":    contentJSON,
+		"plain_text":      plainText,
+		"updated_by":      userID,
+		"content_version": gorm.Expr("content_version + 1"),
+		"updated_at":      now,
+	}
+	if patch != nil {
+		if patch.YjsState != nil {
+			bodyUpdates["yjs_state"] = *patch.YjsState
 		}
-
-		now := time.Now()
-		result := tx.Model(&models.DocumentBody{}).
-			Where("document_id = ?", documentID).
-			Updates(map[string]any{
-				"content_json":    contentJSON,
-				"plain_text":      plainText,
-				"updated_by":      userID,
-				"content_version": gorm.Expr("content_version + 1"),
-				"updated_at":      now,
-			})
-		if result.Error != nil {
-			return result.Error
+		if patch.YjsStateVector != nil {
+			bodyUpdates["yjs_state_vector"] = *patch.YjsStateVector
 		}
-		if result.RowsAffected == 0 {
-			contentRecord := &models.DocumentBody{
-				ID:             uuid.New(),
-				DocumentID:     documentID,
-				ContentJSON:    contentJSON,
-				PlainText:      plainText,
-				ContentVersion: 1,
-				UpdatedBy:      userID,
+		if patch.YjsVersion != nil {
+			bodyUpdates["yjs_version"] = *patch.YjsVersion
+		}
+	}
+
+	var contentVersion int64
+	result := tx.Model(&models.DocumentBody{}).
+		Where("document_id = ?", document.ID).
+		Updates(bodyUpdates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		contentRecord := &models.DocumentBody{
+			ID:             uuid.New(),
+			DocumentID:     document.ID,
+			ContentJSON:    contentJSON,
+			PlainText:      plainText,
+			ContentVersion: 1,
+			YjsVersion:     1,
+			UpdatedBy:      userID,
+		}
+		if patch != nil {
+			if patch.YjsState != nil {
+				contentRecord.YjsState = *patch.YjsState
 			}
-			if err := tx.Create(contentRecord).Error; err != nil {
-				return err
+			if patch.YjsStateVector != nil {
+				contentRecord.YjsStateVector = *patch.YjsStateVector
 			}
-			contentVersion = contentRecord.ContentVersion
-		}
-
-		if contentVersion == 0 {
-			var body models.DocumentBody
-			if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
-				return err
+			if patch.YjsVersion != nil {
+				contentRecord.YjsVersion = *patch.YjsVersion
 			}
-			contentVersion = body.ContentVersion
 		}
-
-		if err := syncDocumentAssetRefs(tx, document.OwnerUserID, documentID, assetIDs, now); err != nil {
-			return err
+		if err := tx.Create(contentRecord).Error; err != nil {
+			return nil, err
 		}
+		contentVersion = contentRecord.ContentVersion
+	}
 
-		updatedAt = now
-		return tx.Model(&document).Updates(map[string]any{
-			"excerpt":    excerpt,
-			"updated_at": now,
-			"updated_by": userID,
-		}).Error
-	})
-	if err != nil {
+	if contentVersion == 0 {
+		var body models.DocumentBody
+		if err := tx.Where("document_id = ?", document.ID).First(&body).Error; err != nil {
+			return nil, err
+		}
+		contentVersion = body.ContentVersion
+	}
+
+	if err := syncDocumentAssetRefs(tx, document.OwnerUserID, document.ID, assetIDs, now); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Model(document).Updates(map[string]any{
+		"excerpt":    excerpt,
+		"updated_at": now,
+		"updated_by": userID,
+	}).Error; err != nil {
 		return nil, err
 	}
 
 	return &UpdateContentResult{
 		Success:        true,
 		ContentVersion: contentVersion,
-		UpdatedAt:      updatedAt,
+		UpdatedAt:      now,
 	}, nil
 }
 

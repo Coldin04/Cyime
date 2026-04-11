@@ -4,9 +4,17 @@ import (
 	"errors"
 	"strings"
 
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+func collaborationDisabledResponse(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+		Error:   "Not Found",
+		Message: ErrDocumentNotFoundOrUnauthorized.Error(),
+	})
+}
 
 // GetFilesHandler handles GET /api/v1/workspace/files
 func GetFilesHandler(c *fiber.Ctx) error {
@@ -126,6 +134,10 @@ func GetFileHandler(c *fiber.Ctx) error {
 
 // GetPublicDocumentHandler handles GET /api/v1/public/documents/:id
 func GetPublicDocumentHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	documentID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -167,6 +179,10 @@ func GetPublicDocumentHandler(c *fiber.Ctx) error {
 
 // GetPublicDocumentContentHandler handles GET /api/v1/public/documents/:id/content
 func GetPublicDocumentContentHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	documentID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -377,6 +393,10 @@ func CreateDocumentHandler(c *fiber.Ctx) error {
 }
 
 func ListSharedDocumentsHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -403,6 +423,10 @@ func ListSharedDocumentsHandler(c *fiber.Ctx) error {
 }
 
 func SharedDocumentSummaryHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -429,6 +453,10 @@ func SharedDocumentSummaryHandler(c *fiber.Ctx) error {
 }
 
 func ListOutgoingSharedDocumentsHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -455,6 +483,10 @@ func ListOutgoingSharedDocumentsHandler(c *fiber.Ctx) error {
 }
 
 func ShareDocumentHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -504,6 +536,10 @@ func ShareDocumentHandler(c *fiber.Ctx) error {
 }
 
 func InviteDocumentByEmailHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -561,6 +597,10 @@ func InviteDocumentByEmailHandler(c *fiber.Ctx) error {
 }
 
 func ListDocumentMembersHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -594,6 +634,10 @@ func ListDocumentMembersHandler(c *fiber.Ctx) error {
 }
 
 func RemoveDocumentMemberHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -731,6 +775,10 @@ func ClearNotificationsHandler(c *fiber.Ctx) error {
 }
 
 func AcceptDocumentInviteHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -769,6 +817,10 @@ func AcceptDocumentInviteHandler(c *fiber.Ctx) error {
 }
 
 func DeclineDocumentInviteHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -801,6 +853,10 @@ func DeclineDocumentInviteHandler(c *fiber.Ctx) error {
 }
 
 func LeaveSharedDocumentHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
@@ -1314,6 +1370,10 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 
 // UpdateDocumentPublicAccessHandler handles PUT /api/v1/workspace/documents/:id/public-access
 func UpdateDocumentPublicAccessHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{

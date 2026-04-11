@@ -33,9 +33,28 @@ func putYjsState(
 	expectedVersion int64,
 ) *http.Response {
 	t.Helper()
+	return putYjsStateWithContentJSON(t, app, documentID, yjsState, yjsStateVector, expectedVersion, "")
+}
+
+func putYjsStateWithContentJSON(
+	t *testing.T,
+	app *fiber.App,
+	documentID uuid.UUID,
+	yjsState string,
+	yjsStateVector string,
+	expectedVersion int64,
+	contentJSON string,
+) *http.Response {
+	t.Helper()
 	payload := fmt.Sprintf(
-		`{"yjsState":%q,"yjsStateVector":%q,"expectedYjsVersion":%d}`,
+		`{"yjsState":%q,"yjsStateVector":%q,"expectedYjsVersion":%d%s}`,
 		yjsState, yjsStateVector, expectedVersion,
+		func() string {
+			if contentJSON == "" {
+				return ""
+			}
+			return fmt.Sprintf(`,"contentJson":%s`, contentJSON)
+		}(),
 	)
 	req := httptest.NewRequest(
 		http.MethodPut,
@@ -233,5 +252,58 @@ func TestUpdateYjsStateHandler_ViewerRoleDenied(t *testing.T) {
 	}
 	if stored.YjsState == "PWN" {
 		t.Fatal("viewer write leaked into storage")
+	}
+}
+
+func TestUpdateYjsStateHandler_WithCanonicalContent_UpdatesJSONTruth(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "yjs-doc")
+
+	if err := db.Model(&models.DocumentBody{}).
+		Where("document_id = ?", docID).
+		Updates(map[string]any{
+			"yjs_version":      3,
+			"yjs_state":        "OLD",
+			"content_json":     `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"old"}]}]}`,
+			"plain_text":       "old",
+			"content_version":  4,
+			"yjs_state_vector": "OLDVEC",
+		}).Error; err != nil {
+		t.Fatalf("seed body: %v", err)
+	}
+
+	app := newRealtimeStateTestApp(ownerID)
+	resp := putYjsStateWithContentJSON(
+		t,
+		app,
+		docID,
+		"NEWSTATE",
+		"NEWVEC",
+		3,
+		`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"fresh canonical"}]}]}`,
+	)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var stored models.DocumentBody
+	if err := db.Where("document_id = ?", docID).First(&stored).Error; err != nil {
+		t.Fatalf("load stored body: %v", err)
+	}
+	if stored.YjsVersion != 4 {
+		t.Fatalf("stored YjsVersion = %d, want 4", stored.YjsVersion)
+	}
+	if stored.ContentVersion != 5 {
+		t.Fatalf("stored ContentVersion = %d, want 5", stored.ContentVersion)
+	}
+	if stored.YjsState != "NEWSTATE" || stored.YjsStateVector != "NEWVEC" {
+		t.Fatalf("stored Yjs fields mismatch: %+v", stored)
+	}
+	if stored.PlainText != "fresh canonical" {
+		t.Fatalf("stored PlainText = %q, want fresh canonical", stored.PlainText)
+	}
+	if stored.ContentJSON != `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"fresh canonical"}]}]}` {
+		t.Fatalf("stored ContentJSON mismatch: %s", stored.ContentJSON)
 	}
 }

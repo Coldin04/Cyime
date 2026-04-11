@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
 	import ListHeader from '$lib/components/workspace/ListHeader.svelte';
@@ -18,6 +19,7 @@
 		batchDeleteFiles,
 		type FileItem
 	} from '$lib/api/workspace';
+	import { realtimeConfig } from '$lib/stores/realtime';
 	import { breadcrumbItems, workspaceContext } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
 	import { toast } from 'svelte-sonner';
@@ -31,6 +33,9 @@
 	let isLoading = $state(true);
 	let refreshTrigger = $state(0);
 	let isMoveDialogOpen = $state(false);
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
 
 	// Use local state for selected items to avoid store overhead during rapid selection
 	let bulkMode = $state(false);
@@ -85,7 +90,9 @@
 		(async () => {
 			try {
 				const shouldProbeSharedFolder =
-					$workspaceContext.currentFolderId === null && (filterType === 'all' || filterType === 'folders');
+					collaborationEnabled &&
+					$workspaceContext.currentFolderId === null &&
+					(filterType === 'all' || filterType === 'folders');
 
 				const filesPromise = getFiles({
 					parent_id: $workspaceContext.currentFolderId,
@@ -318,7 +325,7 @@
 				</p>
 			</div>
 	{:else}
-		{#if hasSharedEntry && $workspaceContext.currentFolderId === null && (filterType === 'all' || filterType === 'folders')}
+		{#if collaborationEnabled && hasSharedEntry && $workspaceContext.currentFolderId === null && (filterType === 'all' || filterType === 'folders')}
 			<SharedFolderListItem />
 		{/if}
 

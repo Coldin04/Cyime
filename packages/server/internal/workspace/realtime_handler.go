@@ -2,13 +2,16 @@ package workspace
 
 import (
 	"errors"
+	"log"
 
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
+	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
 	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // GetDocumentACLHandler handles GET /api/v1/workspace/documents/:id/acl
@@ -180,7 +183,8 @@ func UpdateYjsStateHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err = acl.CanEditDocument(database.DB, userID, documentID); err != nil {
+	document, err := acl.CanEditDocument(database.DB, userID, documentID)
+	if err != nil {
 		if !errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 				Error:   "Internal Server Error",
@@ -196,24 +200,21 @@ func UpdateYjsStateHandler(c *fiber.Ctx) error {
 	var newVersion int64
 	txErr := database.DB.Transaction(func(tx *gorm.DB) error {
 		var existing models.DocumentBody
-		err := tx.Where("document_id = ?", documentID).First(&existing).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("document_id = ?", documentID).
+			First(&existing).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			// First save for this document. The realtime client has nothing
 			// to echo back yet; create the row at version 1.
 			newVersion = 1
-			body := &models.DocumentBody{
-				ID:             uuid.New(),
-				DocumentID:     documentID,
-				ContentJSON:    `{"type":"doc","content":[{"type":"paragraph"}]}`,
-				PlainText:      "",
-				ContentVersion: 1,
-				YjsState:       req.YjsState,
-				YjsStateVector: req.YjsStateVector,
-				YjsVersion:     newVersion,
-				UpdatedBy:      userID,
-			}
-			return tx.Create(body).Error
+			log.Printf("[RealtimeState] create doc=%s user=%s yjsVersion=%d hasContentJSON=%t", documentID, userID, newVersion, len(req.ContentJSON) > 0)
+			_, err := content.PersistCanonicalContent(tx, document, userID, req.ContentJSON, &content.DocumentBodyPatch{
+				YjsState:       &req.YjsState,
+				YjsStateVector: &req.YjsStateVector,
+				YjsVersion:     &newVersion,
+			})
+			return err
 
 		case err != nil:
 			return err
@@ -224,31 +225,29 @@ func UpdateYjsStateHandler(c *fiber.Ctx) error {
 		// lives in the WHERE clause so a concurrent writer racing the same
 		// transaction cannot squeeze through.
 		if req.ExpectedYjsVersion != existing.YjsVersion {
+			log.Printf("[RealtimeState] conflict doc=%s user=%s expected=%d current=%d", documentID, userID, req.ExpectedYjsVersion, existing.YjsVersion)
 			return &yjsVersionConflictError{current: existing.YjsVersion}
 		}
 
 		newVersion = existing.YjsVersion + 1
-		result := tx.Model(&models.DocumentBody{}).
-			Where("document_id = ? AND yjs_version = ?", documentID, req.ExpectedYjsVersion).
+		if len(req.ContentJSON) > 0 {
+			log.Printf("[RealtimeState] update doc=%s user=%s newYjsVersion=%d hasContentJSON=true", documentID, userID, newVersion)
+			_, err := content.PersistCanonicalContent(tx, document, userID, req.ContentJSON, &content.DocumentBodyPatch{
+				YjsState:       &req.YjsState,
+				YjsStateVector: &req.YjsStateVector,
+				YjsVersion:     &newVersion,
+			})
+			return err
+		}
+		log.Printf("[RealtimeState] update doc=%s user=%s newYjsVersion=%d hasContentJSON=false", documentID, userID, newVersion)
+		return tx.Model(&models.DocumentBody{}).
+			Where("document_id = ?", documentID).
 			Updates(map[string]any{
 				"yjs_state":        req.YjsState,
 				"yjs_state_vector": req.YjsStateVector,
 				"yjs_version":      newVersion,
 				"updated_by":       userID,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			// Another writer bumped the version between our SELECT and UPDATE.
-			// Re-read so we can return the latest current version.
-			var fresh models.DocumentBody
-			if err := tx.Select("yjs_version").Where("document_id = ?", documentID).First(&fresh).Error; err != nil {
-				return err
-			}
-			return &yjsVersionConflictError{current: fresh.YjsVersion}
-		}
-		return nil
+			}).Error
 	})
 
 	if txErr != nil {

@@ -219,6 +219,26 @@ func TestListOutgoingSharedDocumentsHandler_ReturnsManagedDocs(t *testing.T) {
 	}
 }
 
+func TestListOutgoingSharedDocumentsHandler_DisabledWhenCollaborationOff(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	sharedUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
+	seedWorkspacePermission(t, db, docID, sharedUserID, ownerID, "viewer")
+
+	app := newWorkspaceTestApp(ownerID)
+	req := httptest.NewRequest(http.MethodGet, "/shared/outgoing", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 when collaboration disabled, got %d", resp.StatusCode)
+	}
+}
+
 func TestGetFileHandler_SharedViewerReturnsViewerRole(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()

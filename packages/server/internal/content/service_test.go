@@ -190,6 +190,20 @@ func TestUpdateContent_AllowsEditorPermission(t *testing.T) {
 	}
 }
 
+func TestUpdateContent_DeniesEditorWhenCollaborationDisabled(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+	seedContentPermission(t, db, docID, editorID, ownerID, "editor")
+
+	if _, err := UpdateContent(editorID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"blocked"}]}]}`)); err == nil {
+		t.Fatal("expected editor update to fail when collaboration is disabled")
+	}
+}
+
 func TestUpdateContent_SyncsDocumentAssetRefsAndAssetState(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()

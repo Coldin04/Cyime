@@ -27,6 +27,7 @@ let {
 	myRole = 'owner',
 	publicAccess = 'private',
 	publicUrl = '',
+	collaborationEnabled = true,
 	collaborationIndicator = null,
 	onlineMembers = [],
 	readOnly = false,
@@ -50,6 +51,7 @@ let {
 	myRole?: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
 	publicAccess?: 'private' | 'authenticated' | 'public' | string;
 	publicUrl?: string;
+	collaborationEnabled?: boolean;
 	collaborationIndicator?:
 		| { kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string }
 		| null;
@@ -288,9 +290,9 @@ $effect(() => {
 				currentTargetId={preferredImageTargetId}
 				options={availableImageTargets}
 				canEditBasic={canEditDocumentMeta}
-				canManageMembers={myRole === 'owner' || myRole === 'collaborator'}
+				canManageMembers={collaborationEnabled && (myRole === 'owner' || myRole === 'collaborator')}
 				canEditImageSettings={canEditDocumentMeta}
-				canManagePublic={myRole === 'owner'}
+				canManagePublic={collaborationEnabled && myRole === 'owner'}
 				{publicAccess}
 				{publicUrl}
 				isUpdating={isUpdatingImageTarget}

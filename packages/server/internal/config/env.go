@@ -50,6 +50,17 @@ func IsTrue(value string) bool {
 	}
 }
 
+// GetCollaborationEnabled returns whether realtime collaboration is enabled.
+// Defaults to true so existing deployments keep current behavior until they
+// explicitly opt out.
+func GetCollaborationEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv("COLLABORATION_ENABLED"))
+	if raw == "" {
+		return true
+	}
+	return IsTrue(raw)
+}
+
 // GetOptionalNonNegativeInt reads an optional non-negative integer from env.
 // Empty values mean "not configured".
 func GetOptionalNonNegativeInt(key string) (*int, error) {

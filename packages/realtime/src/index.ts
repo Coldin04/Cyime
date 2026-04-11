@@ -11,6 +11,21 @@ dotenv.config();
 // 配置
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const GO_API_URL = process.env.GO_API_URL || 'http://localhost:8080/api/v1';
+const COLLABORATION_ENABLED = (() => {
+	const raw = (process.env.COLLABORATION_ENABLED || '').trim().toLowerCase();
+	if (raw === '') {
+		return true;
+	}
+	return ['1', 'true', 'yes', 'y', 'on'].includes(raw);
+})();
+const REALTIME_SAVE_DEBOUNCE_MS = Math.max(
+	1000,
+	parseInt(process.env.REALTIME_SAVE_DEBOUNCE_MS || '10000', 10)
+);
+const REALTIME_SAVE_MAX_DEBOUNCE_MS = Math.max(
+	REALTIME_SAVE_DEBOUNCE_MS,
+	parseInt(process.env.REALTIME_SAVE_MAX_DEBOUNCE_MS || String(REALTIME_SAVE_DEBOUNCE_MS), 10)
+);
 const JWT_SECRET = (() => {
 	const secret = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET;
 	if (!secret) {
@@ -38,9 +53,9 @@ interface RealtimeContext {
 	documentId: string;
 	acl: UserACL;
 	socketId?: string;
-	// yjsVersion is the optimistic-concurrency token for this document; the
-	// realtime server tracks the version it last persisted and echoes it on
-	// the next save so the Go API can reject stale or racing writes.
+	// Connection-local fallback snapshot. The authoritative version is tracked
+	// per document in-process so multiple collaborators don't race forever with
+	// stale per-socket copies.
 	yjsVersion: number;
 }
 
@@ -49,6 +64,11 @@ interface RealtimeContext {
 // down (one fetch per document per 30s per user) while still bounding how
 // long a revoked user can keep editing.
 const ACL_CACHE_TTL_MS = 30_000;
+const PRESENCE_SESSION_TTL_MS = 45_000;
+const PRESENCE_MAX_SESSIONS_PER_DOCUMENT = Math.max(
+	1,
+	parseInt(process.env.PRESENCE_MAX_SESSIONS_PER_DOCUMENT || '12', 10)
+);
 const aclCache = new Map<string, { acl: UserACL; expiresAt: number }>();
 
 function aclCacheKey(documentId: string, userId: string): string {
@@ -87,10 +107,23 @@ function invalidateACLCache(documentId: string, userId: string): void {
 }
 
 const collaborationSockets = new Map<string, Set<string>>();
+const documentYjsVersions = new Map<string, number>();
+const documentCanonicalContentSnapshots = new Map<
+	string,
+	{ contentJSON: string; updatedAt: number; userId: string }
+>();
+const documentPresenceSessions = new Map<
+	string,
+	Map<string, { userId: string; lastSeenAt: number }>
+>();
 const documentPresence = new Map<string, Map<string, number>>();
 const presenceSubscribers = new Map<string, Set<WebSocket>>();
 const presenceClientMeta = new WeakMap<WebSocket, { token: string; userId: string; documentId?: string }>();
 const presenceWebSocketServer = new WebSocketServer({ noServer: true });
+
+function logRealtimeSave(event: string, details: Record<string, unknown> = {}): void {
+	console.debug('[RealtimeSave]', event, details);
+}
 
 function verifyJWT(token: string): TokenPayload | null {
 	try {
@@ -172,12 +205,17 @@ class YjsSaveConflictError extends Error {
 	}
 }
 
+function isYjsSaveConflictError(error: unknown): error is YjsSaveConflictError {
+	return error instanceof YjsSaveConflictError;
+}
+
 async function saveYjsState(
 	documentId: string,
 	token: string,
 	yjsState: string,
 	yjsStateVector: string,
-	expectedYjsVersion: number
+	expectedYjsVersion: number,
+	contentJson?: unknown
 ): Promise<number> {
 	try {
 		const response = await axios.put(
@@ -185,7 +223,8 @@ async function saveYjsState(
 			{
 				yjsState,
 				yjsStateVector,
-				expectedYjsVersion
+				expectedYjsVersion,
+				...(contentJson === undefined ? {} : { contentJson })
 			},
 			{
 				headers: {
@@ -234,6 +273,29 @@ function normalizeDocumentId(rawName?: string): string {
 	return rawName.startsWith('doc:') ? rawName.slice(4) : rawName;
 }
 
+process.on('unhandledRejection', (reason) => {
+	if (isYjsSaveConflictError(reason)) {
+		console.warn(
+			`[Realtime] Suppressed unhandled Yjs save conflict at process boundary (server ${reason.currentVersion})`
+		);
+		return;
+	}
+
+	console.error('[Realtime] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+	if (isYjsSaveConflictError(error)) {
+		console.warn(
+			`[Realtime] Suppressed uncaught Yjs save conflict at process boundary (server ${error.currentVersion})`
+		);
+		return;
+	}
+
+	console.error('[Realtime] Uncaught exception:', error);
+	process.exit(1);
+});
+
 function setCORSHeaders(request: IncomingMessage, response: ServerResponse) {
 	const origin = request.headers.origin;
 	if (origin) {
@@ -243,8 +305,58 @@ function setCORSHeaders(request: IncomingMessage, response: ServerResponse) {
 		response.setHeader('Access-Control-Allow-Origin', '*');
 	}
 	response.setHeader('Vary', 'Origin');
-	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-	response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Presence-Session-Id');
+	response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+}
+
+function getLoadedDocumentEntry(documentId: string): [string, any] | null {
+	for (const entry of (server.hocuspocus as any).documents.entries() as IterableIterator<[string, any]>) {
+		if (normalizeDocumentId(entry[0]) === documentId) {
+			return entry;
+		}
+	}
+	return null;
+}
+
+async function triggerImmediateDocumentPersist(
+	documentId: string,
+	context: RealtimeContext,
+	requestHeaders: IncomingMessage['headers'],
+	requestParameters: URLSearchParams = new URLSearchParams()
+): Promise<void> {
+	const loadedDocumentEntry = getLoadedDocumentEntry(documentId);
+	if (!loadedDocumentEntry) {
+		const loadedDocumentNames = Array.from(
+			(server.hocuspocus as any).documents.keys() as IterableIterator<string>
+		);
+		throw new Error(
+			`document ${documentId} is not loaded in realtime server (loaded: ${loadedDocumentNames.join(', ') || 'none'})`
+		);
+	}
+
+	const [documentName, document] = loadedDocumentEntry;
+	document.broadcastStateless(
+		JSON.stringify({
+			type: 'document-save-request-accepted',
+			documentId,
+			acceptedAt: new Date().toISOString()
+		})
+	);
+
+	await (server.hocuspocus as any).storeDocumentHooks(
+		document,
+		{
+			clientsCount: document.getConnectionsCount(),
+			context,
+			document,
+			documentName,
+			instance: server.hocuspocus,
+			requestHeaders,
+			requestParameters,
+			socketId: context.socketId ?? ''
+		},
+		true
+	);
 }
 
 function addCollaborationSocket(documentId: string, socketId: string) {
@@ -342,12 +454,108 @@ function removePresenceSubscriber(socket: WebSocket) {
 	}
 }
 
+function getTrackedYjsVersion(documentId: string, fallback = 0): number {
+	return documentYjsVersions.get(documentId) ?? fallback;
+}
+
+function setTrackedYjsVersion(documentId: string, version: number): void {
+	documentYjsVersions.set(documentId, version);
+}
+
+function clearTrackedYjsVersion(documentId: string): void {
+	documentYjsVersions.delete(documentId);
+}
+
+function setTrackedCanonicalContentSnapshot(
+	documentId: string,
+	contentJSON: string,
+	userId: string
+): void {
+	documentCanonicalContentSnapshots.set(documentId, {
+		contentJSON,
+		updatedAt: Date.now(),
+		userId
+	});
+}
+
+function getTrackedCanonicalContentSnapshot(documentId: string): string | null {
+	return documentCanonicalContentSnapshots.get(documentId)?.contentJSON ?? null;
+}
+
+function clearTrackedCanonicalContentSnapshot(documentId: string): void {
+	documentCanonicalContentSnapshots.delete(documentId);
+}
+
+function pruneExpiredPresenceSessions(documentId: string, now = Date.now()): void {
+	const sessions = documentPresenceSessions.get(documentId);
+	if (!sessions) {
+		return;
+	}
+
+	for (const [sessionId, session] of sessions) {
+		if (now-session.lastSeenAt >= PRESENCE_SESSION_TTL_MS) {
+			sessions.delete(sessionId);
+		}
+	}
+
+	if (sessions.size === 0) {
+		documentPresenceSessions.delete(documentId);
+	}
+}
+
+function upsertPresenceSession(
+	documentId: string,
+	sessionId: string,
+	userId: string,
+	now = Date.now()
+): { connectedCount: number; accepted: boolean } {
+	let sessions = documentPresenceSessions.get(documentId);
+	if (!sessions) {
+		sessions = new Map<string, { userId: string; lastSeenAt: number }>();
+		documentPresenceSessions.set(documentId, sessions);
+	}
+
+	pruneExpiredPresenceSessions(documentId, now);
+	if (!sessions.has(sessionId) && sessions.size >= PRESENCE_MAX_SESSIONS_PER_DOCUMENT) {
+		return {
+			connectedCount: sessions.size,
+			accepted: false
+		};
+	}
+
+	sessions.set(sessionId, { userId, lastSeenAt: now });
+	return {
+		connectedCount: sessions.size,
+		accepted: true
+	};
+}
+
+function removePresenceSession(documentId: string, sessionId: string): number {
+	const sessions = documentPresenceSessions.get(documentId);
+	if (!sessions) {
+		return 0;
+	}
+
+	sessions.delete(sessionId);
+	if (sessions.size === 0) {
+		documentPresenceSessions.delete(documentId);
+		return 0;
+	}
+
+	return sessions.size;
+}
+
+function getActivePresenceSessionCount(documentId: string, now = Date.now()): number {
+	pruneExpiredPresenceSessions(documentId, now);
+	return documentPresenceSessions.get(documentId)?.size ?? 0;
+}
+
 const server = new Server({
 	port: PORT,
 	address: '0.0.0.0',
 	timeout: 30000,
-	debounce: 60000,
-	maxDebounce: 60000,
+	debounce: REALTIME_SAVE_DEBOUNCE_MS,
+	maxDebounce: REALTIME_SAVE_MAX_DEBOUNCE_MS,
 	async onUpgrade(data: any) {
 		const request = data.request as IncomingMessage;
 		const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
@@ -364,6 +572,12 @@ const server = new Server({
 
 	// 认证 - 从 WebSocket URL 或 token 字段提取 JWT
 	async onAuthenticate(data: any) {
+		if (!COLLABORATION_ENABLED) {
+			const error = new Error('collaboration-disabled') as Error & { reason?: string };
+			error.reason = 'collaboration-disabled';
+			throw error;
+		}
+
 		const token = (data?.token as string | undefined) || extractTokenFromUrl(data?.request?.url);
 
 		if (!token) {
@@ -448,10 +662,13 @@ const server = new Server({
 			console.log(`[DOC:${documentId}] No existing Yjs state found, starting fresh`);
 		}
 		// Stash the version on the connection context so the next save can
-		// echo it back as the optimistic-concurrency token.
+		// echo it back as the optimistic-concurrency token. Also keep the
+		// process-local per-document tracker in sync so all collaborators on
+		// this realtime node share the freshest known version.
 		if (context) {
 			context.yjsVersion = state.yjsVersion;
 		}
+		setTrackedYjsVersion(documentId, state.yjsVersion);
 	},
 
 	// 保存文档 - 节流保存到 Go API
@@ -488,16 +705,59 @@ const server = new Server({
 
 		const yjsState = Buffer.from(Y.encodeStateAsUpdate(document)).toString('base64');
 		const yjsStateVector = Buffer.from(Y.encodeStateVector(document)).toString('base64');
+		const trackedCanonicalContent = getTrackedCanonicalContentSnapshot(documentId);
+
+		const expectedYjsVersion = getTrackedYjsVersion(documentId, context.yjsVersion);
 
 		try {
+			let contentJsonPayload: unknown;
+			if (trackedCanonicalContent) {
+				try {
+					contentJsonPayload = JSON.parse(trackedCanonicalContent);
+				} catch (parseError) {
+					console.warn(
+						`[DOC:${documentId}] Ignoring invalid tracked canonical content snapshot:`,
+						parseError
+					);
+				}
+			}
+			logRealtimeSave('store-start', {
+				documentId,
+				userId,
+				expectedYjsVersion,
+				hasCanonicalSnapshot: contentJsonPayload !== undefined
+			});
+			data.document.broadcastStateless(
+				JSON.stringify({
+					type: 'document-persisting',
+					documentId,
+					startedAt: new Date().toISOString()
+				})
+			);
 			const newVersion = await saveYjsState(
 				documentId,
 				token,
 				yjsState,
 				yjsStateVector,
-				context.yjsVersion
+				expectedYjsVersion,
+				contentJsonPayload
 			);
 			context.yjsVersion = newVersion;
+			setTrackedYjsVersion(documentId, newVersion);
+			logRealtimeSave('store-success', {
+				documentId,
+				userId,
+				newVersion,
+				hasCanonicalSnapshot: contentJsonPayload !== undefined
+			});
+			data.document.broadcastStateless(
+				JSON.stringify({
+					type: 'document-persisted',
+					documentId,
+					yjsVersion: newVersion,
+					savedAt: new Date().toISOString()
+				})
+			);
 		} catch (error) {
 			if (error instanceof YjsSaveConflictError) {
 				// Someone else (or a racing save) bumped the version. Re-load
@@ -508,6 +768,12 @@ const server = new Server({
 				console.warn(
 					`[DOC:${documentId}] Yjs save conflict (had ${context.yjsVersion}, server ${error.currentVersion}); reloading`
 				);
+				logRealtimeSave('store-conflict', {
+					documentId,
+					userId,
+					hadVersion: context.yjsVersion,
+					serverVersion: error.currentVersion
+				});
 				const fresh = await loadYjsState(documentId, token);
 				if (fresh.yjsState) {
 					try {
@@ -517,8 +783,74 @@ const server = new Server({
 					}
 				}
 				context.yjsVersion = fresh.yjsVersion;
+				setTrackedYjsVersion(documentId, fresh.yjsVersion);
+				// The newer state is already durable on the server. Merging it back
+				// into the in-memory doc lets the normal update/debounce flow
+				// schedule the next save without crashing the process.
+				return;
 			}
 			throw error;
+		}
+	},
+
+	async onStateless(data: any) {
+		const context = data.context as RealtimeContext | undefined;
+		const documentId = context?.documentId || normalizeDocumentId(data?.documentName);
+		if (!documentId || !context?.userId) {
+			return;
+		}
+
+		let message:
+			| {
+					type?: string;
+					documentId?: string;
+					contentJson?: unknown;
+			  }
+			| null = null;
+		try {
+			message = JSON.parse(data.payload) as {
+				type?: string;
+				documentId?: string;
+				contentJson?: unknown;
+			};
+		} catch {
+			return;
+		}
+
+		if (message?.documentId !== documentId) {
+			return;
+		}
+
+		if (message.type === 'document-content-snapshot') {
+			if (message.contentJson === undefined) {
+				return;
+			}
+
+			try {
+				const serialized = JSON.stringify(message.contentJson);
+				setTrackedCanonicalContentSnapshot(documentId, serialized, context.userId);
+				logRealtimeSave('canonical-snapshot-updated', {
+					documentId,
+					userId: context.userId,
+					size: serialized.length
+				});
+			} catch (error) {
+				console.warn(`[DOC:${documentId}] Failed to serialize canonical content snapshot:`, error);
+			}
+			return;
+		}
+
+		if (message.type === 'manual-save-request') {
+			logRealtimeSave('manual-save-request', {
+				documentId,
+				userId: context.userId
+			});
+			await triggerImmediateDocumentPersist(
+				documentId,
+				context,
+				data.connection?.request?.headers ?? {},
+				new URLSearchParams()
+			);
 		}
 	},
 
@@ -530,6 +862,10 @@ const server = new Server({
 
 		if (documentId && socketId) {
 			removeCollaborationSocket(documentId, socketId);
+			if (getCollaborationSocketCount(documentId) === 0) {
+				clearTrackedYjsVersion(documentId);
+				clearTrackedCanonicalContentSnapshot(documentId);
+			}
 		}
 
 		if (documentId && userId) {
@@ -550,8 +886,16 @@ const server = new Server({
 			throw null;
 		}
 
-		if (requestURL.pathname !== '/api/v1/realtime/presence') {
+		const isPresenceRequest = requestURL.pathname === '/api/v1/realtime/presence';
+		const isPersistNowRequest = requestURL.pathname === '/api/v1/realtime/persist-now';
+		if (!isPresenceRequest && !isPersistNowRequest) {
 			return;
+		}
+
+		if (!COLLABORATION_ENABLED) {
+			response.writeHead(404, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Collaboration is disabled' }));
+			throw null;
 		}
 
 		const documentId = normalizeDocumentId(requestURL.searchParams.get('documentId') ?? '');
@@ -577,11 +921,99 @@ const server = new Server({
 			throw null;
 		}
 
+		if (isPersistNowRequest) {
+			if (request.method !== 'POST') {
+				response.writeHead(405, { 'Content-Type': 'application/json' });
+				response.end(JSON.stringify({ error: 'Method not allowed' }));
+				throw null;
+			}
+			if (!acl.canEdit) {
+				response.writeHead(403, { 'Content-Type': 'application/json' });
+				response.end(JSON.stringify({ error: 'Forbidden' }));
+				throw null;
+			}
+
+			const context: RealtimeContext = {
+				userId: payload.sub,
+				token,
+				documentId,
+				acl,
+				yjsVersion: getTrackedYjsVersion(documentId)
+			};
+
+			try {
+				logRealtimeSave('manual-save-http-request', {
+					documentId,
+					userId: payload.sub
+				});
+				await triggerImmediateDocumentPersist(documentId, context, request.headers, requestURL.searchParams);
+				response.writeHead(200, { 'Content-Type': 'application/json' });
+				response.end(JSON.stringify({ ok: true, documentId }));
+			} catch (error) {
+				console.error(`[DOC:${documentId}] Failed to force immediate persist:`, error);
+				response.writeHead(409, { 'Content-Type': 'application/json' });
+				response.end(
+					JSON.stringify({
+						error: error instanceof Error ? error.message : 'Failed to persist document immediately',
+						details: error instanceof Error ? error.stack ?? null : null,
+						documentId
+					})
+				);
+			}
+			throw null;
+		}
+
+		const sessionIdHeader = request.headers['x-presence-session-id'];
+		const sessionId =
+			typeof sessionIdHeader === 'string'
+				? sessionIdHeader.trim()
+				: Array.isArray(sessionIdHeader)
+					? (sessionIdHeader[0] ?? '').trim()
+					: '';
+
+		if (request.method === 'PUT' && sessionId) {
+			const { connectedCount, accepted } = upsertPresenceSession(documentId, sessionId, payload.sub);
+			if (!accepted) {
+				response.writeHead(429, { 'Content-Type': 'application/json' });
+				response.end(
+					JSON.stringify({
+						error: 'Too many active sessions for document',
+						documentId,
+						connectedCount,
+						maxSessions: PRESENCE_MAX_SESSIONS_PER_DOCUMENT
+					})
+				);
+				throw null;
+			}
+			response.writeHead(200, { 'Content-Type': 'application/json' });
+			response.end(
+				JSON.stringify({
+					documentId,
+					connectedCount,
+					hasCollaboration: getCollaborationSocketCount(documentId) > 0
+				})
+			);
+			throw null;
+		}
+
+		if (request.method === 'DELETE' && sessionId) {
+			const connectedCount = removePresenceSession(documentId, sessionId);
+			response.writeHead(200, { 'Content-Type': 'application/json' });
+			response.end(
+				JSON.stringify({
+					documentId,
+					connectedCount,
+					hasCollaboration: getCollaborationSocketCount(documentId) > 0
+				})
+			);
+			throw null;
+		}
+
 		response.writeHead(200, { 'Content-Type': 'application/json' });
 		response.end(
 			JSON.stringify({
 				documentId,
-				connectedCount: getDocumentPresenceCount(documentId),
+				connectedCount: getActivePresenceSessionCount(documentId),
 				hasCollaboration: getCollaborationSocketCount(documentId) > 0
 			})
 		);

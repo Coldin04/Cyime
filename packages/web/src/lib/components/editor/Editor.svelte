@@ -51,6 +51,10 @@
 	interface Props {
 		documentId: string;
 		content: JSONContent;
+		externalContentOverride?: {
+			token: number;
+			content: JSONContent;
+		} | null;
 		currentImageTargetId?: string;
 		currentImageTargetLabel?: string;
 		imageTargetOptions?: DocumentImageTargetOption[];
@@ -59,7 +63,13 @@
 		isUpdatingImageTarget?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
-		onContentChange?: (content: JSONContent) => void;
+		onContentChange?: (
+			content: JSONContent,
+			meta?: {
+				viaCollaboration: boolean;
+				isLocalChange: boolean;
+			}
+		) => void;
 		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
 		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
@@ -69,6 +79,7 @@
 	let {
 		documentId,
 		content,
+		externalContentOverride = null,
 		currentImageTargetId = 'managed-r2',
 		currentImageTargetLabel = '',
 		imageTargetOptions = [],
@@ -102,6 +113,7 @@
 	let hasSeededCollaborationContent = false;
 	let hasHydratedManagedImages = false;
 	let isNormalizingMathInput = false;
+	let lastAppliedExternalContentOverrideToken = 0;
 	const imageUploadToastId = 'editor-image-upload';
 
 	const allowedImageMimeTypes = new Set([
@@ -983,7 +995,10 @@
 				}
 				const nextContent = editor.getJSON();
 				lastSyncedContent = serializeDoc(nextContent);
-				onContentChange?.(nextContent);
+				onContentChange?.(nextContent, {
+					viaCollaboration: Boolean(collaboration?.provider),
+					isLocalChange: collaboration?.provider ? collaboration.provider.hasUnsyncedChanges : true
+				});
 				editorRevision += 1;
 			},
 			onSelectionUpdate: () => {
@@ -1071,7 +1086,10 @@
 			const currentContent = editor.getJSON();
 			if (serializeDoc(currentContent) !== lastSyncedContent) {
 				lastSyncedContent = serializeDoc(currentContent);
-				onContentChange?.(currentContent);
+				onContentChange?.(currentContent, {
+					viaCollaboration: Boolean(collaboration?.provider),
+					isLocalChange: collaboration?.provider ? collaboration.provider.hasUnsyncedChanges : true
+				});
 			}
 		}
 
@@ -1096,6 +1114,24 @@
 
 		lastSyncedContent = serializeDoc(content);
 		editor.commands.setContent(toTiptapContent(content), { emitUpdate: false });
+	});
+
+	$effect(() => {
+		if (!editor || !externalContentOverride) {
+			return;
+		}
+
+		if (externalContentOverride.token === lastAppliedExternalContentOverrideToken) {
+			return;
+		}
+		lastAppliedExternalContentOverrideToken = externalContentOverride.token;
+
+		const nextContent = normalizeDoc(externalContentOverride.content);
+		if (serializeDoc(editor.getJSON()) === serializeDoc(nextContent)) {
+			return;
+		}
+
+		editor.commands.setContent(toTiptapContent(nextContent), { emitUpdate: true });
 	});
 
 	function apply(action: (instance: Editor) => void) {

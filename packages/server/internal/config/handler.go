@@ -6,6 +6,7 @@ import (
 
 // ClientConfigResponse represents the client-facing configuration
 type ClientConfigResponse struct {
+	CollaborationEnabled  bool   `json:"collaborationEnabled"`
 	RealtimeWSURL         string `json:"realtimeWsUrl"`
 	DocumentImageMaxBytes int64  `json:"documentImageMaxBytes"`
 }
@@ -14,6 +15,7 @@ type ClientConfigResponse struct {
 // Returns client configuration including realtime WebSocket URL
 func GetClientConfigHandler(c *fiber.Ctx) error {
 	response := ClientConfigResponse{
+		CollaborationEnabled:  GetCollaborationEnabled(),
 		RealtimeWSURL:         GetRealtimeWSURL(),
 		DocumentImageMaxBytes: GetDocumentImageMaxBytes(),
 	}

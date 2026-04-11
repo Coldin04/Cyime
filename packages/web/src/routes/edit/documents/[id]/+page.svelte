@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import type { JSONContent } from '@tiptap/core';
 	import { browser } from '$app/environment';
 	import { beforeNavigate, goto } from '$app/navigation';
@@ -17,6 +17,7 @@
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
 	import { auth } from '$lib/stores/auth';
+	import { apiFetch } from '$lib/api';
 	import { resolveApiUrl } from '$lib/config/api';
 	import { realtimeConfig } from '$lib/stores/realtime';
 	import { yjsProvider, type ProviderInstance } from '$lib/utils/yjsProvider';
@@ -99,6 +100,42 @@
 	let exportTargetId = $state('');
 	let autoSaveEnabled = $state(defaultAutoSaveEnabled);
 	let autoSaveIntervalSeconds = $state(defaultAutoSaveIntervalSeconds);
+	let hasPendingCollaborationSave = $state(false);
+	let hasPendingImmediateCollaborationPersist = $state(false);
+	let hasManualSaveRequestInFlight = $state(false);
+	let localCollaborationChangeSeq = $state(0);
+	let flushedCollaborationChangeSeq = $state(0);
+	let persistedCollaborationChangeSeq = $state(0);
+	let editorContentOverride = $state<{ token: number; content: JSONContent } | null>(null);
+	let collaborationContentSnapshotTimer: number | null = null;
+	type SaveDriver = 'none' | 'collaboration' | 'local';
+	type SaveReason = 'manual' | 'auto' | 'leave' | 'export';
+	type SaveWaiter = {
+		resolve: (value: boolean) => void;
+		timer: number;
+	};
+	type EditorOverrideWaiter = {
+		expectedSerializedContent: string;
+		resolve: (value: boolean) => void;
+		timer: number;
+	};
+	let pageSignal = $state(get(page));
+	const unsubscribePage = page.subscribe((p) => (pageSignal = p));
+	let authSignal = $state(get(auth));
+	const unsubscribeAuth = auth.subscribe((state) => (authSignal = state));
+	let realtimeConfigSignal = $state(get(realtimeConfig));
+	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
+	const documentId = $derived(pageSignal.params?.id);
+	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
+	let collaborationSaveWaiters: SaveWaiter[] = [];
+	let editorContentOverrideWaiter: EditorOverrideWaiter | null = null;
+	let nextEditorContentOverrideToken = 0;
+	const saveDriver = $derived.by<SaveDriver>(() => {
+		if (!documentId || isLoading) {
+			return 'none';
+		}
+		return collaborationEnabled && collaboration?.provider && isYjsConnected ? 'collaboration' : 'local';
+	});
 	const availableImageTargets = $derived(getDocumentImageTargetOptions(imageBedConfigs));
 	const exportImageTargetOptions = $derived(
 		availableImageTargets.filter((option) => option.id !== 'managed-r2')
@@ -183,6 +220,86 @@
 
 	function serializeComparableContent(input: JSONContent): string {
 		return JSON.stringify(normalizeManagedImagesForSave(input));
+	}
+
+	function clearCollaborationContentSnapshotTimer() {
+		if (collaborationContentSnapshotTimer !== null) {
+			window.clearTimeout(collaborationContentSnapshotTimer);
+			collaborationContentSnapshotTimer = null;
+		}
+	}
+
+	function sendCollaborationContentSnapshot(snapshotContent: JSONContent): void {
+		const provider = collaboration?.provider;
+		if (!collaborationEnabled || !provider || !isYjsConnected || !documentId) {
+			return;
+		}
+
+		try {
+			provider.sendStateless(
+				JSON.stringify({
+					type: 'document-content-snapshot',
+					documentId,
+					contentJson: normalizeManagedImagesForSave(snapshotContent)
+				})
+			);
+		} catch (error) {
+			console.warn('[Collaboration] Failed to send canonical content snapshot:', error);
+		}
+	}
+
+	async function requestImmediateCollaborationPersist(): Promise<boolean> {
+		if (!collaborationEnabled || !isYjsConnected || !documentId) {
+			return false;
+		}
+
+		try {
+			const wsUrl = await resolveRealtimeWsUrl();
+			const url = new URL(wsUrl);
+			url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+			url.pathname = '/api/v1/realtime/persist-now';
+			url.search = '';
+			url.searchParams.set('documentId', documentId);
+
+			const response = await apiFetch(url.toString(), {
+				method: 'POST'
+			});
+			if (!response.ok) {
+				const errorText = await response.text();
+				throw new Error(
+					`Immediate collaboration persist failed: ${response.status}${errorText ? ` ${errorText}` : ''}`
+				);
+			}
+			return true;
+		} catch (error) {
+			console.warn('[Collaboration] Failed to request immediate persist:', error);
+			return false;
+		}
+	}
+
+	function scheduleCollaborationContentSnapshot(snapshotContent: JSONContent): void {
+		if (!browser || !collaborationEnabled) {
+			return;
+		}
+
+		clearCollaborationContentSnapshotTimer();
+		collaborationContentSnapshotTimer = window.setTimeout(() => {
+			collaborationContentSnapshotTimer = null;
+			sendCollaborationContentSnapshot(snapshotContent);
+		}, 300);
+	}
+
+	function logSaveDebug(event: string, details: Record<string, unknown> = {}) {
+		console.debug('[SaveDebug]', event, {
+			at: new Date().toISOString(),
+			documentId,
+			saveDriver,
+			hasUnsavedChanges,
+			hasPendingCollaborationSave,
+			isSaving,
+			isYjsConnected,
+			...details
+		});
 	}
 
 	function createExportCopyTitle(value: string): string {
@@ -334,14 +451,18 @@
 		isPreparingExport = true;
 		try {
 			const exportContent = await prepareExportContentWithPublicImages(exportTargetId);
-			const [saveResult, targetResult] = await Promise.all([
-				updateDocumentContent(documentId, normalizeManagedImagesForSave(exportContent)),
-				updateDocumentImageTarget(documentId, exportTargetId)
-			]);
-			content = exportContent;
+			const applied = await applyEditorContentOverride(exportContent);
+			if (!applied) {
+				throw new Error('Failed to apply export content into the editor');
+			}
+
+			const saved = await requestDocumentSave('export');
+			if (!saved) {
+				throw new Error('Failed to persist export content');
+			}
+
+			const targetResult = await updateDocumentImageTarget(documentId, exportTargetId);
 			preferredImageTargetId = targetResult.preferredImageTargetId;
-			lastSaved = new Date(saveResult.updatedAt);
-			hasUnsavedChanges = false;
 			await finalizeExportWithProcessedContent(exportContent);
 		} catch (error) {
 			console.error('[Export] Failed to replace private images for export:', error);
@@ -352,6 +473,14 @@
 	}
 
 	async function handleExportAction(action: ExportAction) {
+		if (hasUnsavedChanges || isSaving || hasPendingCollaborationSave) {
+			const saved = await requestDocumentSave('export');
+			if (!saved) {
+				toast.error(m.editor_save_failed());
+				return;
+			}
+		}
+
 		const managedImages = collectManagedImages(content);
 		if (!exportActionRequiresPublicImageURLs(action) || managedImages.length === 0) {
 			await performExport(action, content);
@@ -369,15 +498,11 @@
 		isExportPrivateImagesDialogOpen = true;
 	}
 
-	// Manually bridge the SvelteKit `page` store to a Svelte 5 signal
-	// since this environment is in runes-mode but likely on an older Svelte 5 version.
-	let pageSignal = $state(get(page));
-	page.subscribe((p) => (pageSignal = p));
-	let authSignal = $state(get(auth));
-	auth.subscribe((state) => (authSignal = state));
-	const documentId = $derived(pageSignal.params?.id);
-
 	beforeNavigate((navigation) => {
+		if (documentId && navigation.to?.url) {
+			void unregisterPresenceSession(documentId, { keepalive: true });
+		}
+
 		if (!browser || !hasUnsavedChanges || bypassLeaveGuard) {
 			return;
 		}
@@ -403,6 +528,9 @@
 		isLeaveConfirmOpen = false;
 		pendingNavigationUrl = null;
 		bypassLeaveGuard = true;
+		if (documentId) {
+			await unregisterPresenceSession(documentId, { keepalive: true });
+		}
 		await goto(target);
 		bypassLeaveGuard = false;
 	}
@@ -411,13 +539,45 @@
 		await handleConfirmLeave();
 	}
 
-	function handleContentChange(newContent: JSONContent) {
+	function handleContentChange(
+		newContent: JSONContent,
+		meta: { viaCollaboration: boolean; isLocalChange: boolean } = {
+			viaCollaboration: false,
+			isLocalChange: true
+		}
+	) {
+		const isActiveCollaborationChange = meta.viaCollaboration && isYjsConnected;
 		if (isLoading) return;
 		if (serializeComparableContent(content) === serializeComparableContent(newContent)) {
 			return;
 		}
-		hasUnsavedChanges = true;
 		content = newContent;
+		if (
+			editorContentOverrideWaiter &&
+			serializeComparableContent(newContent) === editorContentOverrideWaiter.expectedSerializedContent
+		) {
+			window.clearTimeout(editorContentOverrideWaiter.timer);
+			editorContentOverrideWaiter.resolve(true);
+			editorContentOverrideWaiter = null;
+		}
+		if (!(isActiveCollaborationChange && !meta.isLocalChange)) {
+			hasUnsavedChanges = true;
+			if (isActiveCollaborationChange) {
+				localCollaborationChangeSeq += 1;
+				hasPendingCollaborationSave = true;
+				// A fresh local edit supersedes any previous "waiting for persist"
+				// state. While the user is actively typing, show the document as
+				// dirty rather than stuck in "saving".
+				isSaving = false;
+				logSaveDebug('collaboration-local-change', {
+					localCollaborationChangeSeq,
+					meta
+				});
+			}
+		}
+		if (isActiveCollaborationChange) {
+			scheduleCollaborationContentSnapshot(newContent);
+		}
 		if (documentId) {
 			void connectPresenceSocket(documentId);
 			if (!collaboration) {
@@ -437,6 +597,61 @@
 	function handlePublicAccessChange(nextPublicAccess: string, nextPublicURL: string) {
 		publicAccess = nextPublicAccess;
 		publicUrl = nextPublicURL;
+	}
+
+	function settleCollaborationSaveWaiters(value: boolean) {
+		for (const waiter of collaborationSaveWaiters) {
+			window.clearTimeout(waiter.timer);
+			waiter.resolve(value);
+		}
+		collaborationSaveWaiters = [];
+		hasPendingImmediateCollaborationPersist = false;
+		hasManualSaveRequestInFlight = false;
+	}
+
+	function settleEditorContentOverrideWaiter(value: boolean) {
+		if (!editorContentOverrideWaiter) {
+			return;
+		}
+
+		window.clearTimeout(editorContentOverrideWaiter.timer);
+		editorContentOverrideWaiter.resolve(value);
+		editorContentOverrideWaiter = null;
+	}
+
+	async function applyEditorContentOverride(nextContent: JSONContent): Promise<boolean> {
+		if (serializeComparableContent(content) === serializeComparableContent(nextContent)) {
+			return true;
+		}
+
+		settleEditorContentOverrideWaiter(false);
+
+		const result = new Promise<boolean>((resolve) => {
+			const timer = window.setTimeout(() => {
+				editorContentOverrideWaiter = null;
+				resolve(false);
+			}, 5000);
+			editorContentOverrideWaiter = {
+				expectedSerializedContent: serializeComparableContent(nextContent),
+				resolve,
+				timer
+			};
+		});
+
+		const token = ++nextEditorContentOverrideToken;
+		editorContentOverride = { token, content: nextContent };
+		await tick();
+		return result;
+	}
+
+	function queueCollaborationSaveWaiter(): Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			const timer = window.setTimeout(() => {
+				collaborationSaveWaiters = collaborationSaveWaiters.filter((entry) => entry.timer !== timer);
+				resolve(false);
+			}, 20000);
+			collaborationSaveWaiters = [...collaborationSaveWaiters, { resolve, timer }];
+		});
 	}
 
 	function getCurrentUserMember(): ShareDocumentMember | null {
@@ -498,25 +713,36 @@
 	}
 
 	function updateCollaborationIndicator() {
+		if (!collaborationEnabled) {
+			collaborationIndicator = null;
+			return;
+		}
+
 		if (presenceCount > 1) {
 			if (isYjsConnected) {
-				collaborationIndicator = { kind: 'multi', label: `协作已连接，当前有 ${presenceCount} 个会话在线` };
+				collaborationIndicator = {
+					kind: 'multi',
+					label: m.editor_collaboration_connected_multi({ count: String(presenceCount) })
+				};
 				return;
 			}
 
 			collaborationIndicator = {
 				kind: 'multi-pending',
-				label: `检测到 ${presenceCount} 个会话在线，但协作连接尚未建立`
+				label: m.editor_collaboration_pending_multi({ count: String(presenceCount) })
 			};
 			return;
 		}
 
 		if (collaborationError || (hasAttemptedPresence && !presenceConnected && !collaboration)) {
-			collaborationIndicator = { kind: 'single-offline', label: '协作连接已断开，当前为单人模式' };
+			collaborationIndicator = {
+				kind: 'single-offline',
+				label: m.editor_collaboration_disconnected_single_mode()
+			};
 			return;
 		}
 
-		collaborationIndicator = { kind: 'single', label: '当前仅你在线编辑' };
+		collaborationIndicator = { kind: 'single', label: m.editor_collaboration_single_online() };
 	}
 
 	function ensurePresenceSessionId() {
@@ -552,6 +778,10 @@
 	}
 
 	async function fetchCollaborationPresence(nextDocumentId: string): Promise<number> {
+		if (!collaborationEnabled) {
+			return 0;
+		}
+
 		const response = await fetch(buildRealtimePresenceURL(nextDocumentId), {
 			headers: {
 				Authorization: `Bearer ${authSignal.token}`
@@ -573,8 +803,31 @@
 		}
 	}
 
+	async function unregisterPresenceSession(
+		nextDocumentId: string,
+		options: { keepalive?: boolean } = {}
+	): Promise<void> {
+		if (!collaborationEnabled || !browser || !nextDocumentId || !presenceSessionId || !authSignal.token) {
+			return;
+		}
+
+		try {
+			await fetch(buildRealtimePresenceURL(nextDocumentId), {
+				method: 'DELETE',
+				headers: {
+					Authorization: `Bearer ${authSignal.token}`,
+					'X-Presence-Session-Id': presenceSessionId
+				},
+				credentials: 'include',
+				keepalive: options.keepalive ?? false
+			});
+		} catch (error) {
+			console.warn(`[Presence] Failed to unregister session for ${nextDocumentId}:`, error);
+		}
+	}
+
 	async function connectPresenceSocket(nextDocumentId: string) {
-		if (!browser || presenceHeartbeatTimer !== null) {
+		if (!collaborationEnabled || !browser || presenceHeartbeatTimer !== null) {
 			return;
 		}
 
@@ -597,6 +850,16 @@
 					credentials: 'include',
 					body: JSON.stringify({ sessionId })
 				});
+				if (response.status === 429) {
+					const payload = (await response.json()) as { maxSessions?: number };
+					throw new Error(
+						typeof payload.maxSessions === 'number'
+							? m.editor_collaboration_session_limit_reached_with_count({
+									count: String(payload.maxSessions)
+								})
+							: m.editor_collaboration_session_limit_reached()
+					);
+				}
 				if (!response.ok) {
 					throw new Error(`Presence heartbeat failed: ${response.status}`);
 				}
@@ -607,6 +870,14 @@
 				updateCollaborationIndicator();
 			} catch (error) {
 				presenceConnected = false;
+				if (
+					error instanceof Error &&
+					(error.message.includes(m.editor_collaboration_session_limit_reached()) ||
+						error.message.includes('online session limit'))
+				) {
+					collaborationError = error.message;
+					toast.error(error.message);
+				}
 				console.warn(`[Presence] Heartbeat failed for ${nextDocumentId}:`, error);
 				updateCollaborationIndicator();
 			}
@@ -619,6 +890,10 @@
 	}
 
 	async function initializeCollaboration(nextDocumentId: string): Promise<ProviderInstance> {
+		if (!collaborationEnabled) {
+			throw new Error('collaboration-disabled');
+		}
+
 		const wsUrl = await resolveRealtimeWsUrl();
 		const token = authSignal.token;
 		if (!token) {
@@ -640,6 +915,10 @@
 	}
 
 	async function startCollaboration(nextDocumentId: string, reason: 'presence' | 'editing') {
+		if (!collaborationEnabled) {
+			return;
+		}
+
 		const now = Date.now();
 		if (
 			isInitializingCollaboration ||
@@ -661,7 +940,7 @@
 			const collaborationInstance = await initializeCollaboration(nextDocumentId);
 			if (collaborationInstance.error || !collaborationInstance.provider) {
 				collaboration = null;
-				collaborationError = collaborationInstance.error || '协作连接失败';
+				collaborationError = collaborationInstance.error || m.editor_collaboration_connect_failed();
 				isYjsConnected = false;
 				updateCollaborationIndicator();
 				yjsProvider.destroyProvider(nextDocumentId);
@@ -677,7 +956,7 @@
 			collaborationError =
 				collaborationInitError instanceof Error
 					? collaborationInitError.message
-					: 'Unknown collaboration error';
+					: m.editor_collaboration_unknown_error();
 			isYjsConnected = false;
 			updateCollaborationIndicator();
 			clearCollaborationListeners();
@@ -687,6 +966,7 @@
 	}
 
 	function clearCollaborationListeners() {
+		clearCollaborationContentSnapshotTimer();
 		detachCollaborationListeners?.();
 		detachCollaborationListeners = null;
 	}
@@ -695,7 +975,7 @@
 		clearCollaborationListeners();
 
 		if (!instance.provider) {
-			collaborationError = '协作连接已断开';
+			collaborationError = m.editor_collaboration_disconnected();
 			isYjsConnected = false;
 			updateCollaborationIndicator();
 			return;
@@ -731,8 +1011,11 @@
 			}
 
 			if (status === 'disconnected') {
-				collaborationError = '协作连接已断开';
+				collaborationError = m.editor_collaboration_disconnected();
 				isYjsConnected = false;
+				isSaving = false;
+				hasManualSaveRequestInFlight = false;
+				settleCollaborationSaveWaiters(false);
 				resetOnlineMembers();
 				console.warn(`[Yjs] Disconnected for ${documentId}`);
 				updateCollaborationIndicator();
@@ -740,8 +1023,11 @@
 		};
 
 		const handleAuthenticationFailed = ({ reason }: { reason: string }) => {
-			collaborationError = reason || '协作鉴权失败';
+			collaborationError = reason || m.editor_collaboration_auth_failed();
 			isYjsConnected = false;
+			isSaving = false;
+			hasManualSaveRequestInFlight = false;
+			settleCollaborationSaveWaiters(false);
 			resetOnlineMembers();
 			console.warn(`[Yjs] Authentication failed for ${documentId}: ${collaborationError}`);
 			updateCollaborationIndicator();
@@ -754,13 +1040,142 @@
 			syncPresence(states);
 		};
 
+		const handleUnsyncedChanges = ({ number }: { number: number }) => {
+			if (number > 0) {
+				hasPendingCollaborationSave = localCollaborationChangeSeq > persistedCollaborationChangeSeq;
+				isSaving = hasManualSaveRequestInFlight;
+				logSaveDebug('realtime-unsynced', {
+					unsyncedChanges: number
+				});
+				return;
+			}
+
+			if (localCollaborationChangeSeq > persistedCollaborationChangeSeq) {
+				flushedCollaborationChangeSeq = localCollaborationChangeSeq;
+				hasPendingCollaborationSave = true;
+				isSaving = hasManualSaveRequestInFlight;
+				if (hasPendingImmediateCollaborationPersist) {
+					hasPendingImmediateCollaborationPersist = false;
+					void (async () => {
+						const requested = await requestImmediateCollaborationPersist();
+						if (!requested) {
+							hasManualSaveRequestInFlight = false;
+							hasPendingCollaborationSave = localCollaborationChangeSeq > persistedCollaborationChangeSeq;
+							isSaving = false;
+							settleCollaborationSaveWaiters(false);
+							toast.error(m.editor_save_failed());
+							return;
+						}
+						logSaveDebug('manual-save-flush-complete-requested-immediate-persist', {
+							flushedCollaborationChangeSeq,
+							persistedCollaborationChangeSeq
+						});
+					})();
+				}
+				logSaveDebug('realtime-awaiting-persist-ack', {
+					flushedCollaborationChangeSeq,
+					persistedCollaborationChangeSeq
+				});
+				return;
+			}
+
+			hasPendingCollaborationSave = false;
+			isSaving = false;
+			logSaveDebug('realtime-clean');
+		};
+
+		const handleStateless = ({ payload }: { payload: string }) => {
+			let message:
+				| {
+						type?: string;
+						documentId?: string;
+						savedAt?: string;
+						startedAt?: string;
+						acceptedAt?: string;
+				  }
+				| null = null;
+			try {
+				message = JSON.parse(payload) as {
+					type?: string;
+					documentId?: string;
+					savedAt?: string;
+					startedAt?: string;
+					acceptedAt?: string;
+				};
+			} catch {
+				return;
+			}
+
+			if (message?.documentId !== documentId) {
+				return;
+			}
+
+			if (message.type === 'document-save-request-accepted') {
+				if (hasManualSaveRequestInFlight) {
+					isSaving = true;
+					logSaveDebug('realtime-save-request-accepted', {
+						acceptedAt: message.acceptedAt
+					});
+				}
+				return;
+			}
+
+			if (message.type === 'document-persisting') {
+				if (localCollaborationChangeSeq > persistedCollaborationChangeSeq) {
+					isSaving = true;
+					logSaveDebug('realtime-persisting', {
+						flushedCollaborationChangeSeq,
+						persistedCollaborationChangeSeq,
+						startedAt: message.startedAt
+					});
+				}
+				return;
+			}
+
+			if (message?.type !== 'document-persisted') {
+				return;
+			}
+
+			if (flushedCollaborationChangeSeq <= persistedCollaborationChangeSeq) {
+				return;
+			}
+
+			persistedCollaborationChangeSeq = flushedCollaborationChangeSeq;
+			if (localCollaborationChangeSeq !== persistedCollaborationChangeSeq) {
+				return;
+			}
+
+			if (instance.provider?.hasUnsyncedChanges) {
+				return;
+			}
+
+			hasPendingCollaborationSave = false;
+			hasUnsavedChanges = false;
+			isSaving = false;
+			hasManualSaveRequestInFlight = false;
+			lastSaved =
+				typeof message.savedAt === 'string' && message.savedAt.trim() !== ''
+					? new Date(message.savedAt)
+					: new Date();
+			logSaveDebug('realtime-persisted', {
+				flushedCollaborationChangeSeq,
+				persistedCollaborationChangeSeq,
+				savedAt: message.savedAt
+			});
+			settleCollaborationSaveWaiters(true);
+		};
+
 		instance.provider.on('status', handleStatus);
 		instance.provider.on('authenticationFailed', handleAuthenticationFailed);
 		instance.provider.on('awarenessChange', handleAwarenessChange);
+		instance.provider.on('unsyncedChanges', handleUnsyncedChanges);
+		instance.provider.on('stateless', handleStateless);
 		detachCollaborationListeners = () => {
 			instance.provider?.off('status', handleStatus);
 			instance.provider?.off('authenticationFailed', handleAuthenticationFailed);
 			instance.provider?.off('awarenessChange', handleAwarenessChange);
+			instance.provider?.off('unsyncedChanges', handleUnsyncedChanges);
+			instance.provider?.off('stateless', handleStateless);
 		};
 
 		if (instance.error) {
@@ -771,6 +1186,9 @@
 		} else if (instance.isConnected) {
 			isYjsConnected = true;
 			syncPresence();
+			handleUnsyncedChanges({
+				number: instance.provider.hasUnsyncedChanges ? instance.provider.unsyncedChanges : 0
+			});
 		} else {
 			isYjsConnected = false;
 			resetOnlineMembers();
@@ -778,19 +1196,22 @@
 		}
 	}
 
-	async function saveContent(reason: 'manual' | 'auto' = 'manual'): Promise<boolean> {
+	async function saveLocalContent(reason: SaveReason = 'manual'): Promise<boolean> {
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
 			return !hasUnsavedChanges;
 		}
 
 		isSaving = true;
+		logSaveDebug('local-save-start', { reason });
 		try {
 			await updateDocumentContent(documentId, normalizeManagedImagesForSave(content));
 			lastSaved = new Date();
 			hasUnsavedChanges = false;
+			logSaveDebug('local-save-success', { reason });
 			return true;
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
+			logSaveDebug('local-save-failed', { reason, error: error instanceof Error ? error.message : String(error) });
 			if (reason === 'manual') {
 				toast.error(m.editor_save_failed());
 			}
@@ -809,11 +1230,77 @@
 		// We only suppress the interval while collaboration is healthy. If
 		// realtime is unavailable or disconnects, the page falls back to the
 		// classic HTTP autosave path so single-user editing still has a safety net.
-		return !(collaboration?.provider && isYjsConnected);
+		return saveDriver === 'local';
+	}
+
+	async function requestCollaborationSave(_reason: SaveReason): Promise<boolean> {
+		const provider = collaboration?.provider;
+		if (!provider || !isYjsConnected) {
+			logSaveDebug('collaboration-save-skipped-disconnected');
+			return false;
+		}
+
+		if (!hasUnsavedChanges && !hasPendingCollaborationSave && !provider.hasUnsyncedChanges) {
+			logSaveDebug('collaboration-save-noop');
+			return true;
+		}
+
+		isSaving = false;
+		if (_reason === 'manual') {
+			logSaveDebug('manual-save-clicked');
+			hasManualSaveRequestInFlight = true;
+			isSaving = true;
+			hasPendingImmediateCollaborationPersist = true;
+		}
+		logSaveDebug('collaboration-save-requested', {
+			reason: _reason,
+			unsyncedChanges: provider.unsyncedChanges,
+			hasProviderUnsyncedChanges: provider.hasUnsyncedChanges
+		});
+		sendCollaborationContentSnapshot(content);
+		if (_reason === 'manual') {
+			// If Yjs already flushed this revision to the collaboration doc, skip
+			// the extra forceSync round-trip and persist immediately.
+			if (!provider.hasUnsyncedChanges) {
+				flushedCollaborationChangeSeq = localCollaborationChangeSeq;
+				hasPendingCollaborationSave = localCollaborationChangeSeq > persistedCollaborationChangeSeq;
+				hasPendingImmediateCollaborationPersist = false;
+				if (await requestImmediateCollaborationPersist()) {
+					logSaveDebug('manual-save-requested-immediate-persist', {
+						flushedCollaborationChangeSeq,
+						persistedCollaborationChangeSeq
+					});
+					return queueCollaborationSaveWaiter();
+				}
+				hasPendingImmediateCollaborationPersist = false;
+				hasManualSaveRequestInFlight = false;
+				isSaving = false;
+				toast.error(m.editor_save_failed());
+				return false;
+			}
+			provider.forceSync();
+			return queueCollaborationSaveWaiter();
+		}
+
+		if (hasUnsavedChanges || provider.hasUnsyncedChanges) {
+			provider.forceSync();
+		}
+
+		return queueCollaborationSaveWaiter();
+	}
+
+	async function requestDocumentSave(reason: SaveReason = 'manual'): Promise<boolean> {
+		if (saveDriver === 'collaboration') {
+			return requestCollaborationSave(reason);
+		}
+		if (saveDriver === 'local') {
+			return saveLocalContent(reason);
+		}
+		return false;
 	}
 
 	async function handleSaveAndLeave() {
-		const saved = await saveContent();
+		const saved = await requestDocumentSave('leave');
 		if (!saved) {
 			return;
 		}
@@ -844,7 +1331,7 @@
 
 	// Load document content when ID becomes available
 	$effect(() => {
-		if (documentId && !authSignal.loading) {
+		if (documentId && !authSignal.loading && !realtimeConfigSignal.loading) {
 			isLoading = true;
 			const loadContent = async () => {
 				try {
@@ -861,6 +1348,11 @@
 					]);
 
 					if (details.myRole === 'viewer') {
+						await goto(`/view/documents/${documentId}`);
+						return;
+					}
+
+					if (!collaborationEnabled && details.myRole !== 'owner') {
 						await goto(`/view/documents/${documentId}`);
 						return;
 					}
@@ -885,6 +1377,13 @@
 					hasAttemptedPresence = false;
 					collaborationError = null;
 					isYjsConnected = false;
+					hasPendingCollaborationSave = false;
+					localCollaborationChangeSeq = 0;
+					flushedCollaborationChangeSeq = 0;
+					persistedCollaborationChangeSeq = 0;
+					hasManualSaveRequestInFlight = false;
+					isSaving = false;
+					settleCollaborationSaveWaiters(false);
 					resetOnlineMembers();
 					clearPresenceSocket();
 					clearCollaborationListeners();
@@ -896,25 +1395,27 @@
 						console.log('[Load] Title loaded:', title);
 						isLoading = false;
 
-						void (async () => {
-							try {
-								presenceCount = await fetchCollaborationPresence(documentId);
-								updateCollaborationIndicator();
-								await connectPresenceSocket(documentId);
-								// Collaboration bootstrap stays in the background on purpose:
-								// local content must render first so a down realtime service
-								// degrades to single-user editing instead of blanking the editor.
-								await startCollaboration(documentId, 'presence');
-							} catch (presenceError) {
-								console.error('[Collaboration] Failed to fetch presence:', presenceError);
-								presenceCount = 0;
-							presenceConnected = false;
-							hasAttemptedPresence = true;
-							collaborationError = 'presence-disconnected';
-							isYjsConnected = false;
-							updateCollaborationIndicator();
+						if (collaborationEnabled) {
+							void (async () => {
+								try {
+									presenceCount = await fetchCollaborationPresence(documentId);
+									updateCollaborationIndicator();
+									await connectPresenceSocket(documentId);
+									// Collaboration bootstrap stays in the background on purpose:
+									// local content must render first so a down realtime service
+									// degrades to single-user editing instead of blanking the editor.
+									await startCollaboration(documentId, 'presence');
+								} catch (presenceError) {
+									console.error('[Collaboration] Failed to fetch presence:', presenceError);
+									presenceCount = 0;
+									presenceConnected = false;
+									hasAttemptedPresence = true;
+									collaborationError = 'presence-disconnected';
+									isYjsConnected = false;
+									updateCollaborationIndicator();
+								}
+							})();
 						}
-					})();
 				} catch (error) {
 					console.error('[Load] Failed to load document:', error);
 					collaboration = null;
@@ -939,6 +1440,15 @@
 	});
 
 	onDestroy(() => {
+		unsubscribePage();
+		unsubscribeAuth();
+		unsubscribeRealtimeConfig();
+		if (documentId) {
+			void unregisterPresenceSession(documentId, { keepalive: true });
+		}
+		clearCollaborationContentSnapshotTimer();
+		settleEditorContentOverrideWaiter(false);
+		settleCollaborationSaveWaiters(false);
 		clearPresenceSocket();
 		clearCollaborationListeners();
 		if (documentId) {
@@ -962,13 +1472,13 @@
 		}
 
 		// 自动保存只负责非 realtime 模式下的兜底落盘，不额外维护独立状态指示。
-		const timer = window.setInterval(() => {
-			if (!hasUnsavedChanges || isSaving) {
-				return;
-			}
+			const timer = window.setInterval(() => {
+				if (!hasUnsavedChanges || isSaving) {
+					return;
+				}
 
-			void saveContent('auto');
-		}, autoSaveIntervalSeconds * 1000);
+				void requestDocumentSave('auto');
+			}, autoSaveIntervalSeconds * 1000);
 
 		return () => {
 			window.clearInterval(timer);
@@ -981,10 +1491,14 @@
 			const isSaveKey = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's';
 			if (!isSaveKey) return;
 			event.preventDefault();
-			void saveContent();
+			void requestDocumentSave('manual');
 		};
 
 		const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+			if (documentId) {
+				void unregisterPresenceSession(documentId, { keepalive: true });
+			}
+
 			if (!hasUnsavedChanges) {
 				return;
 			}
@@ -1018,6 +1532,7 @@
 				{myRole}
 				{publicAccess}
 				{publicUrl}
+				{collaborationEnabled}
 				{collaborationIndicator}
 				{onlineMembers}
 				readOnly={false}
@@ -1046,6 +1561,7 @@
 					<Editor
 						documentId={documentId!}
 						{content}
+						externalContentOverride={editorContentOverride}
 						currentImageTargetId={preferredImageTargetId}
 						currentImageTargetLabel={currentImageTargetLabel}
 						imageTargetOptions={availableImageTargets}
@@ -1055,7 +1571,7 @@
 						{hasUnsavedChanges}
 						onImageTargetChange={handleImageTargetChange}
 						hydrateManagedContent={refreshSignedImageSources}
-						onSave={saveContent}
+						onSave={() => requestDocumentSave('manual')}
 						onExportAction={handleExportAction}
 						onContentChange={handleContentChange}
 					/>
