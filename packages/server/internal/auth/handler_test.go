@@ -1,10 +1,12 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +20,12 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func setupAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -312,5 +320,56 @@ func TestGetUserProfile_ParsesGoogleOAuthUserInfoAsTrusted(t *testing.T) {
 	}
 	if profile.Picture != "https://example.com/avatar.png" {
 		t.Fatalf("expected picture propagated, got %q", profile.Picture)
+	}
+}
+
+func TestFetchGitHubPrimaryEmail_PrefersVerifiedAndMarksVerified(t *testing.T) {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() != "https://api.github.com/user/emails" {
+				t.Fatalf("unexpected URL: %s", req.URL.String())
+			}
+			body := `[{"email":"unverified@example.com","primary":true,"verified":false},{"email":"verified@example.com","primary":false,"verified":true}]`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(body)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	})
+
+	email, verified, err := fetchGitHubPrimaryEmail(ctx, &oauth2.Config{}, &oauth2.Token{AccessToken: "token"})
+	if err != nil {
+		t.Fatalf("fetch github primary email: %v", err)
+	}
+	if email != "verified@example.com" {
+		t.Fatalf("expected verified email, got %q", email)
+	}
+	if !verified {
+		t.Fatalf("expected email to be marked verified")
+	}
+}
+
+func TestFetchGitHubPrimaryEmail_ReturnsUnverifiedWhenNoVerifiedExists(t *testing.T) {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := `[{"email":"only-unverified@example.com","primary":true,"verified":false}]`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(body)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	})
+
+	email, verified, err := fetchGitHubPrimaryEmail(ctx, &oauth2.Config{}, &oauth2.Token{AccessToken: "token"})
+	if err != nil {
+		t.Fatalf("fetch github primary email: %v", err)
+	}
+	if email != "only-unverified@example.com" {
+		t.Fatalf("expected fallback email, got %q", email)
+	}
+	if verified {
+		t.Fatalf("expected fallback email to be marked unverified")
 	}
 }
