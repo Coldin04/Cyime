@@ -27,6 +27,10 @@
 		if (unlimited || limit === null) return m.user_overview_unlimited();
 		return String(limit);
 	}
+
+	function getUsedDocumentCount(overview: UserOverview): number {
+		return overview.activeDocumentCount + overview.trashedDocumentCount;
+	}
 </script>
 
 <div class="space-y-4">
@@ -60,7 +64,7 @@
 						{m.user_overview_limit_unlimited_hint()}
 					{:else}
 						{m.user_overview_limit_usage({
-							count: String(overview.activeDocumentCount),
+							count: String(getUsedDocumentCount(overview)),
 							limit: String(overview.documentLimit ?? 0)
 						})}
 					{/if}
