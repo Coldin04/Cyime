@@ -1,5 +1,6 @@
 <script lang="ts">
   import SsoLoginBox from '$lib/components/auth/SsoLoginBox.svelte';
+  import Logo from '$lib/components/common/Logo.svelte';
   import * as m from '$paraglide/messages';
 </script>
 
@@ -12,9 +13,7 @@
     <div class="mx-auto max-w-4xl grid grid-cols-1 items-center gap-6 md:grid-cols-2">
       <!-- Left Column: Brand and Tagline -->
       <div class="mb-6 flex flex-col justify-center text-center md:mb-0 md:-translate-y-7 md:pr-10 md:text-left">
-        <h1 class="text-5xl font-bold tracking-tight md:text-6xl">
-          <span class="bg-gradient-to-r from-cyan-300 to-sky-400 bg-clip-text text-transparent">Cyime</span>
-        </h1>
+        <Logo href="/" labelClass="text-5xl font-bold tracking-tight md:text-6xl" />
         <p class="mt-5 hidden text-sm leading-8 text-slate-600 dark:text-slate-400 md:inline-block md:text-lg">
           {m.login_page_tagline_part1()}<br />
           {m.login_page_tagline_part2()}

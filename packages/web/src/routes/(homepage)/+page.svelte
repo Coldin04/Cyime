@@ -1,6 +1,15 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import Logo from '$lib/components/common/Logo.svelte';
+	import {
+		clearManualLocaleCookie,
+		getManualLocaleFromDocument,
+		setManualLocaleCookie
+	} from '$lib/paraglide/manual-locale-cookie';
 	import * as m from '$paraglide/messages';
-	
+	import { getLocale, isLocale, locales } from '$paraglide/runtime';
+	import GlobeHemisphereWest from '~icons/ph/globe-hemisphere-west';
+	import GithubLogo from '~icons/ph/github-logo';
 	import { onMount } from 'svelte';
 
 	const homepageHeroHeadlinePhrases = [
@@ -10,9 +19,52 @@
 
 	let homepageHeroHeadlinePhrase = homepageHeroHeadlinePhrases[0];
 	let homepageHeroHeadlinePhraseIndex = 0;
-	
+	type LocalePreference = 'system' | (typeof locales)[number];
+	let localePreference: LocalePreference = 'system';
+	let localeMenuOpen = false;
+	let localeMenuElement: HTMLDivElement | null = null;
+
+	function getLocaleOptionLabel(localeTag: string): string {
+		if (!browser || typeof Intl === 'undefined' || typeof Intl.DisplayNames === 'undefined') {
+			return localeTag;
+		}
+		try {
+			const display = new Intl.DisplayNames([getLocale()], { type: 'language' });
+			return display.of(localeTag.split('-')[0]) ?? localeTag;
+		} catch {
+			return localeTag;
+		}
+	}
+
+	function handleLocaleSelect(next: LocalePreference) {
+		if (next === localePreference) {
+			localeMenuOpen = false;
+			return;
+		}
+
+		if (next === 'system') {
+			clearManualLocaleCookie();
+			localePreference = 'system';
+			localeMenuOpen = false;
+			if (browser) window.location.reload();
+			return;
+		}
+
+		setManualLocaleCookie(next);
+		localePreference = next;
+		localeMenuOpen = false;
+		if (browser) window.location.reload();
+	}
+
 	onMount(() => {
 		let rotationTimeout: ReturnType<typeof setTimeout>;
+		const manualLocale = getManualLocaleFromDocument();
+		localePreference = manualLocale && isLocale(manualLocale) ? manualLocale : 'system';
+		const handlePointerDown = (event: PointerEvent) => {
+			if (!localeMenuElement?.contains(event.target as Node)) {
+				localeMenuOpen = false;
+			}
+		};
 
 		const scheduleNextPhraseRotation = () => {
 			rotationTimeout = setTimeout(() => {
@@ -25,8 +77,16 @@
 		};
 
 		scheduleNextPhraseRotation();
+		if (browser) {
+			window.addEventListener('pointerdown', handlePointerDown);
+		}
 
-		return () => clearTimeout(rotationTimeout);
+		return () => {
+			clearTimeout(rotationTimeout);
+			if (browser) {
+				window.removeEventListener('pointerdown', handlePointerDown);
+			}
+		};
 	});
 </script>
 
@@ -40,14 +100,72 @@
   <meta name="twitter:description" content={m.homepage_meta_description()} />
 </svelte:head>
 
-<div
-	class="homepage-hero min-h-screen px-8 py-10 dark:bg-slate-900"
+<nav
+	class="sticky top-0 z-30 bg-white/80 backdrop-blur-md dark:bg-slate-900/80 sm:px-2"
 >
-	<div class="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col">
+	<div class="mx-auto flex h-16 w-full max-w-5xl items-center justify-between">
+		<Logo href="/" labelClass="text-lg font-bold tracking-tight sm:text-xl px-3" />
+		<div class="flex items-center gap-3">
+			<div class="relative" bind:this={localeMenuElement}>
+				<button
+					type="button"
+					class="grid h-10 w-10 place-content-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+					aria-label={m.user_profile_language_title()}
+					title={m.user_profile_language_title()}
+					onclick={() => (localeMenuOpen = !localeMenuOpen)}
+				>
+					<GlobeHemisphereWest class="h-5 w-5" />
+				</button>
+				{#if localeMenuOpen}
+					<div
+						class="absolute right-0 top-full z-40 mt-2 min-w-40 rounded-xl bg-white p-1.5 shadow-[0_14px_40px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/80 dark:bg-slate-800 dark:ring-slate-700/80"
+					>
+						<button
+							type="button"
+							class={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+								localePreference === 'system'
+									? 'bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100'
+									: 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/70'
+							}`}
+							onclick={() => handleLocaleSelect('system')}
+						>
+							{m.user_profile_language_option_system()}
+						</button>
+						{#each locales as localeTag (localeTag)}
+							<button
+								type="button"
+								class={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+									localePreference === localeTag
+										? 'bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100'
+										: 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/70'
+								}`}
+								onclick={() => handleLocaleSelect(localeTag)}
+							>
+								{getLocaleOptionLabel(localeTag)}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<a
+				href="https://github.com/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="grid h-10 w-10 place-content-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+				aria-label="GitHub repository"
+				title="GitHub"
+			>
+				<GithubLogo class="h-5 w-5" />
+			</a>
+		</div>
+	</div>
+</nav>
 
-		<div class="flex flex-1 flex-col items-center justify-center text-center">
+<div class="homepage-hero min-h-screen px-6 pb-8 dark:bg-slate-900 sm:px-8">
+	<div class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl flex-col">
+		<div class="flex flex-1 -translate-y-9 flex-col items-center justify-center pt-2 text-center md:-translate-y-8">
 			<h1
-				class="max-w-5xl text-4xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.1] md:text-7xl"
+				class="max-w-5xl text-5xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.1] md:text-7xl"
 			>
 				{#key `${homepageHeroHeadlinePhraseIndex}-${homepageHeroHeadlinePhrase}`}
 					<span
@@ -58,7 +176,7 @@
 				{/key}
 				<span class="mt-3 block md:mt-4">{m.homepage_hero_suffix()}</span>
 			</h1>
-			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-2xl">
+			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-xl">
 				{m.homepage_hero_description()}
 			</p>
 				<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
@@ -79,79 +197,34 @@
 </div>
 
 <!-- Features Section -->
-<div id="features" class="space-y-16 py-16 md:space-y-28 md:py-28">
-	<!-- Feature 1: Online Sync -->
-	<section class="bg-white px-8 dark:bg-slate-800">
-		<div class="mx-auto max-w-5xl">
-			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_editor_features_screenshot_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pl-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_online_sync_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_online_sync_description()}
-					</p>
-				</div>
-			</div>
+<section id="features" class="py-16 sm:px-6 md:py-24 px-16">
+	<div class="mx-auto grid w-full max-w-5xl gap-10 md:grid-cols-3 md:gap-12">
+		<div class="text-center md:text-left">
+			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_online_sync_title()}
+			</h2>
+			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_online_sync_description()}
+			</p>
 		</div>
-	</section>
-
-	<!-- Feature 2: Minimalist Interface -->
-	<section class="bg-sky-50 py-16 dark:bg-slate-900 md:py-28">
-		<div class="mx-auto max-w-5xl px-8">
-			<div class="flex flex-col items-center gap-8 md:flex-row-reverse md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_minimalist_editor_screenshot_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pr-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_focus_writing_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_focus_writing_description()}
-					</p>
-				</div>
-			</div>
+		<div class="text-center md:text-left">
+			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_focus_writing_title()}
+			</h2>
+			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_focus_writing_description()}
+			</p>
 		</div>
-	</section>
-
-	<!-- Feature 3: Smooth Response -->
-	<section class="bg-white px-8 dark:bg-slate-800">
-		<div class="mx-auto max-w-5xl">
-			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_smooth_input_animation_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pl-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_smooth_editor_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_smooth_editor_description()}
-					</p>
-				</div>
-			</div>
+		<div class="px-2 text-center md:text-left">
+			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_feature_media_title()}
+			</h2>
+			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_feature_media_desc()}
+			</p>
 		</div>
-	</section>
-</div>
+	</div>
+</section>
 
 <!-- Footer -->
 <footer class="bg-gray-100 dark:bg-slate-700">

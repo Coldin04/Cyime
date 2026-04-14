@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MagnifyingGlass from '~icons/ph/magnifying-glass';
+	import Logo from '$lib/components/common/Logo.svelte';
 	import UserMenuDropdown from '$lib/components/common/UserMenuDropdown.svelte';
 </script>
 
@@ -7,7 +8,7 @@
 	class="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-black/10 bg-white/80 px-4 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/80"
 >
 	<div class="flex items-center gap-2">
-		<a href="/workspace" class="bg-gradient-to-r from-cyan-300 to-sky-400 bg-clip-text font-bold text-transparent text-lg">Cyime</a>
+		<Logo href="/workspace" labelClass="text-lg font-bold" />
 	</div>
 
 	<div class="flex items-center gap-4">
