@@ -3,7 +3,7 @@
 		<!-- Name Column -->
 		<div class="flex flex-1 items-center gap-3">
 			<div class="h-4 w-4 rounded"></div>
-			<div class="h-6 w-6 rounded bg-teal-200 dark:bg-teal-900"></div>
+			<div class="h-6 w-6 rounded bg-sky-200 dark:bg-sky-900"></div>
 			<div class="h-4 w-40 rounded bg-zinc-300 dark:bg-zinc-700"></div>
 		</div>
 

@@ -252,7 +252,7 @@
 						}}
 						style="padding-left: {1 + folder.level * 1.5}rem"
 					>
-						<Folder class="h-4 w-4 flex-shrink-0 text-teal-500" />
+						<Folder class="h-4 w-4 flex-shrink-0 text-sky-500" />
 						<span class="truncate">{folder.name}</span>
 					</button>
 				{/each}
