@@ -503,57 +503,10 @@
 									</p>
 									</div>
 
-									{#if canManagePublic}
-										<div class="space-y-3">
-											<div class="flex items-center justify-between gap-3">
-												<div>
-													<p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-														{m.editor_document_settings_public_label()}
-													</p>
-													<p class="text-xs text-zinc-500 dark:text-zinc-400">
-														{m.editor_document_settings_public_hint()}
-													</p>
-												</div>
-												<div class="flex items-center gap-2">
-													<select
-														class="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
-														bind:value={draftPublicAccess}
-														disabled={isSavingPublicAccess}
-														onchange={(event) => void handlePublicAccessSelect(event)}
-													>
-														<option value="private">{m.editor_document_settings_public_option_private()}</option>
-														<option value="authenticated">{m.editor_document_settings_public_option_authenticated()}</option>
-														<option value="public">{m.editor_document_settings_public_option_public()}</option>
-													</select>
-												</div>
-											</div>
-											<div class="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-700">
-												<input
-													type="text"
-													readonly
-													value={resolvePublicAccessURL()}
-													class="min-w-0 flex-1 bg-transparent text-xs text-zinc-700 outline-none dark:text-zinc-300"
-												/>
-												<button
-													type="button"
-													class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-													onclick={() => void copyPublicURL()}
-													aria-label={m.editor_document_settings_public_copy_action()}
-													title={m.editor_document_settings_public_copy_action()}
-												>
-													{#if copiedPublicURL}
-														<Check class="h-3.5 w-3.5" />
-													{:else}
-														<Copy class="h-3.5 w-3.5" />
-													{/if}
-												</button>
-											</div>
-										</div>
-									{/if}
-								</section>
+									</section>
 							{/if}
 
-							{#if canManageMembers}
+							{#if canManageMembers || canManagePublic}
 								<section
 									bind:this={permissionsSection}
 									data-section-id="permissions"
@@ -568,10 +521,60 @@
 									</p>
 								</div>
 
+								{#if canManagePublic}
+									<div class="space-y-3">
+										<div class="flex items-center justify-between gap-3">
+											<div>
+												<p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+													{m.editor_document_settings_public_label()}
+												</p>
+												<p class="text-xs text-zinc-500 dark:text-zinc-400">
+													{m.editor_document_settings_public_hint()}
+												</p>
+											</div>
+											<div class="flex items-center gap-2">
+												<select
+													class="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
+													bind:value={draftPublicAccess}
+													disabled={isSavingPublicAccess}
+													onchange={(event) => void handlePublicAccessSelect(event)}
+												>
+													<option value="private">{m.editor_document_settings_public_option_private()}</option>
+													<option value="authenticated">{m.editor_document_settings_public_option_authenticated()}</option>
+													<option value="public">{m.editor_document_settings_public_option_public()}</option>
+												</select>
+											</div>
+										</div>
+										<div class="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+											<input
+												type="text"
+												readonly
+												value={resolvePublicAccessURL()}
+												class="min-w-0 flex-1 bg-transparent text-xs text-zinc-700 outline-none dark:text-zinc-300"
+											/>
+											<button
+												type="button"
+												class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+												onclick={() => void copyPublicURL()}
+												aria-label={m.editor_document_settings_public_copy_action()}
+												title={m.editor_document_settings_public_copy_action()}
+											>
+												{#if copiedPublicURL}
+													<Check class="h-3.5 w-3.5" />
+												{:else}
+													<Copy class="h-3.5 w-3.5" />
+												{/if}
+											</button>
+										</div>
+									</div>
+								{/if}
+
+								{#if canManageMembers}
 									<DocumentCollaborationSettings
 										{documentId}
 										enabled={open && activeSection === 'permissions'}
 									/>
+								{/if}
 								</section>
 							{/if}
 

@@ -343,7 +343,7 @@
 									<p class="text-base font-medium text-zinc-900 dark:text-zinc-100">{item.name}</p>
 								<span class={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
 									item.isEnabled
-										? 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-c-200'
+										? 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
 										: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
 								}`}>
 									{item.isEnabled ? m.user_image_beds_enabled() : m.user_image_beds_disabled()}

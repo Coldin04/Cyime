@@ -278,11 +278,11 @@ func updateProviderDisplayNameInteractive(reader *bufio.Reader) error {
 	}
 
 	fmt.Println()
-	fmt.Print("输入要修改的提供商名称: ")
+	fmt.Print("输入要修改的提供商 name（括号中的值）: ")
 	name, _ := reader.ReadString('\n')
 	name = strings.TrimSpace(name)
 	if name == "" {
-		fmt.Println("未输入提供商名称，已取消。")
+		fmt.Println("未输入提供商 name，已取消。")
 		return nil
 	}
 

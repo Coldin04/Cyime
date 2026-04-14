@@ -5,7 +5,7 @@
 ### 首次初始化（配置 SSO 登录）
 
 ```bash
-cd /home/coldin04/Cyime/packages/server
+cd packages/server
 go run cmd/init/main.go
 ```
 

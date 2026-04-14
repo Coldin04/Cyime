@@ -66,7 +66,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 - 关闭后，前端编辑页会退回单人保存链路；非 owner 访问会按“文档不存在或无权访问”处理
 - 如果还希望某个前端部署本地就完全不加载协作能力，可额外设置 `packages/web/.env` 中的 `PUBLIC_COLLABORATION_ENABLED=false`
 - 前端最终生效值为：`PUBLIC_COLLABORATION_ENABLED && 后端下发的 collaborationEnabled`
-- 以上两个变量统一记录在根目录 [`.env.example`](/home/coldin04/Cyime/.env.example)
+- 以上两个变量统一记录在根目录 [`.env.example`](.env.example)
 - 对于单人部署，推荐做法是：
   - 不启动 `packages/realtime`
   - `packages/server/.env` 设 `COLLABORATION_ENABLED=false`
@@ -159,7 +159,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
   - 前端不会直接读取本地 env，而是读取后端 `/api/v1/config` 下发的 `collaborationEnabled`
   - 可选前端附加开关：`PUBLIC_COLLABORATION_ENABLED`，默认 `true`
   - 适用于你想让某个前端部署固定保持单人模式，不去初始化协作 UI / provider
-  - 这两个变量都已统一写在根目录 [`.env.example`](/home/coldin04/Cyime/.env.example)
+  - 这两个变量都已统一写在根目录 [`.env.example`](.env.example)
 
 - 媒体与图床
   - `MEDIA_STORAGE_PROVIDER`：可选 `local | r2 | s3 | cos`，默认 `local`。
