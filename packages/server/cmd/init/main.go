@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/config"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -58,7 +58,7 @@ var providerTemplates = map[string]ProviderTemplate{
 func main() {
 	_ = config.LoadDotEnv(".env")
 
-	fmt.Println("🍋 CyimeWrite 初始化向导")
+	fmt.Println("🍋 Cyime 初始化向导")
 	fmt.Println("========================")
 	fmt.Println()
 
@@ -73,8 +73,9 @@ func main() {
 	fmt.Println("2. 列出当前登录提供商")
 	fmt.Println("3. 删除单个登录提供商")
 	fmt.Println("4. 清空全部登录提供商")
-	fmt.Println("5. 跳过（退出）")
-	fmt.Print("请选择 (1-5): ")
+	fmt.Println("5. 修改提供商显示名称")
+	fmt.Println("6. 跳过（退出）")
+	fmt.Print("请选择 (1-6): ")
 
 	choice, _ := reader.ReadString('\n')
 	choice = strings.TrimSpace(choice)
@@ -95,6 +96,10 @@ func main() {
 			log.Fatalf("清空提供商失败：%v", err)
 		}
 	case "5":
+		if err := updateProviderDisplayNameInteractive(reader); err != nil {
+			log.Fatalf("修改提供商显示名称失败：%v", err)
+		}
+	case "6":
 		fmt.Println("已退出。你可以稍后重新运行初始化向导。")
 	default:
 		fmt.Println("无效的选择，已退出。")
@@ -174,7 +179,11 @@ func listProviders() error {
 		if provider.IsActive {
 			status = "启用"
 		}
-		fmt.Printf("- %s [%s] client_id=%s status=%s\n", provider.Name, provider.ProtocolType, provider.ClientID, status)
+		displayName := provider.Name
+		if provider.DisplayName != nil && strings.TrimSpace(*provider.DisplayName) != "" {
+			displayName = strings.TrimSpace(*provider.DisplayName)
+		}
+		fmt.Printf("- %s (%s) [%s] client_id=%s status=%s\n", displayName, provider.Name, provider.ProtocolType, provider.ClientID, status)
 	}
 	return nil
 }
@@ -263,6 +272,58 @@ func clearProvidersInteractive(reader *bufio.Reader) error {
 	})
 }
 
+func updateProviderDisplayNameInteractive(reader *bufio.Reader) error {
+	if err := listProviders(); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Print("输入要修改的提供商 name（括号中的值）: ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSpace(name)
+	if name == "" {
+		fmt.Println("未输入提供商 name，已取消。")
+		return nil
+	}
+
+	var provider models.AuthProvider
+	if err := database.DB.Where("name = ?", name).First(&provider).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			fmt.Printf("未找到提供商 '%s'。\n", name)
+			return nil
+		}
+		return err
+	}
+
+	currentDisplayName := provider.Name
+	if provider.DisplayName != nil && strings.TrimSpace(*provider.DisplayName) != "" {
+		currentDisplayName = strings.TrimSpace(*provider.DisplayName)
+	}
+
+	fmt.Printf("当前显示名称: %s\n", currentDisplayName)
+	fmt.Print("新的显示名称（留空则清除，回退到 name 显示）: ")
+	nextDisplayName, _ := reader.ReadString('\n')
+	nextDisplayName = strings.TrimSpace(nextDisplayName)
+
+	updates := map[string]any{
+		"display_name": nil,
+	}
+	if nextDisplayName != "" {
+		updates["display_name"] = nextDisplayName
+	}
+
+	if err := database.DB.Model(&provider).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	if nextDisplayName == "" {
+		fmt.Printf("✅ 已清除 '%s' 的显示名称，前端将回退显示为 name。\n", provider.Name)
+	} else {
+		fmt.Printf("✅ 已将 '%s' 的显示名称更新为 '%s'。\n", provider.Name, nextDisplayName)
+	}
+	return nil
+}
+
 func configureGitHubProvider(reader *bufio.Reader) models.AuthProvider {
 	fmt.Println()
 	fmt.Println("📦 配置 GitHub OAuth")
@@ -284,6 +345,7 @@ func configureGitHubProvider(reader *bufio.Reader) models.AuthProvider {
 	return models.AuthProvider{
 		ID:                    uuid.New(),
 		Name:                  "github",
+		DisplayName:           strPtr(providerTemplates["github"].DisplayName),
 		ProtocolType:          "oauth2",
 		AuthURL:               strPtr(providerTemplates["github"].AuthURL),
 		TokenURL:              strPtr(providerTemplates["github"].TokenURL),
@@ -317,6 +379,7 @@ func configureGoogleProvider(reader *bufio.Reader) models.AuthProvider {
 	return models.AuthProvider{
 		ID:                    uuid.New(),
 		Name:                  "google",
+		DisplayName:           strPtr(providerTemplates["google"].DisplayName),
 		ProtocolType:          "oauth2",
 		IssuerURL:             strPtr(providerTemplates["google"].IssuerURL),
 		AuthURL:               strPtr(providerTemplates["google"].AuthURL),
@@ -338,6 +401,10 @@ func configureCustomProvider(reader *bufio.Reader) models.AuthProvider {
 	fmt.Print("提供商名称 (例如：keycloak, auth0): ")
 	name, _ := reader.ReadString('\n')
 	name = strings.TrimSpace(name)
+
+	fmt.Print("显示名称 (可选，例如：微信, GitHub): ")
+	displayName, _ := reader.ReadString('\n')
+	displayName = strings.TrimSpace(displayName)
 
 	fmt.Print("Issuer URL: ")
 	issuerURL, _ := reader.ReadString('\n')
@@ -371,9 +438,20 @@ func configureCustomProvider(reader *bufio.Reader) models.AuthProvider {
 	iconURL, _ := reader.ReadString('\n')
 	iconURL = strings.TrimSpace(iconURL)
 
+	var displayNamePtr *string
+	if displayName != "" {
+		displayNamePtr = &displayName
+	}
+
+	var iconURLPtr *string
+	if iconURL != "" {
+		iconURLPtr = &iconURL
+	}
+
 	return models.AuthProvider{
 		ID:                    uuid.New(),
 		Name:                  name,
+		DisplayName:           displayNamePtr,
 		ProtocolType:          "oidc",
 		IssuerURL:             &issuerURL,
 		AuthURL:               &authURL,
@@ -381,7 +459,7 @@ func configureCustomProvider(reader *bufio.Reader) models.AuthProvider {
 		UserInfoURL:           &userInfoURL,
 		ClientID:              clientID,
 		ClientSecretEncrypted: clientSecret,
-		IconURL:               &iconURL,
+		IconURL:               iconURLPtr,
 		Scopes:                scopes,
 		IsActive:              true,
 	}

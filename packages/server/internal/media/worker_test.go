@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 )
 

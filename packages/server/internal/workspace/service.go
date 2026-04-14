@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
+	"g.co1d.in/Coldin04/Cyime/server/internal/acl"
+	"g.co1d.in/Coldin04/Cyime/server/internal/config"
+	"g.co1d.in/Coldin04/Cyime/server/internal/content"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/user"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -1306,7 +1307,12 @@ func UpdateDocumentManualExcerpt(userID uuid.UUID, documentID uuid.UUID, manualE
 		return "", "", ErrDocumentExcerptTooLong
 	}
 
-	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, acl.ActionManageMembers)
+	requiredAction := acl.ActionManageMembers
+	if !config.GetCollaborationEnabled() {
+		requiredAction = acl.ActionOwnerOnly
+	}
+
+	document, _, err := acl.AuthorizeDocumentAction(database.DB, userID, documentID, requiredAction)
 	if err != nil {
 		return "", "", ErrDocumentNotFoundOrUnauthorized
 	}

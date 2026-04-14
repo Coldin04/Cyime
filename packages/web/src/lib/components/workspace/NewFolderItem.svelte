@@ -68,7 +68,7 @@
 	<div class="container mx-auto flex items-center gap-3 px-4 py-2">
 		<div class="flex min-w-0 items-center gap-3 pr-4 flex-1">
 			<div class="h-4 w-4"></div>
-			<Folder class="h-5 w-5 flex-shrink-0 text-teal-500" />
+			<Folder class="h-5 w-5 flex-shrink-0 text-sky-500" />
 			<input
 				bind:this={inputElement}
 				type="text"
@@ -83,7 +83,7 @@
 			<button
 				onclick={handleCreate}
 				disabled={!name.trim() || isCreating}
-				class="rounded bg-riptide-500 px-3 py-1 text-xs font-semibold text-white hover:bg-riptide-600 disabled:cursor-not-allowed disabled:opacity-50"
+				class="rounded bg-sky-500 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{isCreating ? m.new_folder_creating() : m.common_create()}
 			</button>

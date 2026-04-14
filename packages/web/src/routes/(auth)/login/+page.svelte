@@ -1,5 +1,6 @@
 <script lang="ts">
   import SsoLoginBox from '$lib/components/auth/SsoLoginBox.svelte';
+  import Logo from '$lib/components/common/Logo.svelte';
   import * as m from '$paraglide/messages';
 </script>
 
@@ -11,17 +12,16 @@
   <div class="container mx-auto p-4">
     <div class="mx-auto max-w-4xl grid grid-cols-1 items-center gap-6 md:grid-cols-2">
       <!-- Left Column: Brand and Tagline -->
-      <div class="text-center md:text-left mb-6 md:mb-0">
-        <h1 class="text-5xl font-bold md:text-6xl">
-          <span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text text-transparent">CyimeWrite</span>
-        </h1>
-        <p class="hidden md:inline-block mx-auto mt-4 text-sm md:text-lg text-gray-600 dark:text-gray-400">
-          {m.login_page_tagline_part1()}<br>          {m.login_page_tagline_part2()}
+      <div class="mb-6 flex flex-col justify-center text-center md:mb-0 md:-translate-y-7 md:pr-10 md:text-left">
+        <Logo href="/" labelClass="text-5xl font-bold tracking-tight md:text-6xl" />
+        <p class="mt-5 hidden text-sm leading-8 text-slate-600 dark:text-slate-400 md:inline-block md:text-lg">
+          {m.login_page_tagline_part1()}<br />
+          {m.login_page_tagline_part2()}
         </p>
       </div>
 
       <!-- Right Column: Login Box -->
-      <div class="w-full max-w-md mx-auto">
+      <div class="mx-auto w-full max-w-md md:-translate-y-4">
         <SsoLoginBox />
       </div>
     </div>

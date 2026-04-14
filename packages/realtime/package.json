@@ -1,7 +1,7 @@
 {
   "name": "@cyimewrite/realtime",
   "version": "1.0.0",
-  "description": "CyimeWrite realtime collaboration server powered by Hocuspocus and Yjs",
+  "description": "Cyime realtime collaboration server powered by Hocuspocus and Yjs",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

@@ -6,14 +6,14 @@ import (
 	"os"
 	"strings"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/content"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/middleware"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/user"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/workspace"
+	"g.co1d.in/Coldin04/Cyime/server/internal/auth"
+	"g.co1d.in/Coldin04/Cyime/server/internal/config"
+	"g.co1d.in/Coldin04/Cyime/server/internal/content"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/media"
+	"g.co1d.in/Coldin04/Cyime/server/internal/middleware"
+	"g.co1d.in/Coldin04/Cyime/server/internal/user"
+	"g.co1d.in/Coldin04/Cyime/server/internal/workspace"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
@@ -164,7 +164,7 @@ func main() {
 
 	// Simple root route to check if server is up
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello from CyimeWrite Server!")
+		return c.SendString("Hello from Cyime Server!")
 	})
 
 	port := os.Getenv("PORT")

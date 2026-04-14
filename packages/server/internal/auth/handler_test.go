@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
@@ -38,12 +38,57 @@ func setupAuthTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.UserSession{}, &models.UserRefreshToken{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.AuthProvider{}, &models.UserSession{}, &models.UserRefreshToken{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	database.DB = db
 	tokenService = nil
 	return db
+}
+
+func TestGetAuthConfig_ReturnsDisplayNameWhenConfigured(t *testing.T) {
+	db := setupAuthTestDB(t)
+	displayName := "GitHub"
+	iconURL := "https://github.com/fluidicon.png"
+	provider := models.AuthProvider{
+		ID:                    uuid.New(),
+		Name:                  "github",
+		DisplayName:           &displayName,
+		ProtocolType:          "oauth2",
+		ClientID:              "client-id",
+		ClientSecretEncrypted: "secret",
+		IconURL:               &iconURL,
+		Scopes:                "read:user user:email",
+		IsActive:              true,
+	}
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	app := fiber.New()
+	app.Get("/api/v1/auth/config", GetAuthConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/config", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Providers []ProviderInfo `json:"providers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(payload.Providers))
+	}
+	if payload.Providers[0].DisplayName == nil || *payload.Providers[0].DisplayName != "GitHub" {
+		t.Fatalf("expected displayName GitHub, got %+v", payload.Providers[0].DisplayName)
+	}
 }
 
 func newAuthTestApp(userID uuid.UUID) *fiber.App {

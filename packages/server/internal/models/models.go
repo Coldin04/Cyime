@@ -65,6 +65,7 @@ func (a *AuthProvider) BeforeCreate(tx *gorm.DB) (err error) {
 type AuthProvider struct {
 	ID                    uuid.UUID `gorm:"type:uuid;primary_key"`
 	Name                  string    `gorm:"type:varchar(100);not null;unique"`
+	DisplayName           *string   `gorm:"type:varchar(100)"`
 	ProtocolType          string    `gorm:"type:varchar(20);not null;default:'oidc'"`
 	IssuerURL             *string   `gorm:"type:varchar(255)"`
 	AuthURL               *string   `gorm:"type:varchar(255)"` // For OAuth2

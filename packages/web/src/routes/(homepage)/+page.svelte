@@ -1,5 +1,94 @@
 <script lang="ts">
-  import * as m from '$paraglide/messages';
+	import { browser } from '$app/environment';
+	import Logo from '$lib/components/common/Logo.svelte';
+	import {
+		clearManualLocaleCookie,
+		getManualLocaleFromDocument,
+		setManualLocaleCookie
+	} from '$lib/paraglide/manual-locale-cookie';
+	import * as m from '$paraglide/messages';
+	import { getLocale, isLocale, locales } from '$paraglide/runtime';
+	import GlobeHemisphereWest from '~icons/ph/globe-hemisphere-west';
+	import GithubLogo from '~icons/ph/github-logo';
+	import previewImageUrl from '$lib/assets/homepage-preview-editor.png';
+	import { onMount } from 'svelte';
+
+	const homepageHeroHeadlinePhrases = [
+		m.homepage_hero_word_light(),
+		m.homepage_hero_word_flow()
+	];
+
+	let homepageHeroHeadlinePhrase = homepageHeroHeadlinePhrases[0];
+	let homepageHeroHeadlinePhraseIndex = 0;
+	type LocalePreference = 'system' | (typeof locales)[number];
+	let localePreference: LocalePreference = 'system';
+	let localeMenuOpen = false;
+	let localeMenuElement: HTMLDivElement | null = null;
+
+	function getLocaleOptionLabel(localeTag: string): string {
+		if (!browser || typeof Intl === 'undefined' || typeof Intl.DisplayNames === 'undefined') {
+			return localeTag;
+		}
+		try {
+			const display = new Intl.DisplayNames([getLocale()], { type: 'language' });
+			return display.of(localeTag.split('-')[0]) ?? localeTag;
+		} catch {
+			return localeTag;
+		}
+	}
+
+	function handleLocaleSelect(next: LocalePreference) {
+		if (next === localePreference) {
+			localeMenuOpen = false;
+			return;
+		}
+
+		if (next === 'system') {
+			clearManualLocaleCookie();
+			localePreference = 'system';
+			localeMenuOpen = false;
+			if (browser) window.location.reload();
+			return;
+		}
+
+		setManualLocaleCookie(next);
+		localePreference = next;
+		localeMenuOpen = false;
+		if (browser) window.location.reload();
+	}
+
+	onMount(() => {
+		let rotationTimeout: ReturnType<typeof setTimeout>;
+		const manualLocale = getManualLocaleFromDocument();
+		localePreference = manualLocale && isLocale(manualLocale) ? manualLocale : 'system';
+		const handlePointerDown = (event: PointerEvent) => {
+			if (!localeMenuElement?.contains(event.target as Node)) {
+				localeMenuOpen = false;
+			}
+		};
+
+		const scheduleNextPhraseRotation = () => {
+			rotationTimeout = setTimeout(() => {
+				homepageHeroHeadlinePhraseIndex =
+					(homepageHeroHeadlinePhraseIndex + 1) % homepageHeroHeadlinePhrases.length;
+				homepageHeroHeadlinePhrase =
+					homepageHeroHeadlinePhrases[homepageHeroHeadlinePhraseIndex];
+				scheduleNextPhraseRotation();
+			}, 3000);
+		};
+
+		scheduleNextPhraseRotation();
+		if (browser) {
+			window.addEventListener('pointerdown', handlePointerDown);
+		}
+
+		return () => {
+			clearTimeout(rotationTimeout);
+			if (browser) {
+				window.removeEventListener('pointerdown', handlePointerDown);
+			}
+		};
+	});
 </script>
 
 <svelte:head>
@@ -12,111 +101,213 @@
   <meta name="twitter:description" content={m.homepage_meta_description()} />
 </svelte:head>
 
-<div
-	class="flex min-h-screen flex-col items-center justify-center bg-riptide-50 p-8 text-center dark:bg-slate-900"
+<nav
+	class="sticky top-0 z-30 bg-white/80 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-md dark:bg-slate-900/80"
 >
-	<h1 class="text-3xl font-bold sm:text-4xl md:text-6xl">
-		<span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text text-transparent">
-			CyimeWrite
-		</span>
-		<span class="text-gray-800 dark:text-gray-200">{m.homepage_brand_name_chinese()}</span>
-	</h1>
-	<p class="mt-4 text-base text-gray-600 dark:text-gray-400 md:text-xl">
-		{m.homepage_tagline_part1()}<br>		{m.homepage_tagline_part2()}
-	</p>
-	<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
-		<a href="/workspace"
-			class="rounded-xl bg-riptide-500 py-3 px-6 font-semibold shadow-lg transition-shadow hover:shadow-xl text-riptide-50"
-		>
-			{m.homepage_start_writing_button()}
-		</a>
-		<a
-            href="#features"
-			class="rounded-xl bg-white py-3 px-6 font-semibold text-gray-600 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
-		>
-			{m.homepage_learn_more_button()}
-		</a>
+	<div class="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6 sm:px-8">
+		<Logo href="/" labelClass="text-lg font-bold tracking-tight sm:text-xl" />
+		<div class="flex items-center gap-3">
+			<div class="relative" bind:this={localeMenuElement}>
+				<button
+					type="button"
+					class="grid h-10 w-10 place-content-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+					aria-label={m.user_profile_language_title()}
+					title={m.user_profile_language_title()}
+					onclick={() => (localeMenuOpen = !localeMenuOpen)}
+				>
+					<GlobeHemisphereWest class="h-5 w-5" />
+				</button>
+				{#if localeMenuOpen}
+					<div
+						class="absolute right-0 top-full z-40 mt-2 min-w-40 rounded-xl bg-white p-1.5 shadow-[0_14px_40px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/80 dark:bg-slate-800 dark:ring-slate-700/80"
+					>
+						<button
+							type="button"
+							class={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+								localePreference === 'system'
+									? 'bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100'
+									: 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/70'
+							}`}
+							onclick={() => handleLocaleSelect('system')}
+						>
+							{m.user_profile_language_option_system()}
+						</button>
+						{#each locales as localeTag (localeTag)}
+							<button
+								type="button"
+								class={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+									localePreference === localeTag
+										? 'bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100'
+										: 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/70'
+								}`}
+								onclick={() => handleLocaleSelect(localeTag)}
+							>
+								{getLocaleOptionLabel(localeTag)}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<a
+				href="https://github.com/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="grid h-10 w-10 place-content-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+				aria-label="GitHub repository"
+				title="GitHub"
+			>
+				<GithubLogo class="h-5 w-5" />
+			</a>
+		</div>
+	</div>
+</nav>
+
+<div class="homepage-hero min-h-screen px-6 pb-8 pt-14 dark:bg-slate-900 sm:px-8 sm:pt-16">
+	<div class="mx-auto grid min-h-[calc(100vh-5rem)] w-full max-w-5xl grid-rows-[1fr_auto]">
+		<div class="flex flex-col items-center justify-center py-10 pt-8 text-center md:pt-10">
+			<h1
+				class="max-w-5xl text-5xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.08] md:text-6xl"
+			>
+				{#key `${homepageHeroHeadlinePhraseIndex}-${homepageHeroHeadlinePhrase}`}
+					<span
+						class="homepage-hero-headline-phrase slide-in bg-gradient-to-r from-teal-400 to-sky-300 bg-clip-text text-transparent"
+					>
+						{homepageHeroHeadlinePhrase}
+					</span>
+				{/key}
+				<span class="mt-3 block md:mt-4">{m.homepage_hero_suffix()}</span>
+			</h1>
+			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-lg">
+				{m.homepage_hero_description()}
+			</p>
+			<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-x-4 sm:space-y-0">
+				<a
+					href="/workspace"
+					class="rounded-xl bg-sky-500 px-6 py-3 font-semibold text-white shadow-lg transition-shadow"
+				>
+					{m.homepage_start_writing_button()}
+				</a>
+				<a
+					href="#features"
+					class="rounded-xl bg-sky-50 px-6 py-3 font-semibold text-slate-800 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
+				>
+					{m.homepage_learn_more_button()}
+				</a>
+			</div>
+		</div>
+
+		<div class="pb-10">
+			<div class="mx-auto w-full max-w-4xl px-2 sm:px-0">
+				<div class="overflow-hidden rounded-2xl bg-white shadow-[0_18px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/10 dark:shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
+					<div class="bg-slate-50 dark:bg-slate-900">
+						<img
+							src={previewImageUrl}
+							alt={m.homepage_editor_features_screenshot_alt()}
+							loading="lazy"
+							decoding="async"
+							class="block h-auto w-full dark:brightness-[0.92] dark:contrast-[1.06]"
+						/>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 </div>
 
 <!-- Features Section -->
-<div id="features" class="space-y-16 py-16 md:space-y-28 md:py-28">
-	<!-- Feature 1: Online Sync -->
-	<section class="bg-white px-8 dark:bg-slate-800">
-		<div class="mx-auto max-w-5xl">
-			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_editor_features_screenshot_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pl-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_online_sync_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_online_sync_description()}
-					</p>
-				</div>
-			</div>
+<section id="features" class="px-6 py-16 sm:px-8 md:py-24">
+	<div class="mx-auto grid w-full max-w-5xl gap-10 md:grid-cols-3 md:gap-12">
+		<div class="text-center md:text-left">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_online_sync_title()}
+			</h2>
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_online_sync_description()}
+			</p>
 		</div>
-	</section>
-
-	<!-- Feature 2: Minimalist Interface -->
-	<section class="bg-riptide-50 py-16 dark:bg-slate-900 md:py-28">
-		<div class="mx-auto max-w-5xl px-8">
-			<div class="flex flex-col items-center gap-8 md:flex-row-reverse md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_minimalist_editor_screenshot_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pr-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_focus_writing_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_focus_writing_description()}
-					</p>
-				</div>
-			</div>
+		<div class="text-center md:text-left">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_focus_writing_title()}
+			</h2>
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_focus_writing_description()}
+			</p>
 		</div>
-	</section>
-
-	<!-- Feature 3: Smooth Response -->
-	<section class="bg-white px-8 dark:bg-slate-800">
-		<div class="mx-auto max-w-5xl">
-			<div class="flex flex-col items-center gap-8 md:flex-row md:gap-8">
-				<div class="w-full md:w-1/2">
-					<div
-						class="aspect-video w-full rounded-2xl bg-gray-200 shadow-lg dark:bg-slate-700"
-						aria-label={m.homepage_smooth_input_animation_alt()}
-					></div>
-				</div>
-				<div class="w-full text-center md:w-1/2 md:pl-16 md:text-left">
-					<h2
-						class="text-2xl font-bold text-gray-800 dark:text-gray-200 sm:text-3xl md:text-4xl"
-					>
-						{m.homepage_smooth_editor_title()}
-					</h2>
-					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400 md:text-lg font-light">
-						{m.homepage_smooth_editor_description()}
-					</p>
-				</div>
-			</div>
+		<div class="text-center md:text-left">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+				{m.homepage_feature_media_title()}
+			</h2>
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+				{m.homepage_feature_media_desc()}
+			</p>
 		</div>
-	</section>
-</div>
+	</div>
+</section>
 
 <!-- Footer -->
 <footer class="bg-gray-100 dark:bg-slate-700">
-	<div class="mx-auto max-w-7xl py-12 px-4 text-center sm:px-6 lg:px-8">
-		<p class="text-gray-500 dark:text-gray-300">{m.homepage_footer_copyright()}</p>
+	<div class="mx-auto flex max-w-5xl flex-col items-center gap-4 px-6 py-10 text-center sm:px-8">
+		<a
+			href="https://github.com/Coldin04/Cyime/blob/main/LICENSE"
+			target="_blank"
+			rel="noreferrer"
+			class="text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+		>
+			{m.homepage_footer_copyright()}
+		</a>
+		<div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-slate-500 dark:text-slate-300">
+			<a
+				href="https://zread.ai/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_docs()}
+			</a>
+			<a
+				href="https://github.com/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_repository()}
+			</a>
+			<a
+				href="https://github.com/Coldin04/Cyime/issues"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_issues()}
+			</a>
+		</div>
 	</div>
 </footer>
+
+
+<style>
+	@keyframes slideInFromRight {
+		0% {
+			transform: translateX(1.5rem);
+			clip-path: inset(0 0 0 100%);
+			opacity: 0;
+		}
+		45% {
+			opacity: 1;
+		}
+		100% {
+			transform: translateX(0);
+			clip-path: inset(0 0 0 0);
+			opacity: 1;
+		}
+	}
+
+	.homepage-hero-headline-phrase {
+		display: inline-block;
+		will-change: transform, clip-path, opacity;
+	}
+	
+	.slide-in {
+		animation: slideInFromRight 0.85s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+</style>

@@ -343,7 +343,7 @@
 									<p class="text-base font-medium text-zinc-900 dark:text-zinc-100">{item.name}</p>
 								<span class={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
 									item.isEnabled
-										? 'bg-riptide-100 text-riptide-800 dark:bg-riptide-950/40 dark:text-riptide-200'
+										? 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
 										: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
 								}`}>
 									{item.isEnabled ? m.user_image_beds_enabled() : m.user_image_beds_disabled()}
@@ -394,7 +394,7 @@
 									type="button"
 									class={`relative ml-2 inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${
 										item.isEnabled
-											? 'bg-riptide-500 hover:bg-riptide-600'
+											? 'bg-cyan-500 hover:bg-cyan-600'
 											: 'bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-700 dark:hover:bg-zinc-600'
 								}`}
 								onclick={() => handleToggleEnabled(item)}
@@ -461,7 +461,7 @@
 									id="image-bed-name"
 									bind:value={form.name}
 									type="text"
-									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-sky-400 dark:focus:ring-sky-950/40"
 									placeholder={m.user_image_beds_name_placeholder()}
 								/>
 							</div>
@@ -473,7 +473,7 @@
 								<select
 									id="image-bed-provider"
 									bind:value={form.providerType}
-									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-sky-400 dark:focus:ring-sky-950/40"
 								>
 									{#each providers as provider (provider.providerType)}
 										<option value={provider.providerType}>{provider.displayName}</option>
@@ -496,7 +496,7 @@
 									min={field.type === 'number' ? '1' : undefined}
 									step={field.type === 'number' ? '1' : undefined}
 									required={field.required}
-									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+									class="w-full rounded-md border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-sky-400 dark:focus:ring-sky-950/40"
 									placeholder={getFieldPlaceholder(field)}
 								/>
 								{#if getFieldHelpText(field)}
@@ -509,7 +509,7 @@
 							<input
 								bind:checked={form.isEnabled}
 								type="checkbox"
-								class="h-4 w-4 rounded border-zinc-300 text-riptide-500 focus:ring-riptide-400"
+								class="h-4 w-4 rounded border-zinc-300 text-sky-500 focus:ring-sky-200 dark:focus:ring-sky-900/40"
 							/>
 							<span>{m.user_image_beds_enabled_toggle()}</span>
 						</label>
@@ -524,7 +524,7 @@
 							</button>
 							<button
 								type="submit"
-								class="rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+								class="rounded-md bg-sky-500 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
 								disabled={saving}
 							>
 								{saving ? m.common_saving() : m.common_save()}

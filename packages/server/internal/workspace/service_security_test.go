@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/acl"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/acl"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -474,6 +474,33 @@ func TestUpdateDocumentManualExcerpt_DeniesEditor(t *testing.T) {
 
 	if _, _, err := UpdateDocumentManualExcerpt(editorID, docID, "editor-should-fail"); err == nil {
 		t.Fatal("expected editor manual excerpt update to fail")
+	}
+}
+
+func TestUpdateDocumentManualExcerpt_AllowsOwnerWhenCollaborationDisabled(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "owner-doc")
+
+	manualExcerpt, excerpt, err := UpdateDocumentManualExcerpt(ownerID, docID, "owner-manual-excerpt")
+	if err != nil {
+		t.Fatalf("expected owner manual excerpt update success when collaboration disabled: %v", err)
+	}
+	if manualExcerpt != "owner-manual-excerpt" {
+		t.Fatalf("expected returned manual excerpt, got %q", manualExcerpt)
+	}
+	if excerpt != "owner-manual-excerpt" {
+		t.Fatalf("expected returned excerpt to be manual text, got %q", excerpt)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load document: %v", err)
+	}
+	if doc.ManualExcerpt != "owner-manual-excerpt" {
+		t.Fatalf("expected manual excerpt saved, got %q", doc.ManualExcerpt)
 	}
 }
 

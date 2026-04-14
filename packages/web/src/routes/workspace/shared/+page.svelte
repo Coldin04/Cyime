@@ -135,7 +135,7 @@
 		</a>
 
 		<div class="flex items-start gap-3">
-			<div class="grid h-10 w-10 place-content-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-300">
+			<div class="grid h-10 w-10 place-content-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300">
 				<UsersThree class="h-5 w-5" />
 			</div>
 			<div class="min-w-0">

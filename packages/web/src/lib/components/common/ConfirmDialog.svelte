@@ -28,7 +28,7 @@
 
 	const confirmClass = $derived(
 		confirmVariant === 'primary'
-			? 'bg-blue-600 hover:bg-blue-700 text-white'
+			? 'bg-sky-500 hover:bg-sky-600 text-white shadow-sm dark:bg-sky-500 dark:hover:bg-sky-400'
 			: 'bg-red-600 hover:bg-red-700 text-white'
 	);
 

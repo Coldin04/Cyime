@@ -5,6 +5,7 @@
 
   type AuthProvider = {
     name: string;
+    displayName?: string;
     icon: string;
     ssoUrl: string;
   };
@@ -17,6 +18,12 @@
     const value = name.trim();
     if (!value) return name;
     return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  function resolveProviderLabel(provider: AuthProvider): string {
+    const displayName = provider.displayName?.trim();
+    if (displayName) return displayName;
+    return formatProviderName(provider.name);
   }
 
   onMount(async () => {
@@ -38,11 +45,15 @@
   });
 </script>
 
-<div class="w-full rounded-2xl border-2 p-8 min-h-48">
-  <h1 class="text-3xl font-semibold mb-4 py-2 text-gray-700 dark:text-gray-300">{m.sso_login_box_title()}</h1>
+<div
+  class="min-h-48 w-full rounded-xl bg-white p-8 shadow-[0_0_0_1px_rgba(148,163,184,0.14),0_24px_60px_rgba(15,23,42,0.10),0_0_44px_rgba(34,211,238,0.10)] dark:bg-slate-900 dark:shadow-[0_0_0_1px_rgba(51,65,85,0.65),0_24px_60px_rgba(2,8,23,0.55)]"
+>
+  <h1 class="mb-4 py-2 text-3xl font-semibold tracking-tight text-slate-700 dark:text-slate-200">
+    {m.sso_login_box_title()}
+  </h1>
   {#if isLoading}
     <div class="flex w-full h-full items-center justify-center rounded-xl">
-      <p class="text-gray-500 dark:text-gray-400 py-4 h-24">{m.sso_login_box_loading_options()}</p>
+      <p class="h-24 py-4 text-slate-500 dark:text-slate-400">{m.sso_login_box_loading_options()}</p>
     </div>
   {:else if error}
     <div class="text-center text-red-500">
@@ -55,17 +66,17 @@
         <a
           href={provider.ssoUrl}
           rel="external"
-          class="block w-full rounded-xl py-3 px-6 text-center text-base font-medium shadow-sm transition-shadow hover:shadow-lg {i ===
+          class="block w-full rounded-lg px-6 py-3 text-center text-base font-medium shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md {i ===
           0
-            ? 'bg-riptide-500 text-riptide-50'
-            : 'bg-white text-gray-600 dark:bg-slate-700 dark:text-gray-300'}"
+            ? 'bg-cyan-500 text-cyan-50 shadow-[0_12px_30px_rgba(6,182,212,0.22)] hover:bg-cyan-400 dark:bg-cyan-500 dark:text-white dark:shadow-[0_14px_34px_rgba(8,145,178,0.30)] dark:hover:bg-cyan-400'
+            : 'bg-white text-slate-600 ring-1 ring-slate-200/80 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700/80 dark:hover:bg-slate-700'}"
         >
-          {m.sso_login_box_login_with_provider({ providerName: formatProviderName(provider.name) })}
+          {m.sso_login_box_login_with_provider({ providerName: resolveProviderLabel(provider) })}
         </a>
       {/each}
     </div>
   {:else}
-    <div class="text-center text-gray-500 dark:text-gray-400">
+    <div class="text-center text-slate-500 dark:text-slate-400">
       <p>{m.sso_login_box_no_sso_options()}</p>
       <p class="mt-2 text-sm">{m.sso_login_box_contact_admin_for_config()}</p>
     </div>

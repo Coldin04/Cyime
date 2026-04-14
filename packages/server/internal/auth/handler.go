@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -54,9 +54,10 @@ type UserProfile struct {
 
 // ProviderInfo represents the data sent to the frontend for a login provider.
 type ProviderInfo struct {
-	Name   string `json:"name"`
-	Icon   string `json:"icon"`
-	SSOUrl string `json:"ssoUrl"`
+	Name        string  `json:"name"`
+	DisplayName *string `json:"displayName,omitempty"`
+	Icon        string  `json:"icon"`
+	SSOUrl      string  `json:"ssoUrl"`
 }
 
 type SessionListResponse struct {
@@ -101,9 +102,10 @@ func GetAuthConfig(c *fiber.Ctx) error {
 			iconURL = *p.IconURL
 		}
 		responseProviders = append(responseProviders, ProviderInfo{
-			Name:   p.Name,
-			Icon:   iconURL,
-			SSOUrl: getAPIBaseURL() + "/api/v1/auth/login/" + p.Name,
+			Name:        p.Name,
+			DisplayName: p.DisplayName,
+			Icon:        iconURL,
+			SSOUrl:      getAPIBaseURL() + "/api/v1/auth/login/" + p.Name,
 		})
 	}
 

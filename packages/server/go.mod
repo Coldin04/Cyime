@@ -1,4 +1,4 @@
-module g.co1d.in/Coldin04/CyimeWrite/server
+module g.co1d.in/Coldin04/Cyime/server
 
 go 1.25
 

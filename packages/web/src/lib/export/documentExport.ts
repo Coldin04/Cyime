@@ -106,7 +106,7 @@ export function exportHtmlDocument(options: {
 }): string {
 	const { title, contentJson, includeKatexCssLink = true } = options;
 	const renderedBody = renderKatexInHtml(generateHTML(contentJson, exportExtensions()));
-	const safeTitle = title.trim() || 'CyimeWrite Export';
+	const safeTitle = title.trim() || 'Cyime Export';
 	const katexLink = includeKatexCssLink
 		? '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css" />'
 		: '';

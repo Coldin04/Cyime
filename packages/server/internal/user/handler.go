@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/imagebeds"
+	"g.co1d.in/Coldin04/Cyime/server/internal/media"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"

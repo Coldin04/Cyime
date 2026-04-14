@@ -163,7 +163,7 @@
 							autocapitalize="off"
 							autocomplete="off"
 							spellcheck="false"
-							class="min-h-[8rem] w-full resize-y rounded-none border border-zinc-200 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+							class="min-h-[8rem] w-full resize-y rounded-none border border-zinc-200 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 							placeholder={blockPlaceholder}
 						></textarea>
 					{/if}
