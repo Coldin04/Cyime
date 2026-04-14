@@ -84,7 +84,7 @@
 				case 'basic':
 					return canEditBasic;
 				case 'permissions':
-					return canManageMembers;
+					return canManageMembers || canManagePublic;
 				case 'image':
 					return canEditImageSettings;
 				default:

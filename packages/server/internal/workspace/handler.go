@@ -134,10 +134,6 @@ func GetFileHandler(c *fiber.Ctx) error {
 
 // GetPublicDocumentHandler handles GET /api/v1/public/documents/:id
 func GetPublicDocumentHandler(c *fiber.Ctx) error {
-	if !config.GetCollaborationEnabled() {
-		return collaborationDisabledResponse(c)
-	}
-
 	documentID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -179,10 +175,6 @@ func GetPublicDocumentHandler(c *fiber.Ctx) error {
 
 // GetPublicDocumentContentHandler handles GET /api/v1/public/documents/:id/content
 func GetPublicDocumentContentHandler(c *fiber.Ctx) error {
-	if !config.GetCollaborationEnabled() {
-		return collaborationDisabledResponse(c)
-	}
-
 	documentID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
@@ -1370,10 +1362,6 @@ func UpdateDocumentImageTargetHandler(c *fiber.Ctx) error {
 
 // UpdateDocumentPublicAccessHandler handles PUT /api/v1/workspace/documents/:id/public-access
 func UpdateDocumentPublicAccessHandler(c *fiber.Ctx) error {
-	if !config.GetCollaborationEnabled() {
-		return collaborationDisabledResponse(c)
-	}
-
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{

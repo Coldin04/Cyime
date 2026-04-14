@@ -292,7 +292,7 @@ $effect(() => {
 				canEditBasic={canEditDocumentMeta}
 				canManageMembers={collaborationEnabled && (myRole === 'owner' || myRole === 'collaborator')}
 				canEditImageSettings={canEditDocumentMeta}
-				canManagePublic={collaborationEnabled && myRole === 'owner'}
+				canManagePublic={myRole === 'owner'}
 				{publicAccess}
 				{publicUrl}
 				isUpdating={isUpdatingImageTarget}

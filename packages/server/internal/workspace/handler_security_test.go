@@ -344,6 +344,29 @@ func TestGetPublicDocumentHandler_PublicDocumentAllowsSignedInNonMember(t *testi
 	}
 }
 
+func TestGetPublicDocumentHandler_StillWorksWhenCollaborationDisabled(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	otherUserID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "public-doc-with-collab-off")
+	seedVerifiedUser(t, db, otherUserID, otherUserID.String()+"@example.com")
+	if err := db.Model(&models.Document{}).Where("id = ?", docID).Update("public_access", PublicAccessGlobal).Error; err != nil {
+		t.Fatalf("set public access: %v", err)
+	}
+
+	app := newWorkspaceTestApp(otherUserID)
+	req := httptest.NewRequest(http.MethodGet, "/public/documents/"+docID.String(), nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when collaboration disabled, got %d", resp.StatusCode)
+	}
+}
+
 func TestDocumentSettingsACL_EditorCannotUpdateExcerptOrPublicAccess(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
@@ -371,6 +394,33 @@ func TestDocumentSettingsACL_EditorCannotUpdateExcerptOrPublicAccess(t *testing.
 	}
 	if publicResp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected public-access update 404, got %d", publicResp.StatusCode)
+	}
+}
+
+func TestUpdateDocumentPublicAccessHandler_OwnerCanUpdateWhenCollaborationDisabled(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, ownerID, "owner-public-access")
+
+	app := newWorkspaceTestApp(ownerID)
+	req := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/public-access", bytes.NewBufferString(`{"publicAccess":"public"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when collaboration disabled, got %d", resp.StatusCode)
+	}
+
+	var doc models.Document
+	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
+		t.Fatalf("reload document: %v", err)
+	}
+	if normalizePublicAccess(doc.PublicAccess) != PublicAccessGlobal {
+		t.Fatalf("expected public access to be updated, got %q", doc.PublicAccess)
 	}
 }
 
