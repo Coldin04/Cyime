@@ -10,9 +10,9 @@
 	--editor-pre-fg: rgb(250 250 250);
 	--editor-quote-bg: rgb(250 250 250);
 	--editor-table-head: rgb(244 244 245);
-	--editor-link: rgb(13 148 136);
-	--editor-selected-cell: rgb(13 148 136 / 0.12);
-	--editor-collab-local-caret: #06b6d4;
+	--editor-link: rgb(59 130 246);
+	--editor-selected-cell: rgb(59 130 246 / 0.12);
+	--editor-collab-local-caret: #3b82f6;
 	--editor-collab-selection-mix: 20%;
 	--editor-collab-selection-alpha: 24%;
 	color: var(--editor-text);
@@ -33,16 +33,16 @@
 		--editor-pre-fg: rgb(244 244 245);
 		--editor-quote-bg: rgb(24 24 27);
 		--editor-table-head: rgb(39 39 42);
-		--editor-link: rgb(45 212 191);
-		--editor-selected-cell: rgb(45 212 191 / 0.18);
-		--editor-collab-local-caret: #67e8f9;
+		--editor-link: rgb(96 165 250);
+		--editor-selected-cell: rgb(96 165 250 / 0.16);
+		--editor-collab-local-caret: #60a5fa;
 		--editor-collab-selection-mix: 32%;
 		--editor-collab-selection-alpha: 18%;
 	}
 }
 
 .dark .tiptap {
-	--editor-collab-local-caret: #67e8f9;
+	--editor-collab-local-caret: #60a5fa;
 	--editor-collab-selection-mix: 32%;
 	--editor-collab-selection-alpha: 18%;
 }
@@ -161,7 +161,7 @@
 
 .tiptap blockquote {
 	background: linear-gradient(180deg, var(--editor-surface-muted) 0%, var(--editor-quote-bg) 100%);
-	border-left: 3px solid rgb(20 184 166);
+	border-left: 3px solid rgb(59 130 246);
 	border-radius: 0 0.95rem 0.95rem 0;
 	padding: 0.9rem 1rem;
 }
@@ -267,9 +267,9 @@
 /* ProseMirror 在节点选中时会给图片挂上选中类，这里做更明显的编辑器式选中框。 */
 .tiptap img.ProseMirror-selectednode {
 	box-shadow:
-		0 0 0 2px rgb(20 184 166 / 0.92),
-		0 0 0 7px rgb(20 184 166 / 0.18),
-		0 12px 28px rgb(20 184 166 / 0.14);
+		0 0 0 2px rgb(59 130 246 / 0.92),
+		0 0 0 7px rgb(59 130 246 / 0.18),
+		0 12px 28px rgb(59 130 246 / 0.14);
 	outline: 2px solid transparent;
 	transform: translateY(-1px);
 }
