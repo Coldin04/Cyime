@@ -54,9 +54,10 @@ type UserProfile struct {
 
 // ProviderInfo represents the data sent to the frontend for a login provider.
 type ProviderInfo struct {
-	Name   string `json:"name"`
-	Icon   string `json:"icon"`
-	SSOUrl string `json:"ssoUrl"`
+	Name        string  `json:"name"`
+	DisplayName *string `json:"displayName,omitempty"`
+	Icon        string  `json:"icon"`
+	SSOUrl      string  `json:"ssoUrl"`
 }
 
 type SessionListResponse struct {
@@ -101,9 +102,10 @@ func GetAuthConfig(c *fiber.Ctx) error {
 			iconURL = *p.IconURL
 		}
 		responseProviders = append(responseProviders, ProviderInfo{
-			Name:   p.Name,
-			Icon:   iconURL,
-			SSOUrl: getAPIBaseURL() + "/api/v1/auth/login/" + p.Name,
+			Name:        p.Name,
+			DisplayName: p.DisplayName,
+			Icon:        iconURL,
+			SSOUrl:      getAPIBaseURL() + "/api/v1/auth/login/" + p.Name,
 		})
 	}
 

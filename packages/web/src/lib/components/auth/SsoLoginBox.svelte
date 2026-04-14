@@ -5,6 +5,7 @@
 
   type AuthProvider = {
     name: string;
+    displayName?: string;
     icon: string;
     ssoUrl: string;
   };
@@ -17,6 +18,12 @@
     const value = name.trim();
     if (!value) return name;
     return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  function resolveProviderLabel(provider: AuthProvider): string {
+    const displayName = provider.displayName?.trim();
+    if (displayName) return displayName;
+    return formatProviderName(provider.name);
   }
 
   onMount(async () => {
@@ -64,7 +71,7 @@
             ? 'bg-cyan-500 text-cyan-50 shadow-[0_12px_30px_rgba(6,182,212,0.22)] hover:bg-cyan-400 dark:bg-cyan-500 dark:text-white dark:shadow-[0_14px_34px_rgba(8,145,178,0.30)] dark:hover:bg-cyan-400'
             : 'bg-white text-slate-600 ring-1 ring-slate-200/80 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700/80 dark:hover:bg-slate-700'}"
         >
-          {m.sso_login_box_login_with_provider({ providerName: formatProviderName(provider.name) })}
+          {m.sso_login_box_login_with_provider({ providerName: resolveProviderLabel(provider) })}
         </a>
       {/each}
     </div>
