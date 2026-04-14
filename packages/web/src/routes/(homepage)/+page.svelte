@@ -10,6 +10,7 @@
 	import { getLocale, isLocale, locales } from '$paraglide/runtime';
 	import GlobeHemisphereWest from '~icons/ph/globe-hemisphere-west';
 	import GithubLogo from '~icons/ph/github-logo';
+	import previewImageUrl from '$lib/assets/homepage-preview-editor.png';
 	import { onMount } from 'svelte';
 
 	const homepageHeroHeadlinePhrases = [
@@ -101,10 +102,10 @@
 </svelte:head>
 
 <nav
-	class="sticky top-0 z-30 bg-white/80 backdrop-blur-md dark:bg-slate-900/80 sm:px-2"
+	class="sticky top-0 z-30 bg-white/80 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-md dark:bg-slate-900/80"
 >
-	<div class="mx-auto flex h-16 w-full max-w-5xl items-center justify-between">
-		<Logo href="/" labelClass="text-lg font-bold tracking-tight sm:text-xl px-3" />
+	<div class="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6 sm:px-8">
+		<Logo href="/" labelClass="text-lg font-bold tracking-tight sm:text-xl" />
 		<div class="flex items-center gap-3">
 			<div class="relative" bind:this={localeMenuElement}>
 				<button
@@ -161,11 +162,11 @@
 	</div>
 </nav>
 
-<div class="homepage-hero min-h-screen px-6 pb-8 dark:bg-slate-900 sm:px-8">
-	<div class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl flex-col">
-		<div class="flex flex-1 -translate-y-9 flex-col items-center justify-center pt-2 text-center md:-translate-y-8">
+<div class="homepage-hero min-h-screen px-6 pb-8 pt-14 dark:bg-slate-900 sm:px-8 sm:pt-16">
+	<div class="mx-auto grid min-h-[calc(100vh-5rem)] w-full max-w-5xl grid-rows-[1fr_auto]">
+		<div class="flex flex-col items-center justify-center py-10 pt-8 text-center md:pt-10">
 			<h1
-				class="max-w-5xl text-5xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.1] md:text-7xl"
+				class="max-w-5xl text-5xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.08] md:text-6xl"
 			>
 				{#key `${homepageHeroHeadlinePhraseIndex}-${homepageHeroHeadlinePhrase}`}
 					<span
@@ -176,50 +177,67 @@
 				{/key}
 				<span class="mt-3 block md:mt-4">{m.homepage_hero_suffix()}</span>
 			</h1>
-			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-xl">
+			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-lg">
 				{m.homepage_hero_description()}
 			</p>
-				<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
-			<a href="/workspace"
-				class="rounded-xl bg-sky-500 py-3 px-6 font-semibold text-white shadow-lg transition-shadow "
-			>
-				{m.homepage_start_writing_button()}
-			</a>
-		<a
-            href="#features"
-			class="rounded-xl bg-sky-50 py-3 px-6 font-semibold text-slate-800 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
-		>
-			{m.homepage_learn_more_button()}
-		</a>
+			<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-x-4 sm:space-y-0">
+				<a
+					href="/workspace"
+					class="rounded-xl bg-sky-500 px-6 py-3 font-semibold text-white shadow-lg transition-shadow"
+				>
+					{m.homepage_start_writing_button()}
+				</a>
+				<a
+					href="#features"
+					class="rounded-xl bg-sky-50 px-6 py-3 font-semibold text-slate-800 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
+				>
+					{m.homepage_learn_more_button()}
+				</a>
+			</div>
+		</div>
+
+		<div class="pb-10">
+			<div class="mx-auto w-full max-w-4xl px-2 sm:px-0">
+				<div class="overflow-hidden rounded-2xl bg-white shadow-[0_18px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/10 dark:shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
+					<div class="bg-slate-50 dark:bg-slate-900">
+						<img
+							src={previewImageUrl}
+							alt={m.homepage_editor_features_screenshot_alt()}
+							loading="lazy"
+							decoding="async"
+							class="block h-auto w-full dark:brightness-[0.92] dark:contrast-[1.06]"
+						/>
+					</div>
 				</div>
+			</div>
 		</div>
 	</div>
 </div>
 
 <!-- Features Section -->
-<section id="features" class="py-16 sm:px-6 md:py-24 px-16">
+<section id="features" class="px-6 py-16 sm:px-8 md:py-24">
 	<div class="mx-auto grid w-full max-w-5xl gap-10 md:grid-cols-3 md:gap-12">
 		<div class="text-center md:text-left">
-			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
 				{m.homepage_online_sync_title()}
 			</h2>
-			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
 				{m.homepage_online_sync_description()}
 			</p>
 		</div>
 		<div class="text-center md:text-left">
-			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
 				{m.homepage_focus_writing_title()}
 			</h2>
-			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
 				{m.homepage_focus_writing_description()}
 			</p>
 		</div>
-		<div class="px-2 text-center md:text-left">
-			<h2 class="px-2 text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+		<div class="text-center md:text-left">
+			<h2 class="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
 				{m.homepage_feature_media_title()}
 			</h2>
-			<p class="px-2 mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
+			<p class="mt-4 text-sm leading-7 text-slate-500 dark:text-slate-400">
 				{m.homepage_feature_media_desc()}
 			</p>
 		</div>
@@ -228,8 +246,41 @@
 
 <!-- Footer -->
 <footer class="bg-gray-100 dark:bg-slate-700">
-	<div class="mx-auto max-w-7xl py-12 px-4 text-center sm:px-6 lg:px-8">
-		<p class="text-gray-500 dark:text-gray-300">{m.homepage_footer_copyright()}</p>
+	<div class="mx-auto flex max-w-5xl flex-col items-center gap-4 px-6 py-10 text-center sm:px-8">
+		<a
+			href="https://github.com/Coldin04/Cyime/blob/main/LICENSE"
+			target="_blank"
+			rel="noreferrer"
+			class="text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+		>
+			{m.homepage_footer_copyright()}
+		</a>
+		<div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-slate-500 dark:text-slate-300">
+			<a
+				href="https://zread.ai/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_docs()}
+			</a>
+			<a
+				href="https://github.com/Coldin04/Cyime"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_repository()}
+			</a>
+			<a
+				href="https://github.com/Coldin04/Cyime/issues"
+				target="_blank"
+				rel="noreferrer"
+				class="transition-colors hover:text-slate-900 dark:hover:text-white"
+			>
+				{m.homepage_footer_issues()}
+			</a>
+		</div>
 	</div>
 </footer>
 
