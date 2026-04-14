@@ -83,7 +83,7 @@
 			<button
 				onclick={handleCreate}
 				disabled={!name.trim() || isCreating}
-				class="rounded bg-cyan-500 px-3 py-1 text-xs font-semibold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
+				class="rounded bg-sky-500 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{isCreating ? m.new_folder_creating() : m.common_create()}
 			</button>

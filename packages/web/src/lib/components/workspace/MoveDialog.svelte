@@ -271,7 +271,7 @@
 				type="button"
 				onclick={handleMove}
 				disabled={isMoving || (isLoadingFolders || (flatFolders.length === 0 && selectedFolderId === null))}
-				class="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+				class="rounded-md bg-sky-500 px-4 py-2 text-sm text-white shadow-sm hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{isMoving ? m.move_dialog_moving() : m.common_move()}
 			</button>

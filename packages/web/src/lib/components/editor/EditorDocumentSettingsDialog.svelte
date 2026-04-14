@@ -455,7 +455,7 @@
 											<div class="flex gap-2">
 												<button
 													type="button"
-													class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+													class="rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-600 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
 													onclick={() => void saveTitle()}
 												>
 													{m.common_save()}
@@ -483,7 +483,7 @@
 										{#if draftExcerpt.trim() !== documentManualExcerpt.trim()}
 											<button
 												type="button"
-												class="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+												class="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
 												onclick={() => void saveExcerpt()}
 												disabled={isSavingExcerpt}
 											>

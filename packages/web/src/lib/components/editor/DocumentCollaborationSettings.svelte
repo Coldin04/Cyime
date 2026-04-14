@@ -294,7 +294,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+					class="rounded-md bg-sky-500 px-3 py-2 text-sm text-white shadow-sm disabled:opacity-60 dark:bg-sky-500 dark:text-white"
 					onclick={() => void submitInvite()}
 					disabled={isSubmittingInvite}
 				>
@@ -356,7 +356,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+					class="rounded-md bg-sky-500 px-3 py-2 text-sm text-white shadow-sm disabled:opacity-60 dark:bg-sky-500 dark:text-white"
 					onclick={() => void submitRoleUpdate()}
 					disabled={isSubmittingRole}
 				>

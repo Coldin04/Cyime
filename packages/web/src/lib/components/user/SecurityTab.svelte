@@ -3,7 +3,6 @@
 	import { toast } from 'svelte-sonner';
 	import * as m from '$paraglide/messages';
 	import { listAuthSessions, revokeAuthSession, revokeOtherAuthSessions, type AuthSession } from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
 
 	let sessions = $state<AuthSession[]>([]);
 	let loading = $state(true);
@@ -38,10 +37,6 @@
 		revokingSessionId = session.id;
 		try {
 			await revokeAuthSession(session.id);
-			if (session.current) {
-				await auth.logout();
-				return;
-			}
 			sessions = sessions.filter((item) => item.id !== session.id);
 			toast.success(m.user_security_session_revoked());
 		} catch (error) {
@@ -95,8 +90,8 @@
 				</div>
 			{:else}
 				{#if currentSession}
-					<section class="rounded-xl border border-cyan-200/80 bg-cyan-50/50 p-4 dark:border-cyan-900/50 dark:bg-cyan-950/20">
-						<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+					<section class="rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+						<div class="min-w-0 space-y-3">
 							<div class="min-w-0 flex-1 space-y-3">
 								<div class="flex flex-wrap items-center gap-2">
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{currentSession.deviceLabel || m.user_security_device_unknown()}</h3>
@@ -122,14 +117,6 @@
 									</div>
 								</div>
 							</div>
-							<button
-								type="button"
-								class="w-full shrink-0 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 sm:w-auto"
-								disabled={revokingSessionId === currentSession.id}
-								onclick={() => handleRevokeSession(currentSession)}
-							>
-								{revokingSessionId === currentSession.id ? m.common_loading() : m.user_security_sign_out_current()}
-							</button>
 						</div>
 					</section>
 				{/if}

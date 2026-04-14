@@ -78,7 +78,7 @@
 							href={item.href}
 							class={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
 								isActive($page.url.pathname, item.href)
-									? 'bg-cyan-100 font-semibold text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200'
+									? 'bg-sky-50 font-semibold text-cyan-900 dark:bg-cyan-900/50 dark:text-cyan-200'
 									: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
 							}`}
 						>
@@ -105,7 +105,7 @@
 						href={item.href}
 						class={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
 							isActive($page.url.pathname, item.href)
-								? 'bg-cyan-100 font-semibold text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200'
+								? 'bg-sky-50 text-cyan-900 shadow-[inset_0_0_0_1px_rgba(8,145,178,0.10)] dark:bg-sky-900/40 dark:text-cyan-100'
 								: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
 						}`}
 					>

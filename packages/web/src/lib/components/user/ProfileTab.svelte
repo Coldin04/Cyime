@@ -103,7 +103,7 @@
 		</div>
 		<button
 			type="button"
-			class="group relative shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+			class="group relative shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2 dark:focus:ring-sky-700 dark:focus:ring-offset-zinc-900"
 			onclick={() => (avatarDialogOpen = true)}
 		>
 			<UserAvatar size={64} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
@@ -122,12 +122,12 @@
 				bind:value={displayName}
 				type="text"
 				maxlength="80"
-				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
+				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-sky-400 dark:focus:ring-sky-950/40"
 				placeholder={m.user_profile_display_name_placeholder()}
 			/>
 			<button
 				type="submit"
-				class="shrink-0 rounded-lg bg-zinc-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+				class="shrink-0 rounded-lg bg-sky-500 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-sky-500 dark:text-white dark:hover:bg-sky-400"
 				disabled={savingDisplayName}
 			>
 				{savingDisplayName ? m.common_saving() : m.common_save()}
@@ -146,7 +146,7 @@
 				value={localePreference}
 				onchange={handleLocaleChange}
 				disabled={switchingLocale}
-				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
+				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-sky-400 dark:focus:ring-sky-950/40"
 			>
 				<option value="system">{m.user_profile_language_option_system()}</option>
 				{#each locales as localeTag (localeTag)}
