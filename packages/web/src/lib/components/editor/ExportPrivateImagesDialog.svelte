@@ -61,7 +61,7 @@
 			<label class="mt-4 flex flex-col gap-2">
 				<span class="text-sm font-medium text-zinc-800 dark:text-zinc-200">{m.editor_export_private_images_dialog_target()}</span>
 				<select
-					class="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
+					class="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-sky-500 dark:focus:ring-sky-900/60"
 					value={selectedTargetId}
 					disabled={busy}
 					onchange={(event) => onTargetChange?.((event.currentTarget as HTMLSelectElement).value)}

@@ -8,9 +8,11 @@
 	} from '$lib/paraglide/manual-locale-cookie';
 	import * as m from '$paraglide/messages';
 	import { getLocale, isLocale, locales } from '$paraglide/runtime';
+	import RouteAuthGuard from '$lib/components/auth/RouteAuthGuard.svelte';
 	import GlobeHemisphereWest from '~icons/ph/globe-hemisphere-west';
 	import GithubLogo from '~icons/ph/github-logo';
-	import previewImageUrl from '$lib/assets/homepage-preview-editor.png';
+	import previewImageLightUrl from '$lib/assets/home_preview_light.png';
+	import previewImageDarkUrl from '$lib/assets/home_preview_dark.png';
 	import { onMount } from 'svelte';
 
 	const homepageHeroHeadlinePhrases = [
@@ -101,10 +103,11 @@
   <meta name="twitter:description" content={m.homepage_meta_description()} />
 </svelte:head>
 
+<RouteAuthGuard mode="guest">
 <nav
 	class="sticky top-0 z-30 bg-white/80 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-md dark:bg-slate-900/80"
 >
-	<div class="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6 sm:px-8">
+	<div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6 sm:px-8">
 		<Logo href="/" labelClass="text-lg font-bold tracking-tight sm:text-xl" />
 		<div class="flex items-center gap-3">
 			<div class="relative" bind:this={localeMenuElement}>
@@ -199,14 +202,18 @@
 		<div class="pb-10">
 			<div class="mx-auto w-full max-w-4xl px-2 sm:px-0">
 				<div class="overflow-hidden rounded-2xl bg-white shadow-[0_18px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/10 dark:shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
-					<div class="bg-slate-50 dark:bg-slate-900">
-						<img
-							src={previewImageUrl}
-							alt={m.homepage_editor_features_screenshot_alt()}
-							loading="lazy"
-							decoding="async"
-							class="block h-auto w-full dark:brightness-[0.92] dark:contrast-[1.06]"
-						/>
+					<div class="homepage-preview-frame bg-slate-50 dark:bg-slate-900">
+						<picture>
+							<source media="(prefers-color-scheme: dark)" srcset={previewImageDarkUrl} />
+							<img
+								src={previewImageLightUrl}
+								alt={m.homepage_editor_features_screenshot_alt()}
+								loading="lazy"
+								decoding="async"
+								class="homepage-preview-image block h-auto w-full"
+							/>
+						</picture>
+						<div class="homepage-preview-mask pointer-events-none absolute inset-0"></div>
 					</div>
 				</div>
 			</div>
@@ -283,6 +290,7 @@
 		</div>
 	</div>
 </footer>
+</RouteAuthGuard>
 
 
 <style>
@@ -306,7 +314,23 @@
 		display: inline-block;
 		will-change: transform, clip-path, opacity;
 	}
-	
+
+	.homepage-preview-frame {
+		position: relative;
+	}
+
+	.homepage-preview-mask {
+		background: transparent;
+		display: none;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.homepage-preview-mask {
+			background: linear-gradient(180deg, rgb(15 23 42 / 0.04), rgb(15 23 42 / 0.16));
+			display: block;
+		}
+	}
+
 	.slide-in {
 		animation: slideInFromRight 0.85s cubic-bezier(0.22, 1, 0.36, 1);
 	}

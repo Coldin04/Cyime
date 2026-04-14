@@ -68,7 +68,7 @@
 			case 'owner':
 				return 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900';
 			case 'collaborator':
-				return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300';
+				return 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300';
 			case 'editor':
 				return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
 			default:
