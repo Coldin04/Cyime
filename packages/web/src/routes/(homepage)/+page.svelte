@@ -203,20 +203,16 @@
 			<div class="mx-auto w-full max-w-4xl px-2 sm:px-0">
 				<div class="overflow-hidden rounded-2xl bg-white shadow-[0_18px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/10 dark:shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
 					<div class="homepage-preview-frame bg-slate-50 dark:bg-slate-900">
-						<img
-							src={previewImageLightUrl}
-							alt={m.homepage_editor_features_screenshot_alt()}
-							loading="lazy"
-							decoding="async"
-							class="homepage-preview-image homepage-preview-image-light block h-auto w-full"
-						/>
-						<img
-							src={previewImageDarkUrl}
-							alt={m.homepage_editor_features_screenshot_alt()}
-							loading="lazy"
-							decoding="async"
-							class="homepage-preview-image homepage-preview-image-dark block h-auto w-full"
-						/>
+						<picture>
+							<source media="(prefers-color-scheme: dark)" srcset={previewImageDarkUrl} />
+							<img
+								src={previewImageLightUrl}
+								alt={m.homepage_editor_features_screenshot_alt()}
+								loading="lazy"
+								decoding="async"
+								class="homepage-preview-image block h-auto w-full"
+							/>
+						</picture>
 						<div class="homepage-preview-mask pointer-events-none absolute inset-0"></div>
 					</div>
 				</div>
@@ -323,26 +319,16 @@
 		position: relative;
 	}
 
-	.homepage-preview-image-dark {
-		display: none;
-	}
-
 	.homepage-preview-mask {
 		background: transparent;
 		display: none;
 	}
 
-	:global(html.dark) .homepage-preview-image-light {
-		display: none;
-	}
-
-	:global(html.dark) .homepage-preview-image-dark {
-		display: block;
-	}
-
-	:global(html.dark) .homepage-preview-mask {
-		background: linear-gradient(180deg, rgb(15 23 42 / 0.04), rgb(15 23 42 / 0.16));
-		display: block;
+	@media (prefers-color-scheme: dark) {
+		.homepage-preview-mask {
+			background: linear-gradient(180deg, rgb(15 23 42 / 0.04), rgb(15 23 42 / 0.16));
+			display: block;
+		}
 	}
 
 	.slide-in {

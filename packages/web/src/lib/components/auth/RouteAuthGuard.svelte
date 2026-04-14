@@ -23,10 +23,10 @@
 	});
 </script>
 
-{#if $auth.loading}
+{#if (requiresAuth && ($auth.loading || !$auth.token)) || (requiresGuest && !$auth.loading && $auth.token)}
 	<div class="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-gray-900">
 		<p class="text-lg text-gray-600 dark:text-gray-300">{m.workspace_loading()}</p>
 	</div>
-{:else if (!requiresAuth && !requiresGuest) || (requiresAuth && $auth.token) || (requiresGuest && !$auth.token)}
+{:else}
 	{@render children()}
 {/if}
