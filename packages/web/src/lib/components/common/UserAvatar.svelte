@@ -90,13 +90,13 @@
 </script>
 
 <div
-	class={`relative grid shrink-0 aspect-square place-content-center overflow-hidden rounded-full bg-riptide-100 dark:bg-riptide-900 ${className}`}
+	class={`relative grid shrink-0 aspect-square place-content-center overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900 ${className}`}
 	style={`width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;`}
 >
 	{#if resolvedSrc && !loadFailed}
 		{#if !loaded}
 			<div
-				class="absolute inset-0 animate-pulse bg-riptide-200/80 dark:bg-riptide-800/70"
+				class="absolute inset-0 animate-pulse bg-sky-200/80 dark:bg-sky-800/70"
 				aria-hidden="true"
 			></div>
 		{/if}
@@ -119,7 +119,7 @@
 		/>
 	{:else}
 		<User
-			class="text-riptide-600 dark:text-riptide-300"
+			class="text-sky-600 dark:text-sky-300"
 			style={`width:${fallbackIconSize}px;height:${fallbackIconSize}px;`}
 			aria-label={m.common_user()}
 		/>

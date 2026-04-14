@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"

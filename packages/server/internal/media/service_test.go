@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

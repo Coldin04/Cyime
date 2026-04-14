@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/config"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

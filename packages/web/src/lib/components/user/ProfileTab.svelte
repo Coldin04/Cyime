@@ -103,7 +103,7 @@
 		</div>
 		<button
 			type="button"
-			class="group relative shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-riptide-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+			class="group relative shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
 			onclick={() => (avatarDialogOpen = true)}
 		>
 			<UserAvatar size={64} name={$auth.user?.displayName} avatarUrl={$auth.user?.avatarUrl} />
@@ -122,7 +122,7 @@
 				bind:value={displayName}
 				type="text"
 				maxlength="80"
-				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+				class="w-full flex-1 rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 				placeholder={m.user_profile_display_name_placeholder()}
 			/>
 			<button
@@ -146,7 +146,7 @@
 				value={localePreference}
 				onchange={handleLocaleChange}
 				disabled={switchingLocale}
-				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+				class="w-full rounded-lg border border-zinc-200 bg-transparent px-4 py-2 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 			>
 				<option value="system">{m.user_profile_language_option_system()}</option>
 				{#each locales as localeTag (localeTag)}

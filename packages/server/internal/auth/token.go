@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -165,7 +165,7 @@ func (s *TokenService) generateAccessToken(userID uuid.UUID) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.accessTokenLifetime)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "CyimeWrite",
+			Issuer:    "Cyime",
 			Subject:   userID.String(),
 		},
 		UserID: userID,

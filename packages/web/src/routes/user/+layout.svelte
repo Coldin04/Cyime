@@ -78,7 +78,7 @@
 							href={item.href}
 							class={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
 								isActive($page.url.pathname, item.href)
-									? 'bg-riptide-100 font-semibold text-riptide-800 dark:bg-riptide-900/50 dark:text-riptide-200'
+									? 'bg-cyan-100 font-semibold text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200'
 									: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
 							}`}
 						>
@@ -105,7 +105,7 @@
 						href={item.href}
 						class={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
 							isActive($page.url.pathname, item.href)
-								? 'bg-riptide-100 font-semibold text-riptide-800 dark:bg-riptide-900/50 dark:text-riptide-200'
+								? 'bg-cyan-100 font-semibold text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200'
 								: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
 						}`}
 					>

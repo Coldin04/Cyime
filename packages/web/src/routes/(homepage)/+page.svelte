@@ -1,5 +1,33 @@
 <script lang="ts">
-  import * as m from '$paraglide/messages';
+	import * as m from '$paraglide/messages';
+	
+	import { onMount } from 'svelte';
+
+	const homepageHeroHeadlinePhrases = [
+		m.homepage_hero_word_light(),
+		m.homepage_hero_word_flow()
+	];
+
+	let homepageHeroHeadlinePhrase = homepageHeroHeadlinePhrases[0];
+	let homepageHeroHeadlinePhraseIndex = 0;
+	
+	onMount(() => {
+		let rotationTimeout: ReturnType<typeof setTimeout>;
+
+		const scheduleNextPhraseRotation = () => {
+			rotationTimeout = setTimeout(() => {
+				homepageHeroHeadlinePhraseIndex =
+					(homepageHeroHeadlinePhraseIndex + 1) % homepageHeroHeadlinePhrases.length;
+				homepageHeroHeadlinePhrase =
+					homepageHeroHeadlinePhrases[homepageHeroHeadlinePhraseIndex];
+				scheduleNextPhraseRotation();
+			}, 3000);
+		};
+
+		scheduleNextPhraseRotation();
+
+		return () => clearTimeout(rotationTimeout);
+	});
 </script>
 
 <svelte:head>
@@ -13,29 +41,40 @@
 </svelte:head>
 
 <div
-	class="flex min-h-screen flex-col items-center justify-center bg-riptide-50 p-8 text-center dark:bg-slate-900"
+	class="homepage-hero min-h-screen px-8 py-10 dark:bg-slate-900"
 >
-	<h1 class="text-3xl font-bold sm:text-4xl md:text-6xl">
-		<span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text text-transparent">
-			CyimeWrite
-		</span>
-		<span class="text-gray-800 dark:text-gray-200">{m.homepage_brand_name_chinese()}</span>
-	</h1>
-	<p class="mt-4 text-base text-gray-600 dark:text-gray-400 md:text-xl">
-		{m.homepage_tagline_part1()}<br>		{m.homepage_tagline_part2()}
-	</p>
-	<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
-		<a href="/workspace"
-			class="rounded-xl bg-riptide-500 py-3 px-6 font-semibold shadow-lg transition-shadow hover:shadow-xl text-riptide-50"
-		>
-			{m.homepage_start_writing_button()}
-		</a>
+	<div class="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col">
+
+		<div class="flex flex-1 flex-col items-center justify-center text-center">
+			<h1
+				class="max-w-5xl text-4xl font-bold leading-[1.14] tracking-tight text-slate-800 dark:text-slate-100 sm:text-5xl md:leading-[1.1] md:text-7xl"
+			>
+				{#key `${homepageHeroHeadlinePhraseIndex}-${homepageHeroHeadlinePhrase}`}
+					<span
+						class="homepage-hero-headline-phrase slide-in bg-gradient-to-r from-teal-400 to-sky-300 bg-clip-text text-transparent"
+					>
+						{homepageHeroHeadlinePhrase}
+					</span>
+				{/key}
+				<span class="mt-3 block md:mt-4">{m.homepage_hero_suffix()}</span>
+			</h1>
+			<p class="mt-8 max-w-3xl text-base leading-8 text-slate-500 dark:text-slate-400 md:text-2xl">
+				{m.homepage_hero_description()}
+			</p>
+				<div class="mt-8 flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
+			<a href="/workspace"
+				class="rounded-xl bg-sky-500 py-3 px-6 font-semibold text-white shadow-lg transition-shadow "
+			>
+				{m.homepage_start_writing_button()}
+			</a>
 		<a
             href="#features"
-			class="rounded-xl bg-white py-3 px-6 font-semibold text-gray-600 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
+			class="rounded-xl bg-sky-50 py-3 px-6 font-semibold text-slate-800 shadow-lg transition-shadow hover:shadow-xl dark:bg-slate-700 dark:text-gray-300"
 		>
 			{m.homepage_learn_more_button()}
 		</a>
+				</div>
+		</div>
 	</div>
 </div>
 
@@ -66,7 +105,7 @@
 	</section>
 
 	<!-- Feature 2: Minimalist Interface -->
-	<section class="bg-riptide-50 py-16 dark:bg-slate-900 md:py-28">
+	<section class="bg-sky-50 py-16 dark:bg-slate-900 md:py-28">
 		<div class="mx-auto max-w-5xl px-8">
 			<div class="flex flex-col items-center gap-8 md:flex-row-reverse md:gap-8">
 				<div class="w-full md:w-1/2">
@@ -120,3 +159,31 @@
 		<p class="text-gray-500 dark:text-gray-300">{m.homepage_footer_copyright()}</p>
 	</div>
 </footer>
+
+
+<style>
+	@keyframes slideInFromRight {
+		0% {
+			transform: translateX(1.5rem);
+			clip-path: inset(0 0 0 100%);
+			opacity: 0;
+		}
+		45% {
+			opacity: 1;
+		}
+		100% {
+			transform: translateX(0);
+			clip-path: inset(0 0 0 0);
+			opacity: 1;
+		}
+	}
+
+	.homepage-hero-headline-phrase {
+		display: inline-block;
+		will-change: transform, clip-path, opacity;
+	}
+	
+	.slide-in {
+		animation: slideInFromRight 0.85s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+</style>

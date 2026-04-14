@@ -3,7 +3,7 @@ package middleware
 import (
 	"strings"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/auth"
+	"g.co1d.in/Coldin04/Cyime/server/internal/auth"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 )

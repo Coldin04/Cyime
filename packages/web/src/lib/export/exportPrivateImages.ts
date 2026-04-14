@@ -144,7 +144,7 @@ export async function runExportAction(action: ExportAction, options: {
 
 	if (action === 'download-html') {
 		const html = exportHtmlDocument({
-			title: options.title.trim() || 'CyimeWrite Export',
+			title: options.title.trim() || 'Cyime Export',
 			contentJson: options.contentJson
 		});
 		downloadTextFile(buildExportFilename(options.title, 'html'), html, 'text/html;charset=utf-8');

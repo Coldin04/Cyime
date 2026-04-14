@@ -1,11 +1,11 @@
-# CyimeWrite 初始化工具
+# Cyime 初始化工具
 
 ## 使用方法
 
 ### 首次初始化（配置 SSO 登录）
 
 ```bash
-cd /home/coldin04/CyimeWrite/packages/server
+cd /home/coldin04/Cyime/packages/server
 go run cmd/init/main.go
 ```
 
@@ -28,7 +28,7 @@ go run cmd/init/main.go
 1. 访问 https://github.com/settings/developers
 2. 点击 "New OAuth App"
 3. 填写应用信息：
-   - **Application name**: CyimeWrite
+   - **Application name**: Cyime
    - **Homepage URL**: http://localhost:8080
    - **Authorization callback URL**: http://localhost:8080/api/v1/auth/callback/github
 4. 创建后获取 Client ID 和 Client Secret

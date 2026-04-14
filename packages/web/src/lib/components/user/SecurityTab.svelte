@@ -95,12 +95,12 @@
 				</div>
 			{:else}
 				{#if currentSession}
-					<section class="rounded-xl border border-riptide-200/80 bg-riptide-50/50 p-4 dark:border-riptide-900/50 dark:bg-riptide-950/20">
+					<section class="rounded-xl border border-cyan-200/80 bg-cyan-50/50 p-4 dark:border-cyan-900/50 dark:bg-cyan-950/20">
 						<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 							<div class="min-w-0 flex-1 space-y-3">
 								<div class="flex flex-wrap items-center gap-2">
 									<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{currentSession.deviceLabel || m.user_security_device_unknown()}</h3>
-									<span class="rounded-full bg-riptide-100 px-2 py-0.5 text-[11px] font-medium text-riptide-800 dark:bg-riptide-900/50 dark:text-riptide-200">
+									<span class="rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-medium text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200">
 										{m.user_security_current_session_badge()}
 									</span>
 								</div>

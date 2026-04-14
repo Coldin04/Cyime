@@ -259,7 +259,7 @@
 			bind:value={queryInput}
 			type="text"
 			placeholder={m.user_media_search_placeholder()}
-			class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+			class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 			onkeydown={async (e) => {
 				if (e.key === 'Enter') {
 					e.preventDefault();
@@ -269,7 +269,7 @@
 		/>
 		<select
 			bind:value={kind}
-			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 			onchange={applyFilters}
 		>
 			<option value="all">{m.user_media_filter_kind_all()}</option>
@@ -279,7 +279,7 @@
 		</select>
 		<select
 			bind:value={status}
-			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+			class="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 			onchange={applyFilters}
 		>
 			<option value="all">{m.user_media_filter_status_all()}</option>
@@ -486,7 +486,7 @@
 												</button>
 												<a
 													href={`/edit/documents/${doc.documentId}`}
-													class="text-xs font-medium text-riptide-700 hover:underline dark:text-riptide-300"
+													class="text-xs font-medium text-cyan-700 hover:underline dark:text-cyan-300"
 												>
 													{m.user_media_action_open_document()}
 												</a>

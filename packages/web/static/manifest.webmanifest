@@ -1,7 +1,7 @@
 {
-	"name": "CyimeWrite",
-	"short_name": "CyimeWrite",
-	"description": "CyimeWrite is a lightweight cloud writing workspace with online editing, real-time collaboration, public sharing, and multi-device access.",
+	"name": "Cyime",
+	"short_name": "Cyime",
+	"description": "Cyime is a lightweight cloud writing workspace with online editing, real-time collaboration, public sharing, and multi-device access.",
 	"start_url": "/workspace",
 	"scope": "/",
 	"display": "standalone",

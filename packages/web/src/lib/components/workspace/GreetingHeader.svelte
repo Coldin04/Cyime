@@ -115,7 +115,7 @@
 		<button
 			onclick={isTrashMode ? handleGoToWorkspaceRoot : handleCreateDocument}
 			disabled={isLoading}
-			class="inline-flex h-10 items-center justify-center gap-2 bg-riptide-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800 disabled:opacity-50 sm:px-4 {isTrashMode
+			class="inline-flex h-10 items-center justify-center gap-2 bg-cyan-500 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-cyan-600 active:bg-cyan-800 disabled:opacity-50 sm:px-4 {isTrashMode
 				? 'rounded-lg'
 				: 'rounded-l-lg'}"
 		>
@@ -136,7 +136,7 @@
 		{#if !isTrashMode}
 			<button
 				onclick={toggleMenu}
-				class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-riptide-400 bg-riptide-500 p-2 text-white shadow-sm transition-colors hover:bg-riptide-600 active:bg-riptide-800"
+				class="inline-flex h-10 w-10 items-center justify-center rounded-r-lg border-l border-cyan-400 bg-cyan-500 p-2 text-white shadow-sm transition-colors hover:bg-cyan-600 active:bg-cyan-800"
 				aria-label={m.common_more_options()}
 			>
 				<DotsThreeVertical class="h-5 w-5" />

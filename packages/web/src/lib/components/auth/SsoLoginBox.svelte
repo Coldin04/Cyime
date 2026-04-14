@@ -57,7 +57,7 @@
           rel="external"
           class="block w-full rounded-xl py-3 px-6 text-center text-base font-medium shadow-sm transition-shadow hover:shadow-lg {i ===
           0
-            ? 'bg-riptide-500 text-riptide-50'
+            ? 'bg-cyan-500 text-cyan-50'
             : 'bg-white text-gray-600 dark:bg-slate-700 dark:text-gray-300'}"
         >
           {m.sso_login_box_login_with_provider({ providerName: formatProviderName(provider.name) })}

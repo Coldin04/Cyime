@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/google/uuid"
 )
 

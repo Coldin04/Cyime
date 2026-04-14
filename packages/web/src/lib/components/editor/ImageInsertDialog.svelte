@@ -142,7 +142,7 @@
 					</p>
 					<select
 						bind:value={selectedTargetId}
-						class="mt-3 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+						class="mt-3 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 						disabled={isUploading || isUpdatingTarget}
 						onchange={() => {
 							void onTargetChange(selectedTargetId);
@@ -168,7 +168,7 @@
 						type="button"
 						class={`flex w-full flex-col items-center justify-center gap-3 rounded-[24px] border border-dashed px-5 py-8 text-center transition ${
 							isDragging
-								? 'border-riptide-500 bg-riptide-50 dark:border-riptide-400 dark:bg-riptide-950/30'
+								? 'border-cyan-500 bg-cyan-50 dark:border-cyan-400 dark:bg-cyan-950/30'
 								: 'border-zinc-300 bg-zinc-50 hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-600 dark:hover:bg-zinc-900/80'
 						}`}
 						onclick={() => fileInput?.click()}
@@ -224,7 +224,7 @@
 								autocapitalize="off"
 								autocomplete="off"
 								spellcheck="false"
-								class="min-w-0 flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-riptide-400 focus:ring-2 focus:ring-riptide-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-riptide-500 dark:focus:ring-riptide-900/60"
+								class="min-w-0 flex-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
 								placeholder={m.editor_image_insert_link_placeholder()}
 								onkeydown={(event) => {
 									if (event.key === 'Enter') {

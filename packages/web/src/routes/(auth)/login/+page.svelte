@@ -13,7 +13,7 @@
       <!-- Left Column: Brand and Tagline -->
       <div class="text-center md:text-left mb-6 md:mb-0">
         <h1 class="text-5xl font-bold md:text-6xl">
-          <span class="bg-gradient-to-r from-cyan-300 to-yellow-300 bg-clip-text text-transparent">CyimeWrite</span>
+          <span class="bg-gradient-to-r from-cyan-300 to-sky-400 bg-clip-text text-transparent">Cyime</span>
         </h1>
         <p class="hidden md:inline-block mx-auto mt-4 text-sm md:text-lg text-gray-600 dark:text-gray-400">
           {m.login_page_tagline_part1()}<br>          {m.login_page_tagline_part2()}

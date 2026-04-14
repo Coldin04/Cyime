@@ -185,7 +185,7 @@ $effect(() => {
 					/>
 					<button
 						onclick={saveTitle}
-						class="grid h-4 w-4 place-content-center rounded text-green-600 transition-colors hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+						class="grid h-4 w-4 place-content-center rounded text-sky-600 transition-colors hover:bg-sky-100 dark:text-sky-400 dark:hover:bg-sky-900/30"
 						title={m.editor_topbar_save_title()}
 					>
 						<Check class="h-4 w-4" />

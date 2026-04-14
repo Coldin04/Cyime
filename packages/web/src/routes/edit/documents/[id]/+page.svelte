@@ -314,11 +314,11 @@
 					resolveApiUrl(`/api/v1/media/assets/${assetId}/content`)
 				);
 				const html = exportHtmlDocument({
-					title: title.trim() || 'CyimeWrite Export',
+					title: title.trim() || 'Cyime Export',
 					contentJson: printContent
 				});
 				await exportPdfDocument({
-					title: title.trim() || 'CyimeWrite Export',
+					title: title.trim() || 'Cyime Export',
 					html
 				});
 				return;

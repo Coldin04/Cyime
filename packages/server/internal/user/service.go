@@ -11,12 +11,12 @@ import (
 	"strconv"
 	"strings"
 
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/config"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/database"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/imagebeds"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/media"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/models"
-	"g.co1d.in/Coldin04/CyimeWrite/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/config"
+	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/imagebeds"
+	"g.co1d.in/Coldin04/Cyime/server/internal/media"
+	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )

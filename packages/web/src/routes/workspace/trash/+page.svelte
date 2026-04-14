@@ -155,7 +155,7 @@ async function confirmEmptyTrash() {
 				>
 					<div class="flex items-center gap-3 truncate">
 						{#if item.type === 'folder'}
-							<Folder class="h-5 w-5 flex-shrink-0 text-teal-500" />
+							<Folder class="h-5 w-5 flex-shrink-0 text-sky-500" />
 						{:else}
 							<File class="h-5 w-5 flex-shrink-0 text-blue-500" />
 						{/if}
