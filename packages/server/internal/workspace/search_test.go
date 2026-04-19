@@ -82,12 +82,12 @@ func TestSearchHandler_ReturnsSearchPayload(t *testing.T) {
 	}
 }
 
-func TestSearchHandler_DisabledWhenCollaborationOff(t *testing.T) {
+func TestSearchHandler_SearchesOwnedDocumentsWhenCollaborationOff(t *testing.T) {
 	t.Setenv("COLLABORATION_ENABLED", "false")
 
 	db := setupWorkspaceTestDB(t)
 	userID := uuid.New()
-	seedDocumentForWorkspace(t, db, userID, "挂载文档")
+	docID := seedDocumentForWorkspace(t, db, userID, "挂载文档")
 
 	app := newWorkspaceTestApp(userID)
 	req := httptest.NewRequest(http.MethodGet, "/search?q=挂载&limit=3", nil)
@@ -95,8 +95,16 @@ func TestSearchHandler_DisabledWhenCollaborationOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 when collaboration disabled, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when collaboration disabled, got %d", resp.StatusCode)
+	}
+
+	var payload SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Documents) != 1 || payload.Documents[0].ID != docID {
+		t.Fatalf("expected owned document search results, got %+v", payload.Documents)
 	}
 }
 
@@ -127,5 +135,31 @@ func TestSearchWorkspace_MatchesDocumentBodyContentJSON(t *testing.T) {
 	}
 	if strings.HasPrefix(result.Documents[0].Excerpt, "seed") {
 		t.Fatalf("expected matched snippet instead of document opening, got %+v", result.Documents[0].Excerpt)
+	}
+}
+
+func TestSearchWorkspace_MultiKeywordSnippetPrefersMatchedContext(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, userID, "普通标题")
+
+	if err := db.Model(&models.DocumentBody{}).
+		Where("document_id = ?", docID).
+		Updates(map[string]any{
+			"content_json": `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"前面一段无关内容。这里提到青柠。再往后还有很多内容，最后才提到独特的香气和口感。"}]}]}`,
+			"plain_text":   "前面一段无关内容。这里提到青柠。再往后还有很多内容，最后才提到独特的香气和口感。",
+		}).Error; err != nil {
+		t.Fatalf("update body content: %v", err)
+	}
+
+	result, err := SearchWorkspace(userID, "独特 青柠", 5)
+	if err != nil {
+		t.Fatalf("search workspace: %v", err)
+	}
+	if len(result.Documents) != 1 {
+		t.Fatalf("expected single document hit, got %+v", result.Documents)
+	}
+	if !strings.Contains(result.Documents[0].Excerpt, "青柠") {
+		t.Fatalf("expected snippet to include one of the keywords, got %+v", result.Documents[0].Excerpt)
 	}
 }

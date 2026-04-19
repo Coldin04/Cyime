@@ -153,17 +153,38 @@
 		return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
 
+	function tokenizeSearchTerms(value: string): string[] {
+		const trimmed = value.trim();
+		if (!trimmed) {
+			return [];
+		}
+
+		const rawTerms = trimmed.split(/\s+/).filter(Boolean);
+		const terms = rawTerms.length > 0 ? rawTerms : [trimmed];
+		const seen = new Set<string>();
+		return terms
+			.filter((term) => {
+				const key = term.toLowerCase();
+				if (seen.has(key)) {
+					return false;
+				}
+				seen.add(key);
+				return true;
+			})
+			.sort((left, right) => right.length - left.length);
+	}
+
 	function highlightMatch(value: string, selected: boolean): string {
 		const text = value.trim();
-		const keyword = query.trim();
+		const terms = tokenizeSearchTerms(query);
 		if (!text) {
 			return '';
 		}
-		if (!keyword) {
+		if (terms.length === 0) {
 			return escapeHtml(text);
 		}
 
-		const pattern = new RegExp(`(${escapeRegExp(keyword)})`, 'gi');
+		const pattern = new RegExp(`(${terms.map((term) => escapeRegExp(term)).join('|')})`, 'gi');
 		const markClass = selected
 			? 'rounded bg-sky-200 px-0.5 text-sky-900 dark:bg-sky-900/60 dark:text-sky-100'
 			: 'rounded bg-sky-100 px-0.5 text-sky-700 dark:bg-sky-950/70 dark:text-sky-300';

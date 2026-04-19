@@ -454,6 +454,67 @@ func normalizeSearchLimit(limit int) int {
 	return limit
 }
 
+func tokenizeSearchTerms(query string) []string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil
+	}
+
+	rawTerms := strings.Fields(trimmed)
+	if len(rawTerms) == 0 {
+		rawTerms = []string{trimmed}
+	}
+
+	seen := make(map[string]struct{}, len(rawTerms))
+	terms := make([]string, 0, len(rawTerms))
+	for _, term := range rawTerms {
+		normalized := strings.TrimSpace(term)
+		if normalized == "" {
+			continue
+		}
+		key := strings.ToLower(normalized)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		terms = append(terms, normalized)
+	}
+	return terms
+}
+
+func locateSearchMatch(text string, terms []string) (start int, termLength int, ok bool) {
+	textRunes := []rune(text)
+	lowerTextRunes := []rune(strings.ToLower(text))
+
+	bestStart := -1
+	bestLength := 0
+	for _, term := range terms {
+		termRunes := []rune(strings.ToLower(term))
+		if len(termRunes) == 0 || len(termRunes) > len(lowerTextRunes) {
+			continue
+		}
+
+		for idx := 0; idx <= len(lowerTextRunes)-len(termRunes); idx++ {
+			if string(lowerTextRunes[idx:idx+len(termRunes)]) != string(termRunes) {
+				continue
+			}
+			if bestStart == -1 || idx < bestStart || (idx == bestStart && len(termRunes) > bestLength) {
+				bestStart = idx
+				bestLength = len(termRunes)
+			}
+			break
+		}
+	}
+
+	if bestStart == -1 {
+		return 0, 0, false
+	}
+	if bestStart > len(textRunes) {
+		return 0, 0, false
+	}
+	return bestStart, bestLength, true
+}
+
 func extractSearchSnippet(text, query string, radius int) string {
 	trimmedText := strings.TrimSpace(text)
 	trimmedQuery := strings.TrimSpace(query)
@@ -469,22 +530,14 @@ func extractSearchSnippet(text, query string, radius int) string {
 	}
 
 	textRunes := []rune(trimmedText)
-	lowerTextRunes := []rune(strings.ToLower(trimmedText))
-	lowerQueryRunes := []rune(strings.ToLower(trimmedQuery))
-
-	matchIndex := -1
-	for idx := 0; idx <= len(lowerTextRunes)-len(lowerQueryRunes); idx++ {
-		if string(lowerTextRunes[idx:idx+len(lowerQueryRunes)]) == string(lowerQueryRunes) {
-			matchIndex = idx
-			break
-		}
-	}
-	if matchIndex == -1 {
+	terms := tokenizeSearchTerms(trimmedQuery)
+	matchIndex, matchLength, ok := locateSearchMatch(trimmedText, terms)
+	if !ok {
 		return ""
 	}
 
 	start := max(0, matchIndex-radius)
-	end := min(len(textRunes), matchIndex+len(lowerQueryRunes)+radius)
+	end := min(len(textRunes), matchIndex+matchLength+radius)
 
 	snippet := string(textRunes[start:end])
 	if start > 0 {
@@ -547,6 +600,26 @@ func buildDocumentSearchSnippetFromSources(excerpt, manualExcerpt, plainText, co
 	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
 }
 
+func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gorm.DB {
+	if len(terms) == 0 || len(fields) == 0 {
+		return query
+	}
+
+	clauses := make([]string, 0, len(terms))
+	args := make([]any, 0, len(terms)*len(fields))
+	for _, term := range terms {
+		fieldClauses := make([]string, 0, len(fields))
+		like := "%" + term + "%"
+		for _, field := range fields {
+			fieldClauses = append(fieldClauses, field+" LIKE ?")
+			args = append(args, like)
+		}
+		clauses = append(clauses, "("+strings.Join(fieldClauses, " OR ")+")")
+	}
+
+	return query.Where("("+strings.Join(clauses, " OR ")+")", args...)
+}
+
 func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchResponse, error) {
 	query := strings.TrimSpace(rawQuery)
 	limit = normalizeSearchLimit(limit)
@@ -561,7 +634,7 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		return result, nil
 	}
 
-	like := "%" + query + "%"
+	terms := tokenizeSearchTerms(query)
 
 	type documentRow struct {
 		ID                     uuid.UUID
@@ -580,13 +653,26 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 	}
 
 	var documentRows []documentRow
-	if err := database.DB.
+	selectRole := "COALESCE(perms.role, '') AS my_role"
+	documentQuery := database.DB.
 		Table("documents AS d").
-		Joins("LEFT JOIN document_bodies AS bodies ON bodies.document_id = d.id AND bodies.deleted_at IS NULL").
-		Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = d.id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+		Joins("LEFT JOIN document_bodies AS bodies ON bodies.document_id = d.id AND bodies.deleted_at IS NULL")
+	if config.GetCollaborationEnabled() {
+		documentQuery = documentQuery.
+			Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = d.id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+			Where("(d.owner_user_id = ? OR perms.role IN ?)", userID, acl.AllowedRolesForAction(acl.ActionRead))
+	} else {
+		documentQuery = documentQuery.Where("d.owner_user_id = ?", userID)
+		selectRole = "'' AS my_role"
+	}
+	documentQuery = applyMultiKeywordLike(documentQuery, terms, []string{
+		"d.title",
+		"d.excerpt",
+		"d.manual_excerpt",
+		"bodies.content_json",
+	})
+	if err := documentQuery.
 		Where("d.deleted_at IS NULL").
-		Where("(d.owner_user_id = ? OR perms.role IN ?)", userID, acl.AllowedRolesForAction(acl.ActionRead)).
-		Where("(d.title LIKE ? OR d.excerpt LIKE ? OR d.manual_excerpt LIKE ? OR bodies.content_json LIKE ?)", like, like, like, like).
 		Select(
 			"d.id",
 			"d.owner_user_id",
@@ -599,7 +685,7 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 			"d.document_type",
 			"d.preferred_image_target_id",
 			"d.public_access",
-			"COALESCE(perms.role, '') AS my_role",
+			selectRole,
 			"d.updated_at",
 		).
 		Order("d.updated_at desc").
@@ -628,8 +714,9 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 	}
 
 	var folders []models.Folder
-	if err := database.DB.
-		Where("owner_user_id = ? AND deleted_at IS NULL AND name LIKE ?", userID, like).
+	folderQuery := database.DB.Where("owner_user_id = ? AND deleted_at IS NULL", userID)
+	folderQuery = applyMultiKeywordLike(folderQuery, terms, []string{"name"})
+	if err := folderQuery.
 		Order("updated_at desc").
 		Limit(limit).
 		Find(&folders).Error; err != nil {
@@ -652,13 +739,16 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 	if err != nil {
 		return nil, err
 	}
-	sharedAssets, err := media.ListSharedEditableAssets(media.ListAssetsRequest{
-		UserID: userID,
-		Query:  query,
-		Limit:  limit,
-	})
-	if err != nil {
-		return nil, err
+	sharedAssets := &media.ListSharedAssetsResult{}
+	if config.GetCollaborationEnabled() {
+		sharedAssets, err = media.ListSharedEditableAssets(media.ListAssetsRequest{
+			UserID: userID,
+			Query:  query,
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	documentTitles := make(map[uuid.UUID]string)

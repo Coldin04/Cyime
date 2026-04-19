@@ -84,10 +84,6 @@ func SearchHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if !config.GetCollaborationEnabled() {
-		return collaborationDisabledResponse(c)
-	}
-
 	response, err := SearchWorkspace(userID, c.Query("q"), c.QueryInt("limit", 5))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
