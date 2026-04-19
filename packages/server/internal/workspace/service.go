@@ -493,19 +493,20 @@ func collectSearchMatches(text string, terms []string) []searchMatch {
 	matches := make([]searchMatch, 0, len(terms))
 
 	for _, term := range terms {
-		termRunes := []rune(strings.ToLower(term))
+		lowerTerm := strings.ToLower(term)
+		termRunes := []rune(lowerTerm)
 		if len(termRunes) == 0 || len(termRunes) > len(lowerTextRunes) {
 			continue
 		}
 
 		for idx := 0; idx <= len(lowerTextRunes)-len(termRunes); idx++ {
-			if string(lowerTextRunes[idx:idx+len(termRunes)]) != string(termRunes) {
+			if !slices.Equal(lowerTextRunes[idx:idx+len(termRunes)], termRunes) {
 				continue
 			}
 			matches = append(matches, searchMatch{
 				start:  idx,
 				length: len(termRunes),
-				term:   strings.ToLower(term),
+				term:   lowerTerm,
 			})
 			break
 		}
@@ -519,20 +520,6 @@ func collectSearchMatches(text string, terms []string) []searchMatch {
 	})
 
 	return matches
-}
-
-func locateSearchMatch(text string, terms []string) (start int, termLength int, ok bool) {
-	textRunes := []rune(text)
-	matches := collectSearchMatches(text, terms)
-	if len(matches) == 0 {
-		return 0, 0, false
-	}
-
-	best := matches[0]
-	if best.start > len(textRunes) {
-		return 0, 0, false
-	}
-	return best.start, best.length, true
 }
 
 func locateBestSnippetWindow(text string, terms []string, radius int) (start int, end int, ok bool) {
@@ -680,21 +667,6 @@ func normalizeSearchCandidatesLimit(limit int) int {
 	return candidateLimit
 }
 
-func matchesSearchTerms(value string, terms []string) bool {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || len(terms) == 0 {
-		return false
-	}
-
-	lowerValue := strings.ToLower(trimmed)
-	for _, term := range terms {
-		if strings.Contains(lowerValue, strings.ToLower(term)) {
-			return true
-		}
-	}
-	return false
-}
-
 func matchTermSubsequence(value, term string) (start int, span int, gaps int, ok bool) {
 	valueRunes := []rune(strings.ToLower(value))
 	termRunes := []rune(strings.ToLower(term))
@@ -837,43 +809,6 @@ func fetchOwnedSearchFolders(userID uuid.UUID, terms []string, limit int, applyF
 	return folders, nil
 }
 
-func searchOwnedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.AssetListItem, error) {
-	if len(terms) == 0 {
-		return nil, nil
-	}
-
-	queries := append([]string{strings.Join(terms, " ")}, terms...)
-	assetsByID := make(map[uuid.UUID]media.AssetListItem, limit*len(queries))
-	for _, term := range queries {
-		items, err := media.ListOwnedAssets(media.ListAssetsRequest{
-			UserID: userID,
-			Query:  term,
-			Limit:  limit,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items.Items {
-			existing, exists := assetsByID[item.ID]
-			if !exists || item.UpdatedAt.After(existing.UpdatedAt) {
-				assetsByID[item.ID] = item
-			}
-		}
-	}
-
-	assets := make([]media.AssetListItem, 0, len(assetsByID))
-	for _, item := range assetsByID {
-		assets = append(assets, item)
-	}
-	sort.Slice(assets, func(i, j int) bool {
-		return assets[i].UpdatedAt.After(assets[j].UpdatedAt)
-	})
-	if len(assets) > limit {
-		assets = assets[:limit]
-	}
-	return assets, nil
-}
-
 func collectRecentOwnedAssets(userID uuid.UUID, limit int) ([]media.AssetListItem, error) {
 	items, err := media.ListOwnedAssets(media.ListAssetsRequest{
 		UserID: userID,
@@ -885,43 +820,6 @@ func collectRecentOwnedAssets(userID uuid.UUID, limit int) ([]media.AssetListIte
 	return items.Items, nil
 }
 
-func searchSharedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.SharedAssetListItem, error) {
-	if len(terms) == 0 {
-		return nil, nil
-	}
-
-	queries := append([]string{strings.Join(terms, " ")}, terms...)
-	assetsByID := make(map[uuid.UUID]media.SharedAssetListItem, limit*len(queries))
-	for _, term := range queries {
-		items, err := media.ListSharedEditableAssets(media.ListAssetsRequest{
-			UserID: userID,
-			Query:  term,
-			Limit:  limit,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items.Items {
-			existing, exists := assetsByID[item.ID]
-			if !exists || item.UpdatedAt.After(existing.UpdatedAt) {
-				assetsByID[item.ID] = item
-			}
-		}
-	}
-
-	assets := make([]media.SharedAssetListItem, 0, len(assetsByID))
-	for _, item := range assetsByID {
-		assets = append(assets, item)
-	}
-	sort.Slice(assets, func(i, j int) bool {
-		return assets[i].UpdatedAt.After(assets[j].UpdatedAt)
-	})
-	if len(assets) > limit {
-		assets = assets[:limit]
-	}
-	return assets, nil
-}
-
 func collectRecentSharedAssets(userID uuid.UUID, limit int) ([]media.SharedAssetListItem, error) {
 	items, err := media.ListSharedEditableAssets(media.ListAssetsRequest{
 		UserID: userID,
@@ -931,6 +829,22 @@ func collectRecentSharedAssets(userID uuid.UUID, limit int) ([]media.SharedAsset
 		return nil, err
 	}
 	return items.Items, nil
+}
+
+func chooseBestSharedAssetDocument(documents []media.SharedAssetDocument, terms []string) *media.SharedAssetDocument {
+	var best *media.SharedAssetDocument
+	bestScore := -1
+	for idx := range documents {
+		score, matched := scoreSearchValue(documents[idx].Title, terms)
+		if !matched {
+			score = 0
+		}
+		if best == nil || score > bestScore || (score == bestScore && documents[idx].UpdatedAt.After(best.UpdatedAt)) {
+			best = &documents[idx]
+			bestScore = score
+		}
+	}
+	return best
 }
 
 func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gorm.DB {
@@ -1079,65 +993,15 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		result.Folders = result.Folders[:limit]
 	}
 
-	ownedAssets, err := searchOwnedAssetsByTerms(userID, terms, limit)
+	ownedAssets, err := collectRecentOwnedAssets(userID, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
 	sharedAssets := []media.SharedAssetListItem{}
 	if config.GetCollaborationEnabled() {
-		sharedAssets, err = searchSharedAssetsByTerms(userID, terms, limit)
+		sharedAssets, err = collectRecentSharedAssets(userID, candidateLimit)
 		if err != nil {
 			return nil, err
-		}
-	}
-
-	if len(ownedAssets)+len(sharedAssets) < limit {
-		existingOwned := make(map[uuid.UUID]struct{}, len(ownedAssets))
-		for _, item := range ownedAssets {
-			existingOwned[item.ID] = struct{}{}
-		}
-		recentOwnedAssets, err := collectRecentOwnedAssets(userID, candidateLimit)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range recentOwnedAssets {
-			if _, ok := existingOwned[item.ID]; ok {
-				continue
-			}
-			if _, matched := scoreSearchValue(item.Filename, terms); !matched {
-				continue
-			}
-			ownedAssets = append(ownedAssets, item)
-			existingOwned[item.ID] = struct{}{}
-		}
-		if config.GetCollaborationEnabled() {
-			existingShared := make(map[uuid.UUID]struct{}, len(sharedAssets))
-			for _, item := range sharedAssets {
-				existingShared[item.ID] = struct{}{}
-			}
-			recentSharedAssets, err := collectRecentSharedAssets(userID, candidateLimit)
-			if err != nil {
-				return nil, err
-			}
-			for _, item := range recentSharedAssets {
-				if _, ok := existingShared[item.ID]; ok {
-					continue
-				}
-				titleText := ""
-				if len(item.Documents) > 0 {
-					titleText = item.Documents[0].Title
-				}
-				filenameScore, filenameMatched := scoreSearchValue(item.Filename, terms)
-				titleScore, titleMatched := scoreSearchValue(titleText, terms)
-				if !filenameMatched && !titleMatched {
-					continue
-				}
-				if filenameScore == 0 && titleScore == 0 {
-					continue
-				}
-				sharedAssets = append(sharedAssets, item)
-				existingShared[item.ID] = struct{}{}
-			}
 		}
 	}
 
@@ -1186,8 +1050,8 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 	}
 	for _, item := range sharedAssets {
 		var documentID *uuid.UUID
-		if len(item.Documents) > 0 {
-			documentID = &item.Documents[0].DocumentID
+		if bestDocument := chooseBestSharedAssetDocument(item.Documents, terms); bestDocument != nil {
+			documentID = &bestDocument.DocumentID
 		}
 		appendMediaItem(item.ID, item.Filename, item.Kind, item.MimeType, documentID, item.UpdatedAt)
 	}
