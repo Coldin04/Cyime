@@ -159,7 +159,22 @@ func TestSearchWorkspace_MultiKeywordSnippetPrefersMatchedContext(t *testing.T) 
 	if len(result.Documents) != 1 {
 		t.Fatalf("expected single document hit, got %+v", result.Documents)
 	}
-	if !strings.Contains(result.Documents[0].Excerpt, "青柠") {
-		t.Fatalf("expected snippet to include one of the keywords, got %+v", result.Documents[0].Excerpt)
+	if !strings.Contains(result.Documents[0].Excerpt, "青柠") || !strings.Contains(result.Documents[0].Excerpt, "独特") {
+		t.Fatalf("expected snippet to include both keyword contexts, got %+v", result.Documents[0].Excerpt)
+	}
+}
+
+func TestSearchWorkspace_MultiKeywordMediaMatchesAcrossTerms(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, userID, "青柠笔记")
+	seedWorkspaceAsset(t, db, userID, docID, "独特香气.png")
+
+	result, err := SearchWorkspace(userID, "青柠 独特", 5)
+	if err != nil {
+		t.Fatalf("search workspace: %v", err)
+	}
+	if len(result.Media) != 1 {
+		t.Fatalf("expected multi-keyword media hit, got %+v", result.Media)
 	}
 }

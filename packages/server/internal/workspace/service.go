@@ -482,12 +482,16 @@ func tokenizeSearchTerms(query string) []string {
 	return terms
 }
 
-func locateSearchMatch(text string, terms []string) (start int, termLength int, ok bool) {
-	textRunes := []rune(text)
-	lowerTextRunes := []rune(strings.ToLower(text))
+type searchMatch struct {
+	start  int
+	length int
+	term   string
+}
 
-	bestStart := -1
-	bestLength := 0
+func collectSearchMatches(text string, terms []string) []searchMatch {
+	lowerTextRunes := []rune(strings.ToLower(text))
+	matches := make([]searchMatch, 0, len(terms))
+
 	for _, term := range terms {
 		termRunes := []rune(strings.ToLower(term))
 		if len(termRunes) == 0 || len(termRunes) > len(lowerTextRunes) {
@@ -498,21 +502,76 @@ func locateSearchMatch(text string, terms []string) (start int, termLength int, 
 			if string(lowerTextRunes[idx:idx+len(termRunes)]) != string(termRunes) {
 				continue
 			}
-			if bestStart == -1 || idx < bestStart || (idx == bestStart && len(termRunes) > bestLength) {
-				bestStart = idx
-				bestLength = len(termRunes)
-			}
+			matches = append(matches, searchMatch{
+				start:  idx,
+				length: len(termRunes),
+				term:   strings.ToLower(term),
+			})
 			break
 		}
 	}
 
-	if bestStart == -1 {
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].start == matches[j].start {
+			return matches[i].length > matches[j].length
+		}
+		return matches[i].start < matches[j].start
+	})
+
+	return matches
+}
+
+func locateSearchMatch(text string, terms []string) (start int, termLength int, ok bool) {
+	textRunes := []rune(text)
+	matches := collectSearchMatches(text, terms)
+	if len(matches) == 0 {
 		return 0, 0, false
 	}
-	if bestStart > len(textRunes) {
+
+	best := matches[0]
+	if best.start > len(textRunes) {
 		return 0, 0, false
 	}
-	return bestStart, bestLength, true
+	return best.start, best.length, true
+}
+
+func locateBestSnippetWindow(text string, terms []string, radius int) (start int, end int, ok bool) {
+	textRunes := []rune(text)
+	matches := collectSearchMatches(text, terms)
+	if len(matches) == 0 {
+		return 0, 0, false
+	}
+
+	bestCoverage := -1
+	bestStart := 0
+	bestEnd := 0
+	bestAnchor := len(textRunes)
+
+	for _, anchor := range matches {
+		windowStart := max(0, anchor.start-radius)
+		windowEnd := min(len(textRunes), anchor.start+anchor.length+radius)
+		coveredTerms := make(map[string]struct{}, len(terms))
+		for _, candidate := range matches {
+			if candidate.start >= windowStart && candidate.start < windowEnd {
+				coveredTerms[candidate.term] = struct{}{}
+			}
+		}
+
+		coverage := len(coveredTerms)
+		if coverage > bestCoverage ||
+			(coverage == bestCoverage && anchor.start < bestAnchor) ||
+			(coverage == bestCoverage && anchor.start == bestAnchor && windowEnd-windowStart > bestEnd-bestStart) {
+			bestCoverage = coverage
+			bestStart = windowStart
+			bestEnd = windowEnd
+			bestAnchor = anchor.start
+		}
+	}
+
+	if bestCoverage <= 0 {
+		return 0, 0, false
+	}
+	return bestStart, bestEnd, true
 }
 
 func extractSearchSnippet(text, query string, radius int) string {
@@ -531,13 +590,10 @@ func extractSearchSnippet(text, query string, radius int) string {
 
 	textRunes := []rune(trimmedText)
 	terms := tokenizeSearchTerms(trimmedQuery)
-	matchIndex, matchLength, ok := locateSearchMatch(trimmedText, terms)
+	start, end, ok := locateBestSnippetWindow(trimmedText, terms, radius)
 	if !ok {
 		return ""
 	}
-
-	start := max(0, matchIndex-radius)
-	end := min(len(textRunes), matchIndex+matchLength+radius)
 
 	snippet := string(textRunes[start:end])
 	if start > 0 {
@@ -598,6 +654,95 @@ func buildDocumentSearchSnippetFromSources(excerpt, manualExcerpt, plainText, co
 		return snippet
 	}
 	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
+}
+
+func matchesSearchTerms(value string, terms []string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(terms) == 0 {
+		return false
+	}
+
+	lowerValue := strings.ToLower(trimmed)
+	for _, term := range terms {
+		if strings.Contains(lowerValue, strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
+}
+
+func searchOwnedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.AssetListItem, error) {
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	queries := append([]string{strings.Join(terms, " ")}, terms...)
+	assetsByID := make(map[uuid.UUID]media.AssetListItem, limit*len(queries))
+	for _, term := range queries {
+		items, err := media.ListOwnedAssets(media.ListAssetsRequest{
+			UserID: userID,
+			Query:  term,
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items.Items {
+			existing, exists := assetsByID[item.ID]
+			if !exists || item.UpdatedAt.After(existing.UpdatedAt) {
+				assetsByID[item.ID] = item
+			}
+		}
+	}
+
+	assets := make([]media.AssetListItem, 0, len(assetsByID))
+	for _, item := range assetsByID {
+		assets = append(assets, item)
+	}
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].UpdatedAt.After(assets[j].UpdatedAt)
+	})
+	if len(assets) > limit {
+		assets = assets[:limit]
+	}
+	return assets, nil
+}
+
+func searchSharedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.SharedAssetListItem, error) {
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	queries := append([]string{strings.Join(terms, " ")}, terms...)
+	assetsByID := make(map[uuid.UUID]media.SharedAssetListItem, limit*len(queries))
+	for _, term := range queries {
+		items, err := media.ListSharedEditableAssets(media.ListAssetsRequest{
+			UserID: userID,
+			Query:  term,
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items.Items {
+			existing, exists := assetsByID[item.ID]
+			if !exists || item.UpdatedAt.After(existing.UpdatedAt) {
+				assetsByID[item.ID] = item
+			}
+		}
+	}
+
+	assets := make([]media.SharedAssetListItem, 0, len(assetsByID))
+	for _, item := range assetsByID {
+		assets = append(assets, item)
+	}
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].UpdatedAt.After(assets[j].UpdatedAt)
+	})
+	if len(assets) > limit {
+		assets = assets[:limit]
+	}
+	return assets, nil
 }
 
 func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gorm.DB {
@@ -669,6 +814,7 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		"d.title",
 		"d.excerpt",
 		"d.manual_excerpt",
+		"bodies.plain_text",
 		"bodies.content_json",
 	})
 	if err := documentQuery.
@@ -731,21 +877,13 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		})
 	}
 
-	ownedAssets, err := media.ListOwnedAssets(media.ListAssetsRequest{
-		UserID: userID,
-		Query:  query,
-		Limit:  limit,
-	})
+	ownedAssets, err := searchOwnedAssetsByTerms(userID, terms, limit)
 	if err != nil {
 		return nil, err
 	}
-	sharedAssets := &media.ListSharedAssetsResult{}
+	sharedAssets := []media.SharedAssetListItem{}
 	if config.GetCollaborationEnabled() {
-		sharedAssets, err = media.ListSharedEditableAssets(media.ListAssetsRequest{
-			UserID: userID,
-			Query:  query,
-			Limit:  limit,
-		})
+		sharedAssets, err = searchSharedAssetsByTerms(userID, terms, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -769,7 +907,7 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		return document.Title
 	}
 
-	mediaByID := make(map[uuid.UUID]SearchMediaItem, len(ownedAssets.Items)+len(sharedAssets.Items))
+	mediaByID := make(map[uuid.UUID]SearchMediaItem, len(ownedAssets)+len(sharedAssets))
 	appendMediaItem := func(assetID uuid.UUID, filename, kind, mimeType string, documentID *uuid.UUID, updatedAt time.Time) {
 		item := SearchMediaItem{
 			ID:         assetID,
@@ -791,10 +929,10 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		}
 	}
 
-	for _, item := range ownedAssets.Items {
+	for _, item := range ownedAssets {
 		appendMediaItem(item.ID, item.Filename, item.Kind, item.MimeType, item.DocumentID, item.UpdatedAt)
 	}
-	for _, item := range sharedAssets.Items {
+	for _, item := range sharedAssets {
 		var documentID *uuid.UUID
 		if len(item.Documents) > 0 {
 			documentID = &item.Documents[0].DocumentID
@@ -804,6 +942,9 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 
 	result.Media = make([]SearchMediaItem, 0, len(mediaByID))
 	for _, item := range mediaByID {
+		if !matchesSearchTerms(item.Filename, terms) && (item.DocumentTitle == nil || !matchesSearchTerms(*item.DocumentTitle, terms)) {
+			continue
+		}
 		result.Media = append(result.Media, item)
 	}
 	sort.Slice(result.Media, func(i, j int) bool {
