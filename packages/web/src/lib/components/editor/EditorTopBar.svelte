@@ -166,7 +166,7 @@ $effect(() => {
 		if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) {
 			return true;
 		}
-		return target.closest('input, textarea, [contenteditable="true"], [role="textbox"]') !== null;
+		return target.closest('[contenteditable="true"], [role="textbox"]') !== null;
 	}
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
