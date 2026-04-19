@@ -67,6 +67,34 @@ func GetFilesHandler(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
+func SearchHandler(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user context",
+		})
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Invalid User ID",
+			Message: "User ID format is invalid",
+		})
+	}
+
+	response, err := SearchWorkspace(userID, c.Query("q"), c.QueryInt("limit", 5))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(response)
+}
+
 // GetFileHandler handles GET /api/v1/workspace/files/:id
 func GetFileHandler(c *fiber.Ctx) error {
 	// Get user ID from locals

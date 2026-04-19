@@ -35,6 +35,8 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.DocumentImageTargetPreference{},
 		&models.DocumentInvite{},
 		&models.Notification{},
+		&models.BlobObject{},
+		&models.Asset{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -110,6 +112,55 @@ func seedWorkspacePermission(t *testing.T, db *gorm.DB, documentID, userID, crea
 	if err := db.Create(&permission).Error; err != nil {
 		t.Fatalf("create document permission: %v", err)
 	}
+}
+
+func seedWorkspaceAsset(t *testing.T, db *gorm.DB, ownerID, documentID uuid.UUID, filename string) uuid.UUID {
+	t.Helper()
+
+	blob := models.BlobObject{
+		ID:              uuid.New(),
+		SHA256:          uuid.NewString(),
+		Size:            int64(len(filename) + 10),
+		MimeType:        "image/png",
+		StorageProvider: "local",
+		ObjectKey:       "objects/" + uuid.NewString(),
+		URL:             "https://example.com/" + filename,
+		Status:          "ready",
+		ThumbnailStatus: "skipped",
+	}
+	if err := db.Create(&blob).Error; err != nil {
+		t.Fatalf("create blob: %v", err)
+	}
+
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		DocumentID:     &documentID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       filename,
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 1,
+		CreatedBy:      ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	ref := models.DocumentAssetRef{
+		ID:          uuid.New(),
+		DocumentID:  documentID,
+		AssetID:     asset.ID,
+		OwnerUserID: ownerID,
+		RefType:     "editor_content",
+	}
+	if err := db.Create(&ref).Error; err != nil {
+		t.Fatalf("create asset ref: %v", err)
+	}
+
+	return asset.ID
 }
 
 func TestGetFile_Document_DeniesCrossUserAccess(t *testing.T) {

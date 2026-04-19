@@ -150,6 +150,44 @@ type DocumentPublicContentResponse struct {
 	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
+type SearchDocumentItem struct {
+	ID                     uuid.UUID  `json:"id"`
+	Title                  string     `json:"title"`
+	Excerpt                string     `json:"excerpt"`
+	DocumentType           string     `json:"documentType"`
+	PreferredImageTargetID string     `json:"preferredImageTargetId"`
+	MyRole                 string     `json:"myRole"`
+	PublicAccess           string     `json:"publicAccess"`
+	PublicURL              string     `json:"publicUrl"`
+	FolderID               *uuid.UUID `json:"folderId,omitempty"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+}
+
+type SearchFolderItem struct {
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	ParentID  *uuid.UUID `json:"parentId,omitempty"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+type SearchMediaItem struct {
+	ID            uuid.UUID  `json:"id"`
+	Filename      string     `json:"filename"`
+	Kind          string     `json:"kind"`
+	MimeType      string     `json:"mimeType"`
+	DocumentID    *uuid.UUID `json:"documentId,omitempty"`
+	DocumentTitle *string    `json:"documentTitle,omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type SearchResponse struct {
+	Query     string               `json:"query"`
+	Documents []SearchDocumentItem `json:"documents"`
+	Folders   []SearchFolderItem   `json:"folders"`
+	Media     []SearchMediaItem    `json:"media"`
+	Total     int                  `json:"total"`
+}
+
 type BatchMoveRequest struct {
 	Items               []ItemToMove `json:"items"`
 	DestinationFolderID *uuid.UUID   `json:"destinationFolderId"`
