@@ -159,8 +159,21 @@ $effect(() => {
 		isSearchOpen = false;
 	}
 
+	function isEditableTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) {
+			return false;
+		}
+		if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) {
+			return true;
+		}
+		return target.closest('input, textarea, [contenteditable="true"], [role="textbox"]') !== null;
+	}
+
 	function handleGlobalKeydown(event: KeyboardEvent) {
 		if (event.isComposing) {
+			return;
+		}
+		if (event.defaultPrevented || isEditableTarget(event.target)) {
 			return;
 		}
 		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {

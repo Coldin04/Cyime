@@ -99,7 +99,7 @@
 			} catch (error) {
 				if (currentToken !== requestToken) return;
 				results = emptyResults(trimmed);
-				errorMessage = error instanceof Error ? error.message : 'Search failed';
+				errorMessage = error instanceof Error ? error.message : m.common_unknown_error();
 			} finally {
 				if (currentToken === requestToken) {
 					isLoading = false;

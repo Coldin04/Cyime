@@ -82,6 +82,24 @@ func TestSearchHandler_ReturnsSearchPayload(t *testing.T) {
 	}
 }
 
+func TestSearchHandler_DisabledWhenCollaborationOff(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	seedDocumentForWorkspace(t, db, userID, "挂载文档")
+
+	app := newWorkspaceTestApp(userID)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=挂载&limit=3", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 when collaboration disabled, got %d", resp.StatusCode)
+	}
+}
+
 func TestSearchWorkspace_MatchesDocumentBodyContentJSON(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	userID := uuid.New()

@@ -496,15 +496,6 @@ func extractSearchSnippet(text, query string, radius int) string {
 	return snippet
 }
 
-func buildDocumentSearchSnippet(excerpt, manualExcerpt, plainText, query string) string {
-	for _, candidate := range []string{manualExcerpt, excerpt, plainText} {
-		if snippet := extractSearchSnippet(candidate, query, 36); snippet != "" {
-			return snippet
-		}
-	}
-	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
-}
-
 func extractPlainTextFromContentJSON(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -544,10 +535,14 @@ func extractPlainTextFromContentJSON(raw string) string {
 }
 
 func buildDocumentSearchSnippetFromSources(excerpt, manualExcerpt, plainText, contentJSON, query string) string {
-	for _, candidate := range []string{manualExcerpt, excerpt, plainText, extractPlainTextFromContentJSON(contentJSON)} {
+	for _, candidate := range []string{manualExcerpt, excerpt, plainText} {
 		if snippet := extractSearchSnippet(candidate, query, 36); snippet != "" {
 			return snippet
 		}
+	}
+
+	if snippet := extractSearchSnippet(extractPlainTextFromContentJSON(contentJSON), query, 36); snippet != "" {
+		return snippet
 	}
 	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
 }
