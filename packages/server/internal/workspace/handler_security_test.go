@@ -19,6 +19,7 @@ func newWorkspaceTestApp(userID uuid.UUID) *fiber.App {
 		c.Locals("userId", userID.String())
 		return c.Next()
 	})
+	app.Get("/search", SearchHandler)
 	app.Get("/files/:id", GetFileHandler)
 	app.Get("/public/documents/:id", GetPublicDocumentHandler)
 	app.Get("/shared/summary", SharedDocumentSummaryHandler)

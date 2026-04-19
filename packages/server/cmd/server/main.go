@@ -90,6 +90,7 @@ func main() {
 	// Workspace routes (protected)
 	workspaceRoutes := api.Group("/workspace", middleware.Protected())
 	workspaceRoutes.Get("/files", workspace.GetFilesHandler)
+	workspaceRoutes.Get("/search", workspace.SearchHandler)
 	workspaceRoutes.Get("/shared/summary", workspace.SharedDocumentSummaryHandler)
 	workspaceRoutes.Get("/shared/documents", workspace.ListSharedDocumentsHandler)
 	workspaceRoutes.Get("/shared/outgoing", workspace.ListOutgoingSharedDocumentsHandler)

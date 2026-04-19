@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"g.co1d.in/Coldin04/Cyime/server/internal/config"
 	"g.co1d.in/Coldin04/Cyime/server/internal/content"
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/media"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"g.co1d.in/Coldin04/Cyime/server/internal/user"
 	"github.com/google/uuid"
@@ -440,6 +442,379 @@ func GetSharedDocumentSummary(userID uuid.UUID) (*SharedDocumentSummaryResponse,
 	default:
 		return &SharedDocumentSummaryResponse{HasSharedDocuments: true}, nil
 	}
+}
+
+func normalizeSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 5
+	}
+	if limit > 20 {
+		return 20
+	}
+	return limit
+}
+
+func tokenizeSearchTerms(query string) []string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil
+	}
+
+	rawTerms := strings.Fields(trimmed)
+	if len(rawTerms) == 0 {
+		rawTerms = []string{trimmed}
+	}
+
+	seen := make(map[string]struct{}, len(rawTerms))
+	terms := make([]string, 0, len(rawTerms))
+	for _, term := range rawTerms {
+		normalized := strings.TrimSpace(term)
+		if normalized == "" {
+			continue
+		}
+		key := strings.ToLower(normalized)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		terms = append(terms, normalized)
+	}
+	return terms
+}
+
+func locateSearchMatch(text string, terms []string) (start int, termLength int, ok bool) {
+	textRunes := []rune(text)
+	lowerTextRunes := []rune(strings.ToLower(text))
+
+	bestStart := -1
+	bestLength := 0
+	for _, term := range terms {
+		termRunes := []rune(strings.ToLower(term))
+		if len(termRunes) == 0 || len(termRunes) > len(lowerTextRunes) {
+			continue
+		}
+
+		for idx := 0; idx <= len(lowerTextRunes)-len(termRunes); idx++ {
+			if string(lowerTextRunes[idx:idx+len(termRunes)]) != string(termRunes) {
+				continue
+			}
+			if bestStart == -1 || idx < bestStart || (idx == bestStart && len(termRunes) > bestLength) {
+				bestStart = idx
+				bestLength = len(termRunes)
+			}
+			break
+		}
+	}
+
+	if bestStart == -1 {
+		return 0, 0, false
+	}
+	if bestStart > len(textRunes) {
+		return 0, 0, false
+	}
+	return bestStart, bestLength, true
+}
+
+func extractSearchSnippet(text, query string, radius int) string {
+	trimmedText := strings.TrimSpace(text)
+	trimmedQuery := strings.TrimSpace(query)
+	if trimmedText == "" {
+		return ""
+	}
+	if trimmedQuery == "" {
+		runes := []rune(trimmedText)
+		if len(runes) <= radius*2 {
+			return trimmedText
+		}
+		return string(runes[:radius*2]) + "..."
+	}
+
+	textRunes := []rune(trimmedText)
+	terms := tokenizeSearchTerms(trimmedQuery)
+	matchIndex, matchLength, ok := locateSearchMatch(trimmedText, terms)
+	if !ok {
+		return ""
+	}
+
+	start := max(0, matchIndex-radius)
+	end := min(len(textRunes), matchIndex+matchLength+radius)
+
+	snippet := string(textRunes[start:end])
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(textRunes) {
+		snippet += "..."
+	}
+	return snippet
+}
+
+func extractPlainTextFromContentJSON(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	var root any
+	if err := json.Unmarshal([]byte(trimmed), &root); err != nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 16)
+	var walk func(node any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if textValue, ok := typed["text"].(string); ok {
+				textValue = strings.TrimSpace(textValue)
+				if textValue != "" {
+					parts = append(parts, textValue)
+				}
+			}
+			if content, ok := typed["content"].([]any); ok {
+				for _, child := range content {
+					walk(child)
+				}
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(root)
+
+	return strings.Join(parts, " ")
+}
+
+func buildDocumentSearchSnippetFromSources(excerpt, manualExcerpt, plainText, contentJSON, query string) string {
+	for _, candidate := range []string{manualExcerpt, excerpt, plainText} {
+		if snippet := extractSearchSnippet(candidate, query, 36); snippet != "" {
+			return snippet
+		}
+	}
+
+	if snippet := extractSearchSnippet(extractPlainTextFromContentJSON(contentJSON), query, 36); snippet != "" {
+		return snippet
+	}
+	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
+}
+
+func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gorm.DB {
+	if len(terms) == 0 || len(fields) == 0 {
+		return query
+	}
+
+	clauses := make([]string, 0, len(terms))
+	args := make([]any, 0, len(terms)*len(fields))
+	for _, term := range terms {
+		fieldClauses := make([]string, 0, len(fields))
+		like := "%" + term + "%"
+		for _, field := range fields {
+			fieldClauses = append(fieldClauses, field+" LIKE ?")
+			args = append(args, like)
+		}
+		clauses = append(clauses, "("+strings.Join(fieldClauses, " OR ")+")")
+	}
+
+	return query.Where("("+strings.Join(clauses, " OR ")+")", args...)
+}
+
+func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchResponse, error) {
+	query := strings.TrimSpace(rawQuery)
+	limit = normalizeSearchLimit(limit)
+
+	result := &SearchResponse{
+		Query:     query,
+		Documents: make([]SearchDocumentItem, 0),
+		Folders:   make([]SearchFolderItem, 0),
+		Media:     make([]SearchMediaItem, 0),
+	}
+	if query == "" {
+		return result, nil
+	}
+
+	terms := tokenizeSearchTerms(query)
+
+	type documentRow struct {
+		ID                     uuid.UUID
+		OwnerUserID            uuid.UUID
+		FolderID               *uuid.UUID
+		Title                  string
+		Excerpt                string
+		ManualExcerpt          string
+		PlainText              string
+		ContentJSON            string
+		DocumentType           string
+		PreferredImageTargetID string
+		PublicAccess           string
+		MyRole                 string
+		UpdatedAt              time.Time
+	}
+
+	var documentRows []documentRow
+	selectRole := "COALESCE(perms.role, '') AS my_role"
+	documentQuery := database.DB.
+		Table("documents AS d").
+		Joins("LEFT JOIN document_bodies AS bodies ON bodies.document_id = d.id AND bodies.deleted_at IS NULL")
+	if config.GetCollaborationEnabled() {
+		documentQuery = documentQuery.
+			Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = d.id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+			Where("(d.owner_user_id = ? OR perms.role IN ?)", userID, acl.AllowedRolesForAction(acl.ActionRead))
+	} else {
+		documentQuery = documentQuery.Where("d.owner_user_id = ?", userID)
+		selectRole = "'' AS my_role"
+	}
+	documentQuery = applyMultiKeywordLike(documentQuery, terms, []string{
+		"d.title",
+		"d.excerpt",
+		"d.manual_excerpt",
+		"bodies.content_json",
+	})
+	if err := documentQuery.
+		Where("d.deleted_at IS NULL").
+		Select(
+			"d.id",
+			"d.owner_user_id",
+			"d.folder_id",
+			"d.title",
+			"d.excerpt",
+			"d.manual_excerpt",
+			"COALESCE(bodies.plain_text, '') AS plain_text",
+			"COALESCE(bodies.content_json, '') AS content_json",
+			"d.document_type",
+			"d.preferred_image_target_id",
+			"d.public_access",
+			selectRole,
+			"d.updated_at",
+		).
+		Order("d.updated_at desc").
+		Limit(limit).
+		Scan(&documentRows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range documentRows {
+		role := row.MyRole
+		if row.OwnerUserID == userID {
+			role = acl.RoleOwner
+		}
+		result.Documents = append(result.Documents, SearchDocumentItem{
+			ID:                     row.ID,
+			Title:                  row.Title,
+			Excerpt:                buildDocumentSearchSnippetFromSources(row.Excerpt, row.ManualExcerpt, row.PlainText, row.ContentJSON, query),
+			DocumentType:           row.DocumentType,
+			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(row.PreferredImageTargetID),
+			MyRole:                 role,
+			PublicAccess:           normalizePublicAccess(row.PublicAccess),
+			PublicURL:              buildDocumentPublicURL(row.ID),
+			FolderID:               row.FolderID,
+			UpdatedAt:              row.UpdatedAt,
+		})
+	}
+
+	var folders []models.Folder
+	folderQuery := database.DB.Where("owner_user_id = ? AND deleted_at IS NULL", userID)
+	folderQuery = applyMultiKeywordLike(folderQuery, terms, []string{"name"})
+	if err := folderQuery.
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&folders).Error; err != nil {
+		return nil, err
+	}
+	for _, folder := range folders {
+		result.Folders = append(result.Folders, SearchFolderItem{
+			ID:        folder.ID,
+			Name:      folder.Name,
+			ParentID:  folder.ParentID,
+			UpdatedAt: folder.UpdatedAt,
+		})
+	}
+
+	ownedAssets, err := media.ListOwnedAssets(media.ListAssetsRequest{
+		UserID: userID,
+		Query:  query,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sharedAssets := &media.ListSharedAssetsResult{}
+	if config.GetCollaborationEnabled() {
+		sharedAssets, err = media.ListSharedEditableAssets(media.ListAssetsRequest{
+			UserID: userID,
+			Query:  query,
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	documentTitles := make(map[uuid.UUID]string)
+	loadDocumentTitle := func(documentID uuid.UUID) string {
+		if title, ok := documentTitles[documentID]; ok {
+			return title
+		}
+
+		var document models.Document
+		if err := database.DB.
+			Select("id", "title").
+			Where("id = ? AND deleted_at IS NULL", documentID).
+			First(&document).Error; err != nil {
+			documentTitles[documentID] = ""
+			return ""
+		}
+		documentTitles[documentID] = document.Title
+		return document.Title
+	}
+
+	mediaByID := make(map[uuid.UUID]SearchMediaItem, len(ownedAssets.Items)+len(sharedAssets.Items))
+	appendMediaItem := func(assetID uuid.UUID, filename, kind, mimeType string, documentID *uuid.UUID, updatedAt time.Time) {
+		item := SearchMediaItem{
+			ID:         assetID,
+			Filename:   filename,
+			Kind:       kind,
+			MimeType:   mimeType,
+			DocumentID: documentID,
+			UpdatedAt:  updatedAt,
+		}
+		if documentID != nil {
+			if title := strings.TrimSpace(loadDocumentTitle(*documentID)); title != "" {
+				item.DocumentTitle = &title
+			}
+		}
+
+		existing, exists := mediaByID[assetID]
+		if !exists || item.UpdatedAt.After(existing.UpdatedAt) {
+			mediaByID[assetID] = item
+		}
+	}
+
+	for _, item := range ownedAssets.Items {
+		appendMediaItem(item.ID, item.Filename, item.Kind, item.MimeType, item.DocumentID, item.UpdatedAt)
+	}
+	for _, item := range sharedAssets.Items {
+		var documentID *uuid.UUID
+		if len(item.Documents) > 0 {
+			documentID = &item.Documents[0].DocumentID
+		}
+		appendMediaItem(item.ID, item.Filename, item.Kind, item.MimeType, documentID, item.UpdatedAt)
+	}
+
+	result.Media = make([]SearchMediaItem, 0, len(mediaByID))
+	for _, item := range mediaByID {
+		result.Media = append(result.Media, item)
+	}
+	sort.Slice(result.Media, func(i, j int) bool {
+		return result.Media[i].UpdatedAt.After(result.Media[j].UpdatedAt)
+	})
+	if len(result.Media) > limit {
+		result.Media = result.Media[:limit]
+	}
+
+	result.Total = len(result.Documents) + len(result.Folders) + len(result.Media)
+	return result, nil
 }
 
 func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*OutgoingSharedDocumentListResponse, error) {

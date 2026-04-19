@@ -111,6 +111,44 @@ export type SharedDocumentSummaryResponse = {
 	hasSharedDocuments: boolean;
 };
 
+export type SearchDocumentItem = {
+	id: string;
+	title: string;
+	excerpt: string;
+	documentType: 'rich_text' | 'table' | string;
+	preferredImageTargetId: 'managed-r2' | string;
+	myRole: 'owner' | 'collaborator' | 'editor' | 'viewer' | string;
+	publicAccess: 'private' | 'authenticated' | 'public' | string;
+	publicUrl: string;
+	folderId?: string | null;
+	updatedAt: string;
+};
+
+export type SearchFolderItem = {
+	id: string;
+	name: string;
+	parentId?: string | null;
+	updatedAt: string;
+};
+
+export type SearchMediaItem = {
+	id: string;
+	filename: string;
+	kind: 'image' | 'video' | 'file' | string;
+	mimeType: string;
+	documentId?: string | null;
+	documentTitle?: string | null;
+	updatedAt: string;
+};
+
+export type WorkspaceSearchResponse = {
+	query: string;
+	documents: SearchDocumentItem[];
+	folders: SearchFolderItem[];
+	media: SearchMediaItem[];
+	total: number;
+};
+
 export type OutgoingSharedDocumentItem = {
 	documentId: string;
 	title: string;
@@ -169,6 +207,26 @@ export async function getFiles(params: {
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.message || 'Failed to fetch files');
+	}
+
+	return response.json();
+}
+
+export async function searchWorkspace(params: {
+	q: string;
+	limit?: number;
+}): Promise<WorkspaceSearchResponse> {
+	const queryParams = new URLSearchParams();
+	queryParams.set('q', params.q);
+	if (typeof params.limit === 'number') {
+		queryParams.set('limit', String(params.limit));
+	}
+
+	const response = await apiFetch(`/api/v1/workspace/search?${queryParams.toString()}`);
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new Error(error.message || 'Failed to search workspace');
 	}
 
 	return response.json();
