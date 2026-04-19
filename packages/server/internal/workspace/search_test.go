@@ -178,3 +178,59 @@ func TestSearchWorkspace_MultiKeywordMediaMatchesAcrossTerms(t *testing.T) {
 		t.Fatalf("expected multi-keyword media hit, got %+v", result.Media)
 	}
 }
+
+func TestSearchWorkspace_FuzzyAndRankedResults(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+
+	topDocID := seedDocumentForWorkspace(t, db, userID, "挂载指南")
+	_ = seedDocumentForWorkspace(t, db, userID, "云端挂载实践记录")
+
+	folderA := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: userID,
+		Name:        "挂载资料",
+		CreatedBy:   userID,
+		UpdatedBy:   userID,
+	}
+	folderB := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: userID,
+		Name:        "我的挂载备忘",
+		CreatedBy:   userID,
+		UpdatedBy:   userID,
+	}
+	if err := db.Create(&folderA).Error; err != nil {
+		t.Fatalf("create folderA: %v", err)
+	}
+	if err := db.Create(&folderB).Error; err != nil {
+		t.Fatalf("create folderB: %v", err)
+	}
+
+	seedWorkspaceAsset(t, db, userID, topDocID, "挂载说明.png")
+
+	result, err := SearchWorkspace(userID, "挂南", 5)
+	if err != nil {
+		t.Fatalf("search workspace: %v", err)
+	}
+
+	if len(result.Documents) == 0 || result.Documents[0].ID != topDocID {
+		t.Fatalf("expected fuzzy title match to rank first, got %+v", result.Documents)
+	}
+
+	result, err = SearchWorkspace(userID, "挂资", 5)
+	if err != nil {
+		t.Fatalf("search workspace folders: %v", err)
+	}
+	if len(result.Folders) == 0 || result.Folders[0].Name != "挂载资料" {
+		t.Fatalf("expected stronger folder name match to rank first, got %+v", result.Folders)
+	}
+
+	result, err = SearchWorkspace(userID, "挂说", 5)
+	if err != nil {
+		t.Fatalf("search workspace media: %v", err)
+	}
+	if len(result.Media) == 0 || result.Media[0].Filename != "挂载说明.png" {
+		t.Fatalf("expected fuzzy media filename match, got %+v", result.Media)
+	}
+}

@@ -656,6 +656,30 @@ func buildDocumentSearchSnippetFromSources(excerpt, manualExcerpt, plainText, co
 	return resolveDocumentListExcerpt(excerpt, manualExcerpt)
 }
 
+type workspaceSearchDocumentRow struct {
+	ID                     uuid.UUID
+	OwnerUserID            uuid.UUID
+	FolderID               *uuid.UUID
+	Title                  string
+	Excerpt                string
+	ManualExcerpt          string
+	PlainText              string
+	ContentJSON            string
+	DocumentType           string
+	PreferredImageTargetID string
+	PublicAccess           string
+	MyRole                 string
+	UpdatedAt              time.Time
+}
+
+func normalizeSearchCandidatesLimit(limit int) int {
+	candidateLimit := max(limit*4, 20)
+	if candidateLimit > 80 {
+		return 80
+	}
+	return candidateLimit
+}
+
 func matchesSearchTerms(value string, terms []string) bool {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || len(terms) == 0 {
@@ -669,6 +693,148 @@ func matchesSearchTerms(value string, terms []string) bool {
 		}
 	}
 	return false
+}
+
+func matchTermSubsequence(value, term string) (start int, span int, gaps int, ok bool) {
+	valueRunes := []rune(strings.ToLower(value))
+	termRunes := []rune(strings.ToLower(term))
+	if len(valueRunes) == 0 || len(termRunes) == 0 || len(termRunes) > len(valueRunes) {
+		return 0, 0, 0, false
+	}
+
+	start = -1
+	last := -1
+	matched := 0
+	for idx, current := range valueRunes {
+		if current != termRunes[matched] {
+			continue
+		}
+		if start == -1 {
+			start = idx
+		} else if last >= 0 && idx > last+1 {
+			gaps += idx - last - 1
+		}
+		last = idx
+		matched++
+		if matched == len(termRunes) {
+			return start, last - start + 1, gaps, true
+		}
+	}
+
+	return 0, 0, 0, false
+}
+
+func scoreSearchValue(value string, terms []string) (score int, matched bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(terms) == 0 {
+		return 0, false
+	}
+
+	lowerValue := strings.ToLower(trimmed)
+	matchedTerms := 0
+	for _, term := range terms {
+		lowerTerm := strings.ToLower(term)
+		if lowerTerm == "" {
+			continue
+		}
+
+		if index := strings.Index(lowerValue, lowerTerm); index >= 0 {
+			matched = true
+			matchedTerms++
+			termScore := 1200 + len([]rune(lowerTerm))*12 - min(index, 120)*5
+			if index == 0 {
+				termScore += 220
+			}
+			if lowerValue == lowerTerm {
+				termScore += 320
+			}
+			score += max(termScore, 200)
+			continue
+		}
+
+		start, span, gaps, ok := matchTermSubsequence(lowerValue, lowerTerm)
+		if !ok {
+			continue
+		}
+		matched = true
+		matchedTerms++
+		termScore := 260 + len([]rune(lowerTerm))*8 - span*4 - gaps*6 - min(start, 120)*2
+		score += max(termScore, 40)
+	}
+
+	if !matched {
+		return 0, false
+	}
+	score += matchedTerms * 900
+	if matchedTerms == len(terms) {
+		score += 1400
+	}
+	return score, true
+}
+
+func fetchAccessibleDocumentSearchRows(userID uuid.UUID, terms []string, limit int, applyFilter bool) ([]workspaceSearchDocumentRow, error) {
+	rows := make([]workspaceSearchDocumentRow, 0)
+	selectRole := "COALESCE(perms.role, '') AS my_role"
+	documentQuery := database.DB.
+		Table("documents AS d").
+		Joins("LEFT JOIN document_bodies AS bodies ON bodies.document_id = d.id AND bodies.deleted_at IS NULL")
+	if config.GetCollaborationEnabled() {
+		documentQuery = documentQuery.
+			Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = d.id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
+			Where("(d.owner_user_id = ? OR perms.role IN ?)", userID, acl.AllowedRolesForAction(acl.ActionRead))
+	} else {
+		documentQuery = documentQuery.Where("d.owner_user_id = ?", userID)
+		selectRole = "'' AS my_role"
+	}
+	if applyFilter {
+		documentQuery = applyMultiKeywordLike(documentQuery, terms, []string{
+			"d.title",
+			"d.excerpt",
+			"d.manual_excerpt",
+			"bodies.plain_text",
+			"bodies.content_json",
+		})
+	}
+
+	err := documentQuery.
+		Where("d.deleted_at IS NULL").
+		Select(
+			"d.id",
+			"d.owner_user_id",
+			"d.folder_id",
+			"d.title",
+			"d.excerpt",
+			"d.manual_excerpt",
+			"COALESCE(bodies.plain_text, '') AS plain_text",
+			"COALESCE(bodies.content_json, '') AS content_json",
+			"d.document_type",
+			"d.preferred_image_target_id",
+			"d.public_access",
+			selectRole,
+			"d.updated_at",
+		).
+		Order("d.updated_at desc").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func fetchOwnedSearchFolders(userID uuid.UUID, terms []string, limit int, applyFilter bool) ([]models.Folder, error) {
+	folders := make([]models.Folder, 0)
+	query := database.DB.Where("owner_user_id = ? AND deleted_at IS NULL", userID)
+	if applyFilter {
+		query = applyMultiKeywordLike(query, terms, []string{"name"})
+	}
+	if err := query.
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&folders).Error; err != nil {
+		return nil, err
+	}
+	return folders, nil
 }
 
 func searchOwnedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.AssetListItem, error) {
@@ -708,6 +874,17 @@ func searchOwnedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]me
 	return assets, nil
 }
 
+func collectRecentOwnedAssets(userID uuid.UUID, limit int) ([]media.AssetListItem, error) {
+	items, err := media.ListOwnedAssets(media.ListAssetsRequest{
+		UserID: userID,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items.Items, nil
+}
+
 func searchSharedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]media.SharedAssetListItem, error) {
 	if len(terms) == 0 {
 		return nil, nil
@@ -745,6 +922,17 @@ func searchSharedAssetsByTerms(userID uuid.UUID, terms []string, limit int) ([]m
 	return assets, nil
 }
 
+func collectRecentSharedAssets(userID uuid.UUID, limit int) ([]media.SharedAssetListItem, error) {
+	items, err := media.ListSharedEditableAssets(media.ListAssetsRequest{
+		UserID: userID,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items.Items, nil
+}
+
 func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gorm.DB {
 	if len(terms) == 0 || len(fields) == 0 {
 		return query
@@ -780,64 +968,35 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 	}
 
 	terms := tokenizeSearchTerms(query)
+	candidateLimit := normalizeSearchCandidatesLimit(limit)
 
-	type documentRow struct {
-		ID                     uuid.UUID
-		OwnerUserID            uuid.UUID
-		FolderID               *uuid.UUID
-		Title                  string
-		Excerpt                string
-		ManualExcerpt          string
-		PlainText              string
-		ContentJSON            string
-		DocumentType           string
-		PreferredImageTargetID string
-		PublicAccess           string
-		MyRole                 string
-		UpdatedAt              time.Time
-	}
-
-	var documentRows []documentRow
-	selectRole := "COALESCE(perms.role, '') AS my_role"
-	documentQuery := database.DB.
-		Table("documents AS d").
-		Joins("LEFT JOIN document_bodies AS bodies ON bodies.document_id = d.id AND bodies.deleted_at IS NULL")
-	if config.GetCollaborationEnabled() {
-		documentQuery = documentQuery.
-			Joins("LEFT JOIN document_permissions AS perms ON perms.document_id = d.id AND perms.user_id = ? AND perms.deleted_at IS NULL", userID).
-			Where("(d.owner_user_id = ? OR perms.role IN ?)", userID, acl.AllowedRolesForAction(acl.ActionRead))
-	} else {
-		documentQuery = documentQuery.Where("d.owner_user_id = ?", userID)
-		selectRole = "'' AS my_role"
-	}
-	documentQuery = applyMultiKeywordLike(documentQuery, terms, []string{
-		"d.title",
-		"d.excerpt",
-		"d.manual_excerpt",
-		"bodies.plain_text",
-		"bodies.content_json",
-	})
-	if err := documentQuery.
-		Where("d.deleted_at IS NULL").
-		Select(
-			"d.id",
-			"d.owner_user_id",
-			"d.folder_id",
-			"d.title",
-			"d.excerpt",
-			"d.manual_excerpt",
-			"COALESCE(bodies.plain_text, '') AS plain_text",
-			"COALESCE(bodies.content_json, '') AS content_json",
-			"d.document_type",
-			"d.preferred_image_target_id",
-			"d.public_access",
-			selectRole,
-			"d.updated_at",
-		).
-		Order("d.updated_at desc").
-		Limit(limit).
-		Scan(&documentRows).Error; err != nil {
+	documentRows, err := fetchAccessibleDocumentSearchRows(userID, terms, candidateLimit, true)
+	if err != nil {
 		return nil, err
+	}
+
+	if len(documentRows) < limit {
+		existing := make(map[uuid.UUID]struct{}, len(documentRows))
+		for _, row := range documentRows {
+			existing[row.ID] = struct{}{}
+		}
+		fuzzyRows, err := fetchAccessibleDocumentSearchRows(userID, nil, candidateLimit, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range fuzzyRows {
+			if _, ok := existing[row.ID]; ok {
+				continue
+			}
+			if _, matched := scoreSearchValue(row.Title, terms); !matched {
+				excerptText := row.ManualExcerpt + " " + row.Excerpt + " " + row.PlainText + " " + extractPlainTextFromContentJSON(row.ContentJSON)
+				if _, fallbackMatched := scoreSearchValue(excerptText, terms); !fallbackMatched {
+					continue
+				}
+			}
+			documentRows = append(documentRows, row)
+			existing[row.ID] = struct{}{}
+		}
 	}
 
 	for _, row := range documentRows {
@@ -858,15 +1017,47 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 			UpdatedAt:              row.UpdatedAt,
 		})
 	}
+	sort.Slice(result.Documents, func(i, j int) bool {
+		left := result.Documents[i]
+		right := result.Documents[j]
+		leftScore, _ := scoreSearchValue(left.Title, terms)
+		leftExcerptScore, _ := scoreSearchValue(left.Excerpt, terms)
+		rightScore, _ := scoreSearchValue(right.Title, terms)
+		rightExcerptScore, _ := scoreSearchValue(right.Excerpt, terms)
+		totalLeft := leftScore*4 + leftExcerptScore*2
+		totalRight := rightScore*4 + rightExcerptScore*2
+		if totalLeft == totalRight {
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		return totalLeft > totalRight
+	})
+	if len(result.Documents) > limit {
+		result.Documents = result.Documents[:limit]
+	}
 
-	var folders []models.Folder
-	folderQuery := database.DB.Where("owner_user_id = ? AND deleted_at IS NULL", userID)
-	folderQuery = applyMultiKeywordLike(folderQuery, terms, []string{"name"})
-	if err := folderQuery.
-		Order("updated_at desc").
-		Limit(limit).
-		Find(&folders).Error; err != nil {
+	folders, err := fetchOwnedSearchFolders(userID, terms, candidateLimit, true)
+	if err != nil {
 		return nil, err
+	}
+	if len(folders) < limit {
+		existing := make(map[uuid.UUID]struct{}, len(folders))
+		for _, folder := range folders {
+			existing[folder.ID] = struct{}{}
+		}
+		fuzzyFolders, err := fetchOwnedSearchFolders(userID, nil, candidateLimit, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, folder := range fuzzyFolders {
+			if _, ok := existing[folder.ID]; ok {
+				continue
+			}
+			if _, matched := scoreSearchValue(folder.Name, terms); !matched {
+				continue
+			}
+			folders = append(folders, folder)
+			existing[folder.ID] = struct{}{}
+		}
 	}
 	for _, folder := range folders {
 		result.Folders = append(result.Folders, SearchFolderItem{
@@ -875,6 +1066,17 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 			ParentID:  folder.ParentID,
 			UpdatedAt: folder.UpdatedAt,
 		})
+	}
+	sort.Slice(result.Folders, func(i, j int) bool {
+		leftScore, _ := scoreSearchValue(result.Folders[i].Name, terms)
+		rightScore, _ := scoreSearchValue(result.Folders[j].Name, terms)
+		if leftScore == rightScore {
+			return result.Folders[i].UpdatedAt.After(result.Folders[j].UpdatedAt)
+		}
+		return leftScore > rightScore
+	})
+	if len(result.Folders) > limit {
+		result.Folders = result.Folders[:limit]
 	}
 
 	ownedAssets, err := searchOwnedAssetsByTerms(userID, terms, limit)
@@ -886,6 +1088,56 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 		sharedAssets, err = searchSharedAssetsByTerms(userID, terms, limit)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	if len(ownedAssets)+len(sharedAssets) < limit {
+		existingOwned := make(map[uuid.UUID]struct{}, len(ownedAssets))
+		for _, item := range ownedAssets {
+			existingOwned[item.ID] = struct{}{}
+		}
+		recentOwnedAssets, err := collectRecentOwnedAssets(userID, candidateLimit)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range recentOwnedAssets {
+			if _, ok := existingOwned[item.ID]; ok {
+				continue
+			}
+			if _, matched := scoreSearchValue(item.Filename, terms); !matched {
+				continue
+			}
+			ownedAssets = append(ownedAssets, item)
+			existingOwned[item.ID] = struct{}{}
+		}
+		if config.GetCollaborationEnabled() {
+			existingShared := make(map[uuid.UUID]struct{}, len(sharedAssets))
+			for _, item := range sharedAssets {
+				existingShared[item.ID] = struct{}{}
+			}
+			recentSharedAssets, err := collectRecentSharedAssets(userID, candidateLimit)
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range recentSharedAssets {
+				if _, ok := existingShared[item.ID]; ok {
+					continue
+				}
+				titleText := ""
+				if len(item.Documents) > 0 {
+					titleText = item.Documents[0].Title
+				}
+				filenameScore, filenameMatched := scoreSearchValue(item.Filename, terms)
+				titleScore, titleMatched := scoreSearchValue(titleText, terms)
+				if !filenameMatched && !titleMatched {
+					continue
+				}
+				if filenameScore == 0 && titleScore == 0 {
+					continue
+				}
+				sharedAssets = append(sharedAssets, item)
+				existingShared[item.ID] = struct{}{}
+			}
 		}
 	}
 
@@ -942,13 +1194,31 @@ func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchRespo
 
 	result.Media = make([]SearchMediaItem, 0, len(mediaByID))
 	for _, item := range mediaByID {
-		if !matchesSearchTerms(item.Filename, terms) && (item.DocumentTitle == nil || !matchesSearchTerms(*item.DocumentTitle, terms)) {
+		_, filenameMatched := scoreSearchValue(item.Filename, terms)
+		documentTitleMatched := false
+		if item.DocumentTitle != nil {
+			_, documentTitleMatched = scoreSearchValue(*item.DocumentTitle, terms)
+		}
+		if !filenameMatched && !documentTitleMatched {
 			continue
 		}
 		result.Media = append(result.Media, item)
 	}
 	sort.Slice(result.Media, func(i, j int) bool {
-		return result.Media[i].UpdatedAt.After(result.Media[j].UpdatedAt)
+		leftScore, _ := scoreSearchValue(result.Media[i].Filename, terms)
+		rightScore, _ := scoreSearchValue(result.Media[j].Filename, terms)
+		if result.Media[i].DocumentTitle != nil {
+			titleScore, _ := scoreSearchValue(*result.Media[i].DocumentTitle, terms)
+			leftScore += titleScore * 2
+		}
+		if result.Media[j].DocumentTitle != nil {
+			titleScore, _ := scoreSearchValue(*result.Media[j].DocumentTitle, terms)
+			rightScore += titleScore * 2
+		}
+		if leftScore == rightScore {
+			return result.Media[i].UpdatedAt.After(result.Media[j].UpdatedAt)
+		}
+		return leftScore > rightScore
 	})
 	if len(result.Media) > limit {
 		result.Media = result.Media[:limit]
