@@ -120,7 +120,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
     ENV=DEVELOPMENT go run ./cmd/init/main.go
 
     # 运行后端
-    ENV=DEVELOPMENT go run ./server/main.go
+    ENV=DEVELOPMENT go run ./cmd/server/main.go
     ```
     后端服务将运行在 `http://localhost:8080`。
     说明：后端启动会自动读取 `packages/server/.env`。
