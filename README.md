@@ -116,11 +116,11 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
     # 进入后端目录
     cd packages/server
 
-    # 建议先从仓库根目录的 .env.example 复制一份
-    # cp ../.env.example .env
+    # 对数据服务进行初始化操作,并注入 Oauth 服务以便接下来的操作
+    ENV=DEVELOPMENT go run ./cmd/init/main.go
 
     # 运行后端
-    go run ./cmd/server/main.go
+    ENV=DEVELOPMENT go run ./server/main.go
     ```
     后端服务将运行在 `http://localhost:8080`。
     说明：后端启动会自动读取 `packages/server/.env`。
