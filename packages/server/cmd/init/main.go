@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/config"
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
+	"g.co1d.in/Coldin04/Cyime/server/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -56,7 +59,43 @@ var providerTemplates = map[string]ProviderTemplate{
 }
 
 func main() {
-	_ = config.LoadDotEnv(".env")
+	err := config.LoadDotEnv(".env")
+	if err != nil {
+		switch {
+		case strings.ToLower(os.Getenv("ENV")) == "development":
+			// create an .env before to ensure the next step work fine.:<
+			// get env from root of this project before, if not exist, generate a minimal one.
+			log.Println(".env 没有找到，正在从 .env.example 中复制配置")
+			runtimeCallerPath := utils.GetRunTimeCallerPath()
+			envExamplePath := filepath.Join(runtimeCallerPath, "../../", ".env.example")
+			envPath := filepath.Join(runtimeCallerPath, ".env")
+			envExampleFile, err := os.ReadFile(envExamplePath)
+			if err != nil {
+				log.Fatalf("读取 .env.example 失败: %v, 请通过原始 ENV 获取一份 ENV 样本后重试流程!", err)
+			}
+			err = os.WriteFile(envPath, envExampleFile, 0644)
+			if err != nil {
+				log.Fatalf("创建 .env 失败: %v", err)
+				return
+			}
+			// replace the JWT_SECRET_KEY with a random SHA256 hash
+			jwtSecretKey := utils.GenerateRandomSHA256()
+			appEncryptionKey := utils.GenerateRandomSHA256()
+			envExampleFile = bytes.ReplaceAll(envExampleFile, []byte("JWT_SECRET_KEY=replace-with-a-strong-secret"), []byte("JWT_SECRET_KEY="+jwtSecretKey))
+			envExampleFile = bytes.ReplaceAll(envExampleFile, []byte("APP_ENCRYPTION_KEY=replace-with-a-strong-secret"), []byte("APP_ENCRYPTION_KEY="+appEncryptionKey))
+			err = os.WriteFile(envPath, envExampleFile, 0644)
+			if err != nil {
+				log.Fatalf("替换 JWT_SECRET_KEY 失败: %v", err)
+				return
+			}
+			fmt.Println("已创建 .env 文件")
+			fmt.Println("请修改 .env 文件中的配置，然后重新运行初始化工具")
+			return
+		default:
+			log.Fatalf("加载 .env 失败: %v, 请检查 .env 文件是否存在且正确配置", err)
+			return
+		}
+	}
 
 	fmt.Println("🍋 Cyime 初始化向导")
 	fmt.Println("========================")
