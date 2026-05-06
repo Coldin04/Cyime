@@ -190,6 +190,63 @@ func TestGetFile_Document_AllowsSharedViewer(t *testing.T) {
 	}
 }
 
+func TestGetFiles_DocumentsSortByNameUsesTitleColumn(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	seedDocumentForWorkspace(t, db, ownerID, "Beta")
+	seedDocumentForWorkspace(t, db, ownerID, "Alpha")
+
+	response, err := GetFiles(ownerID, nil, 50, 0, "name", "asc", "documents")
+	if err != nil {
+		t.Fatalf("get document files: %v", err)
+	}
+	if len(response.Items) != 2 {
+		t.Fatalf("expected 2 documents, got %+v", response.Items)
+	}
+	if response.Items[0].Name != "Alpha" || response.Items[1].Name != "Beta" {
+		t.Fatalf("expected documents sorted by title, got %q then %q", response.Items[0].Name, response.Items[1].Name)
+	}
+}
+
+func TestGetFiles_FoldersWithoutParentReturnsOnlyRootFolders(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, "owner@example.com")
+
+	rootFolder := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: ownerID,
+		Name:        "Root",
+		CreatedBy:   ownerID,
+		UpdatedBy:   ownerID,
+	}
+	if err := db.Create(&rootFolder).Error; err != nil {
+		t.Fatalf("create root folder: %v", err)
+	}
+	childFolder := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: ownerID,
+		ParentID:    &rootFolder.ID,
+		Name:        "Child",
+		CreatedBy:   ownerID,
+		UpdatedBy:   ownerID,
+	}
+	if err := db.Create(&childFolder).Error; err != nil {
+		t.Fatalf("create child folder: %v", err)
+	}
+
+	response, err := GetFiles(ownerID, nil, 50, 0, "name", "asc", "folders")
+	if err != nil {
+		t.Fatalf("get folder files: %v", err)
+	}
+	if len(response.Items) != 1 {
+		t.Fatalf("expected only root folder, got %+v", response.Items)
+	}
+	if response.Items[0].ID != rootFolder.ID {
+		t.Fatalf("expected root folder %s, got %s", rootFolder.ID, response.Items[0].ID)
+	}
+}
+
 func TestMoveDocument_DeniesCrossUserAccess(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
@@ -761,6 +818,82 @@ func TestRestoreTrashedItems_RejectsWhenQuotaAlreadyExceeded(t *testing.T) {
 
 	var document models.Document
 	if err := db.Unscoped().First(&document, "id = ?", docID).Error; err != nil {
+		t.Fatalf("load trashed document: %v", err)
+	}
+	if !document.DeletedAt.Valid {
+		t.Fatal("expected document to remain in trash")
+	}
+}
+
+func TestRestoreTrashedItems_RejectsRootFolderNameConflict(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	seedVerifiedUser(t, db, ownerID, "owner@example.com")
+
+	trashedFolder := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: ownerID,
+		Name:        "Projects",
+		CreatedBy:   ownerID,
+		UpdatedBy:   ownerID,
+	}
+	if err := db.Create(&trashedFolder).Error; err != nil {
+		t.Fatalf("create trashed folder: %v", err)
+	}
+	if err := db.Delete(&models.Folder{}, "id = ?", trashedFolder.ID).Error; err != nil {
+		t.Fatalf("trash folder: %v", err)
+	}
+
+	activeFolder := models.Folder{
+		ID:          uuid.New(),
+		OwnerUserID: ownerID,
+		Name:        "Projects",
+		CreatedBy:   ownerID,
+		UpdatedBy:   ownerID,
+	}
+	if err := db.Create(&activeFolder).Error; err != nil {
+		t.Fatalf("create active conflicting folder: %v", err)
+	}
+
+	response, err := RestoreTrashedItems(ownerID, []ItemToRestore{{ID: trashedFolder.ID, Type: "folder"}})
+	if err != nil {
+		t.Fatalf("restore trashed folder: %v", err)
+	}
+	if response.RestoredCount != 0 || len(response.FailedItems) != 1 {
+		t.Fatalf("expected one failed restore, got %+v", response)
+	}
+
+	var folder models.Folder
+	if err := db.Unscoped().First(&folder, "id = ?", trashedFolder.ID).Error; err != nil {
+		t.Fatalf("load trashed folder: %v", err)
+	}
+	if !folder.DeletedAt.Valid {
+		t.Fatal("expected folder to remain in trash")
+	}
+}
+
+func TestRestoreTrashedItems_RejectsRootDocumentTitleConflict(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	trashedDocID := seedDocumentForWorkspace(t, db, ownerID, "Release Notes")
+	if err := db.Delete(&models.Document{}, "id = ?", trashedDocID).Error; err != nil {
+		t.Fatalf("trash document: %v", err)
+	}
+	if err := db.Delete(&models.DocumentBody{}, "document_id = ?", trashedDocID).Error; err != nil {
+		t.Fatalf("trash document body: %v", err)
+	}
+	seedDocumentForWorkspace(t, db, ownerID, "Release Notes")
+
+	response, err := RestoreTrashedItems(ownerID, []ItemToRestore{{ID: trashedDocID, Type: "document"}})
+	if err != nil {
+		t.Fatalf("restore trashed document: %v", err)
+	}
+	if response.RestoredCount != 0 || len(response.FailedItems) != 1 {
+		t.Fatalf("expected one failed restore, got %+v", response)
+	}
+
+	var document models.Document
+	if err := db.Unscoped().First(&document, "id = ?", trashedDocID).Error; err != nil {
 		t.Fatalf("load trashed document: %v", err)
 	}
 	if !document.DeletedAt.Valid {

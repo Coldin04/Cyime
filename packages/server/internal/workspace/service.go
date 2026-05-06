@@ -1193,6 +1193,34 @@ func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*Outgoing
 	}, nil
 }
 
+func applyFolderParentScope(query *gorm.DB, parentID *uuid.UUID) *gorm.DB {
+	if parentID == nil {
+		return query.Where("parent_id IS NULL")
+	}
+	return query.Where("parent_id = ?", *parentID)
+}
+
+func applyDocumentFolderScope(query *gorm.DB, folderID *uuid.UUID) *gorm.DB {
+	if folderID == nil {
+		return query.Where("folder_id IS NULL")
+	}
+	return query.Where("folder_id = ?", *folderID)
+}
+
+func normalizeFileListSortColumn(sortBy string, fileType string) string {
+	switch sortBy {
+	case "name", "title":
+		if fileType == "document" {
+			return "title"
+		}
+		return "name"
+	case "created_at", "updated_at":
+		return sortBy
+	default:
+		return "updated_at"
+	}
+}
+
 // GetFiles retrieves a list of files (folders and documents) for a given user and parent folder
 func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, order, filterType string) (*FileListResponse, error) {
 	// Default values
@@ -1209,22 +1237,6 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		filterType = "all"
 	}
 
-	// Validate sort_by field
-	validSorts := map[string]bool{
-		"name": true, "title": true, "created_at": true, "updated_at": true,
-	}
-	if !validSorts[sortBy] {
-		sortBy = "updated_at"
-	}
-	validSortFields := map[string]bool{
-		"name":       true,
-		"updated_at": true,
-		"created_at": true,
-	}
-	if !validSortFields[sortBy] {
-		sortBy = "updated_at"
-	}
-
 	// Validate order
 	if order != "asc" && order != "desc" {
 		order = "desc"
@@ -1237,14 +1249,15 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 	if filterType == "folders" {
 		// Only folders
 		query := database.DB.Model(&models.Folder{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
-		if parentID != nil {
-			query = query.Where("parent_id = ?", parentID)
+		query = applyFolderParentScope(query, parentID)
+
+		if err := query.Count(&total).Error; err != nil {
+			return nil, err
 		}
 
-		query.Count(&total)
-
 		var folders []models.Folder
-		if err := query.Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&folders).Error; err != nil {
+		folderSortColumn := normalizeFileListSortColumn(sortBy, "folder")
+		if err := query.Order(folderSortColumn + " " + order).Limit(limit).Offset(offset).Find(&folders).Error; err != nil {
 			return nil, err
 		}
 
@@ -1255,16 +1268,15 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 	} else if filterType == "documents" {
 		// Only documents
 		query := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
-		if parentID != nil {
-			query = query.Where("folder_id = ?", parentID)
-		} else {
-			query = query.Where("folder_id IS NULL")
+		query = applyDocumentFolderScope(query, parentID)
+
+		if err := query.Count(&total).Error; err != nil {
+			return nil, err
 		}
 
-		query.Count(&total)
-
 		var documents []models.Document
-		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "manual_excerpt", "document_type", "created_at", "updated_at", "created_by").Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
+		documentSortColumn := normalizeFileListSortColumn(sortBy, "document")
+		if err := query.Select("id", "owner_user_id", "folder_id", "title", "excerpt", "manual_excerpt", "document_type", "created_at", "updated_at", "created_by").Order(documentSortColumn + " " + order).Limit(limit).Offset(offset).Find(&documents).Error; err != nil {
 			return nil, err
 		}
 
@@ -1278,26 +1290,25 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		var folderCount, documentCount int64
 
 		folderQuery := database.DB.Model(&models.Folder{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
-		if parentID != nil {
-			folderQuery = folderQuery.Where("parent_id = ?", parentID)
-		} else {
-			folderQuery = folderQuery.Where("parent_id IS NULL")
+		folderQuery = applyFolderParentScope(folderQuery, parentID)
+		if err := folderQuery.Count(&folderCount).Error; err != nil {
+			return nil, err
 		}
-		folderQuery.Count(&folderCount)
 
 		documentQuery := database.DB.Model(&models.Document{}).Where("owner_user_id = ? AND deleted_at IS NULL", userID)
-		if parentID != nil {
-			documentQuery = documentQuery.Where("folder_id = ?", parentID)
-		} else {
-			documentQuery = documentQuery.Where("folder_id IS NULL")
+		documentQuery = applyDocumentFolderScope(documentQuery, parentID)
+		if err := documentQuery.Count(&documentCount).Error; err != nil {
+			return nil, err
 		}
-		documentQuery.Count(&documentCount)
 
 		total = folderCount + documentCount
 
 		// Fetch folders
 		var folders []models.Folder
-		folderQuery.Order(sortBy + " " + order).Limit(limit).Offset(offset).Find(&folders)
+		folderSortColumn := normalizeFileListSortColumn(sortBy, "folder")
+		if err := folderQuery.Order(folderSortColumn + " " + order).Limit(limit).Offset(offset).Find(&folders).Error; err != nil {
+			return nil, err
+		}
 
 		for _, f := range folders {
 			items = append(items, folderToFileItem(f))
@@ -1307,7 +1318,10 @@ func GetFiles(userID uuid.UUID, parentID *uuid.UUID, limit, offset int, sortBy, 
 		remainingLimit := limit - len(folders)
 		if remainingLimit > 0 {
 			var documents []models.Document
-			documentQuery.Order(sortBy + " " + order).Limit(remainingLimit).Offset(max(0, offset-len(folders))).Find(&documents)
+			documentSortColumn := normalizeFileListSortColumn(sortBy, "document")
+			if err := documentQuery.Order(documentSortColumn + " " + order).Limit(remainingLimit).Offset(max(0, offset-len(folders))).Find(&documents).Error; err != nil {
+				return nil, err
+			}
 
 			for _, m := range documents {
 				items = append(items, documentToFileItem(m, ""))
@@ -2481,7 +2495,12 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 
 				// Check for naming conflict in parent directory
 				var conflictCount int64
-				tx.Model(&models.Folder{}).Where("parent_id = ? AND name = ? AND owner_user_id = ? AND deleted_at IS NULL", folder.ParentID, folder.Name, userID).Count(&conflictCount)
+				conflictQuery := tx.Model(&models.Folder{}).
+					Where("name = ? AND owner_user_id = ? AND deleted_at IS NULL", folder.Name, userID)
+				conflictQuery = applyFolderParentScope(conflictQuery, folder.ParentID)
+				if err := conflictQuery.Count(&conflictCount).Error; err != nil {
+					return err
+				}
 				if conflictCount > 0 {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "恢复失败，目标位置已存在同名文件夹。"})
 					continue
@@ -2506,7 +2525,12 @@ func RestoreTrashedItems(userID uuid.UUID, itemsToRestore []ItemToRestore) (*Res
 
 				// Check for naming conflict
 				var conflictCount int64
-				tx.Model(&models.Document{}).Where("folder_id = ? AND title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.FolderID, document.Title, document.OwnerUserID).Count(&conflictCount)
+				conflictQuery := tx.Model(&models.Document{}).
+					Where("title = ? AND owner_user_id = ? AND deleted_at IS NULL", document.Title, document.OwnerUserID)
+				conflictQuery = applyDocumentFolderScope(conflictQuery, document.FolderID)
+				if err := conflictQuery.Count(&conflictCount).Error; err != nil {
+					return err
+				}
 				if conflictCount > 0 {
 					failedItems = append(failedItems, FailedItem{ID: item.ID, Type: item.Type, Reason: "恢复失败，目标位置已存在同名文档。"})
 					continue
