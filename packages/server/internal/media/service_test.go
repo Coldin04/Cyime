@@ -884,3 +884,47 @@ func TestListOwnedAssets_PaginatesLikeWorkspaceList(t *testing.T) {
 		t.Fatalf("expected hasMore=false at offset 1 limit 2, got true")
 	}
 }
+
+func TestGetAccessibleAsset_DeniesSharedPermissionWhenCollaborationDisabled(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedOwnedDocument(t, db, ownerID)
+	seedDocumentPermission(t, db, docID, viewerID, ownerID, "viewer")
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	blob := seedBlob(t, db, "owner/disabled-collab.png", "image/png", 17, "hash-disabled-collab")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "disabled-collab.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 1,
+		CreatedBy:      ownerID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	if err := db.Create(&models.DocumentAssetRef{
+		ID:          uuid.New(),
+		DocumentID:  docID,
+		AssetID:     asset.ID,
+		OwnerUserID: ownerID,
+		RefType:     mediaRefTypeEditorContent,
+	}).Error; err != nil {
+		t.Fatalf("create ref: %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(viewerID, asset.ID); !errors.Is(err, ErrAssetNotFoundOrForbidden) {
+		t.Fatalf("expected shared viewer access to be denied when collaboration is disabled, got %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(ownerID, asset.ID); err != nil {
+		t.Fatalf("expected owner access to remain allowed when collaboration is disabled: %v", err)
+	}
+}
