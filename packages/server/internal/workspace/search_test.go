@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -176,6 +177,33 @@ func TestSearchWorkspace_MultiKeywordMediaMatchesAcrossTerms(t *testing.T) {
 	}
 	if len(result.Media) != 1 {
 		t.Fatalf("expected multi-keyword media hit, got %+v", result.Media)
+	}
+}
+
+func TestSearchWorkspace_LimitsLongMultiKeywordQueries(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	_ = seedDocumentForWorkspace(t, db, userID, "普通标题")
+
+	terms := make([]string, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		terms = append(terms, fmt.Sprintf("term%04d", i))
+	}
+	query := strings.Join(terms, " ")
+
+	if got := tokenizeSearchTerms(query); len(got) != maxSearchTerms {
+		t.Fatalf("expected tokenized terms to be capped at %d, got %d", maxSearchTerms, len(got))
+	}
+	if got := len([]rune(normalizeSearchQuery(query))); got > maxSearchQueryRunes {
+		t.Fatalf("expected normalized query to be capped at %d runes, got %d", maxSearchQueryRunes, got)
+	}
+
+	result, err := SearchWorkspace(userID, query, 5)
+	if err != nil {
+		t.Fatalf("search workspace with many terms should not build an oversized SQL expression: %v", err)
+	}
+	if result.Query != normalizeSearchQuery(query) {
+		t.Fatalf("expected returned query to be normalized, got %q", result.Query)
 	}
 }
 
