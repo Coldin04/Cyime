@@ -144,6 +144,9 @@ func RoleAllowsAction(role, action string) bool {
 func AllowedRolesForAction(action string) []string {
 	switch action {
 	case ActionRead:
+		if !config.GetCollaborationEnabled() {
+			return []string{RoleOwner}
+		}
 		return []string{RoleViewer, RoleEditor, RoleCollaborator, RoleOwner}
 	case ActionEdit:
 		if !config.GetCollaborationEnabled() {
