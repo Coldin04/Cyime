@@ -53,6 +53,9 @@ importers:
       '@tiptap/extension-table-row':
         specifier: ^3.20.4
         version: 3.20.4(@tiptap/extension-table@3.20.4(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))(@tiptap/pm@3.21.0))
+      '@tiptap/pm':
+        specifier: ^3.20.4
+        version: 3.21.0
       '@tiptap/starter-kit':
         specifier: ^3.20.4
         version: 3.21.0
