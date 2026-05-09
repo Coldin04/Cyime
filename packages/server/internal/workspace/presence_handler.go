@@ -31,11 +31,8 @@ type presenceEntry struct {
 }
 
 var (
-	presenceMu        sync.Mutex
-	presenceStore     = map[uuid.UUID]map[string]presenceEntry{}
-	presenceAuthMu    sync.Mutex
-	presenceAuthTTL   = 40 * time.Second
-	presenceAuthCache = map[uuid.UUID]map[uuid.UUID]time.Time{}
+	presenceMu    sync.Mutex
+	presenceStore = map[uuid.UUID]map[string]presenceEntry{}
 )
 
 func normalizeSessionID(raw string) string {
@@ -102,44 +99,9 @@ func readPresence(documentID uuid.UUID) (int, int) {
 	return countPresenceLocked(documentID)
 }
 
-func cleanupPresenceAuthLocked(now time.Time) {
-	for documentID, users := range presenceAuthCache {
-		for userID, expiry := range users {
-			if now.After(expiry) {
-				delete(users, userID)
-			}
-		}
-		if len(users) == 0 {
-			delete(presenceAuthCache, documentID)
-		}
-	}
-}
-
 func canReadDocumentForPresence(userID, documentID uuid.UUID) error {
-	now := time.Now()
-
-	presenceAuthMu.Lock()
-	documentCache := presenceAuthCache[documentID]
-	if expiry, ok := documentCache[userID]; ok && now.Before(expiry) {
-		presenceAuthMu.Unlock()
-		return nil
-	}
-	presenceAuthMu.Unlock()
-
-	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
-		return err
-	}
-
-	presenceAuthMu.Lock()
-	cleanupPresenceAuthLocked(now)
-	documentCache = presenceAuthCache[documentID]
-	if documentCache == nil {
-		documentCache = map[uuid.UUID]time.Time{}
-		presenceAuthCache[documentID] = documentCache
-	}
-	documentCache[userID] = now.Add(presenceAuthTTL)
-	presenceAuthMu.Unlock()
-	return nil
+	_, err := acl.CanReadDocument(database.DB, userID, documentID)
+	return err
 }
 
 func parseUserAndDocumentID(c *fiber.Ctx) (uuid.UUID, uuid.UUID, error) {
