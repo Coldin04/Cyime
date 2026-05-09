@@ -785,6 +785,7 @@ func fetchAccessibleDocumentSearchRows(userID uuid.UUID, terms []string, limit i
 		documentQuery = documentQuery.Where("d.owner_user_id = ?", userID)
 		selectRole = "'' AS my_role"
 	}
+	contentJSONSelect := "COALESCE(bodies.content_json, '') AS content_json"
 	if applyFilter {
 		documentQuery = applyMultiKeywordLike(documentQuery, terms, []string{
 			"d.title",
@@ -793,6 +794,10 @@ func fetchAccessibleDocumentSearchRows(userID uuid.UUID, terms []string, limit i
 			"bodies.plain_text",
 			"bodies.content_json",
 		})
+	} else {
+		// Unfiltered fuzzy expansion should only rank lightweight indexed text.
+		// Avoid materializing full document JSON for every recent candidate.
+		contentJSONSelect = "'' AS content_json"
 	}
 
 	err := documentQuery.
@@ -805,7 +810,7 @@ func fetchAccessibleDocumentSearchRows(userID uuid.UUID, terms []string, limit i
 			"d.excerpt",
 			"d.manual_excerpt",
 			"COALESCE(bodies.plain_text, '') AS plain_text",
-			"COALESCE(bodies.content_json, '') AS content_json",
+			contentJSONSelect,
 			"d.document_type",
 			"d.preferred_image_target_id",
 			"d.public_access",
