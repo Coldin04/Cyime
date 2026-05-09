@@ -454,6 +454,11 @@ func GetSharedDocumentSummary(userID uuid.UUID) (*SharedDocumentSummaryResponse,
 	}
 }
 
+const (
+	maxSearchQueryRunes = 256
+	maxSearchTerms      = 8
+)
+
 func normalizeSearchLimit(limit int) int {
 	if limit <= 0 {
 		return 5
@@ -464,8 +469,17 @@ func normalizeSearchLimit(limit int) int {
 	return limit
 }
 
-func tokenizeSearchTerms(query string) []string {
+func normalizeSearchQuery(query string) string {
 	trimmed := strings.TrimSpace(query)
+	runes := []rune(trimmed)
+	if len(runes) <= maxSearchQueryRunes {
+		return trimmed
+	}
+	return strings.TrimSpace(string(runes[:maxSearchQueryRunes]))
+}
+
+func tokenizeSearchTerms(query string) []string {
+	trimmed := normalizeSearchQuery(query)
 	if trimmed == "" {
 		return nil
 	}
@@ -475,8 +489,8 @@ func tokenizeSearchTerms(query string) []string {
 		rawTerms = []string{trimmed}
 	}
 
-	seen := make(map[string]struct{}, len(rawTerms))
-	terms := make([]string, 0, len(rawTerms))
+	seen := make(map[string]struct{}, min(len(rawTerms), maxSearchTerms))
+	terms := make([]string, 0, min(len(rawTerms), maxSearchTerms))
 	for _, term := range rawTerms {
 		normalized := strings.TrimSpace(term)
 		if normalized == "" {
@@ -488,6 +502,9 @@ func tokenizeSearchTerms(query string) []string {
 		}
 		seen[key] = struct{}{}
 		terms = append(terms, normalized)
+		if len(terms) >= maxSearchTerms {
+			break
+		}
 	}
 	return terms
 }
@@ -878,7 +895,7 @@ func applyMultiKeywordLike(query *gorm.DB, terms []string, fields []string) *gor
 }
 
 func SearchWorkspace(userID uuid.UUID, rawQuery string, limit int) (*SearchResponse, error) {
-	query := strings.TrimSpace(rawQuery)
+	query := normalizeSearchQuery(rawQuery)
 	limit = normalizeSearchLimit(limit)
 
 	result := &SearchResponse{
