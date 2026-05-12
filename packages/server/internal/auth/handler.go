@@ -368,6 +368,9 @@ func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile
 	}
 
 	normalizedEmail := normalizeEmail(userProfile.Email)
+	if !userProfile.EmailVerified {
+		normalizedEmail = nil
+	}
 	var existingByEmail models.User
 	if normalizedEmail != nil {
 		queryErr := tx.Where("email = ?", *normalizedEmail).First(&existingByEmail).Error
@@ -579,13 +582,9 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			if userName == "" {
 				userName = ghUser.Login
 			}
-			userEmail := strings.TrimSpace(ghUser.Email)
-			verifiedEmail, emailVerified, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
+			userEmail, emailVerified, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
 			if err != nil {
 				return nil, err
-			}
-			if verifiedEmail != "" {
-				userEmail = verifiedEmail
 			}
 			userProfile = UserProfile{
 				Subject:       fmt.Sprintf("%d", ghUser.ID),
@@ -607,12 +606,9 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			}
 
 			userProfile = UserProfile{
-				Subject: strings.TrimSpace(googleUser.ID),
-				Email:   strings.TrimSpace(googleUser.Email),
-				// Preserve the existing trust contract for Google OAuth userinfo:
-				// once Google returns an email address for the account, treat it as
-				// trusted rather than downgrading based on this endpoint's flag.
-				EmailVerified: strings.TrimSpace(googleUser.Email) != "",
+				Subject:       strings.TrimSpace(googleUser.ID),
+				Email:         strings.TrimSpace(googleUser.Email),
+				EmailVerified: googleUser.VerifiedEmail,
 				Name:          strings.TrimSpace(googleUser.Name),
 				Picture:       strings.TrimSpace(googleUser.Picture),
 			}
@@ -649,26 +645,17 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 		return "", false, fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
 	}
 
-	anyEmail := ""
 	for _, item := range emails {
 		email := strings.TrimSpace(item.Email)
-		if email == "" {
-			continue
-		}
-		if anyEmail == "" {
-			anyEmail = email
-		}
-		if item.Primary && item.Verified {
+		if item.Primary && item.Verified && email != "" {
 			return email, true, nil
 		}
 	}
 	for _, item := range emails {
-		if item.Verified && strings.TrimSpace(item.Email) != "" {
-			return strings.TrimSpace(item.Email), true, nil
+		email := strings.TrimSpace(item.Email)
+		if item.Verified && email != "" {
+			return email, true, nil
 		}
-	}
-	if anyEmail != "" {
-		return anyEmail, false, nil
 	}
 
 	return "", false, nil
