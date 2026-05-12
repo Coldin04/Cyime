@@ -1,12 +1,15 @@
 package database
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/config"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -124,13 +127,26 @@ func Connect() {
 		}
 	}
 
-	// Auto-migrate the schema
+	// Auto-migrate the identity tables first so legacy refresh tokens can be
+	// backfilled with session rows before UserRefreshToken's non-null session_id
+	// column is applied. SQLite cannot add a NOT NULL column without a default to
+	// a non-empty table, so doing this in one AutoMigrate call bricks upgrades.
 	err = DB.AutoMigrate(
 		&models.User{},
 		&models.UserImageBedConfig{},
 		&models.AuthProvider{},
 		&models.UserIdentityProvider{},
 		&models.UserSession{},
+	)
+	if err != nil {
+		log.Fatalf("Failed to auto-migrate identity tables: %v", err)
+	}
+
+	if err := backfillLegacyRefreshTokenSessions(DB); err != nil {
+		log.Fatalf("Failed to backfill legacy refresh token sessions: %v", err)
+	}
+
+	err = DB.AutoMigrate(
 		&models.UserRefreshToken{},
 		&models.Folder{},
 		&models.Document{},
@@ -150,4 +166,96 @@ func Connect() {
 	}
 
 	log.Println("Database migrated.")
+}
+
+type legacyRefreshTokenSessionBackfill struct {
+	ID        string
+	UserID    string
+	CreatedAt time.Time
+}
+
+// backfillLegacyRefreshTokenSessions upgrades databases that predate
+// UserSession. The old user_refresh_tokens table had no session_id column; on
+// SQLite, asking AutoMigrate to add the new non-null column to a populated table
+// fails before the application can start. Add the column as nullable first,
+// create one session per existing refresh token, and then let AutoMigrate finish
+// creating indexes and constraints for the current model.
+func backfillLegacyRefreshTokenSessions(db *gorm.DB) error {
+	if db.Dialector.Name() != "sqlite" || !db.Migrator().HasTable(&models.UserRefreshToken{}) {
+		return nil
+	}
+
+	hasSessionID := db.Migrator().HasColumn(&models.UserRefreshToken{}, "SessionID")
+	if !hasSessionID {
+		var tokenCount int64
+		if err := db.Table("user_refresh_tokens").Count(&tokenCount).Error; err != nil {
+			return err
+		}
+		if tokenCount == 0 {
+			return nil
+		}
+
+		if err := db.Exec("ALTER TABLE user_refresh_tokens ADD COLUMN session_id uuid").Error; err != nil {
+			return err
+		}
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var tokens []legacyRefreshTokenSessionBackfill
+		if err := tx.Table("user_refresh_tokens").
+			Select("id, user_id, created_at").
+			Where("session_id IS NULL OR session_id = ?", "").
+			Find(&tokens).Error; err != nil {
+			return err
+		}
+
+		for _, token := range tokens {
+			var userCount int64
+			if err := tx.Model(&models.User{}).Where("id = ?", token.UserID).Count(&userCount).Error; err != nil {
+				return err
+			}
+			if userCount == 0 {
+				log.Printf("Deleting legacy refresh token %s for missing user %s during session backfill", token.ID, token.UserID)
+				if err := tx.Exec("DELETE FROM user_refresh_tokens WHERE id = ?", token.ID).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			userID, err := uuid.Parse(token.UserID)
+			if err != nil {
+				log.Printf("Deleting legacy refresh token %s with invalid user id %q during session backfill", token.ID, token.UserID)
+				if err := tx.Exec("DELETE FROM user_refresh_tokens WHERE id = ?", token.ID).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			lastSeenAt := token.CreatedAt
+			if lastSeenAt.IsZero() {
+				lastSeenAt = time.Now()
+			}
+			session := models.UserSession{
+				UserID:      userID,
+				UserAgent:   "",
+				DeviceLabel: "Legacy session",
+				LastSeenAt:  lastSeenAt,
+			}
+			if err := tx.Create(&session).Error; err != nil {
+				return err
+			}
+			if err := tx.Table("user_refresh_tokens").Where("id = ?", token.ID).Update("session_id", session.ID).Error; err != nil {
+				return err
+			}
+		}
+
+		var missing int64
+		if err := tx.Table("user_refresh_tokens").Where("session_id IS NULL OR session_id = ?", "").Count(&missing).Error; err != nil {
+			return err
+		}
+		if missing != 0 {
+			return errors.New("legacy refresh token session backfill left tokens without session_id")
+		}
+		return nil
+	})
 }
