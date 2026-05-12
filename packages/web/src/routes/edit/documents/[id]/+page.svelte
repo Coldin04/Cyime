@@ -76,6 +76,8 @@
 	let hasUnsavedChanges = $state(false);
 	let isLoading = $state(true);
 	let collaboration = $state<ProviderInstance | null>(null);
+	let collaborationDocumentId = $state<string | null>(null);
+	let documentLoadSequence = 0;
 	let collaborationError = $state<string | null>(null);
 	let collaborationIndicator = $state<
 		{ kind: 'single' | 'single-offline' | 'multi-pending' | 'multi'; label: string } | null
@@ -127,6 +129,9 @@
 	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
 	const documentId = $derived(pageSignal.params?.id);
 	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
+	const activeCollaboration = $derived(
+		collaborationDocumentId === documentId ? collaboration : null
+	);
 	let collaborationSaveWaiters: SaveWaiter[] = [];
 	let editorContentOverrideWaiter: EditorOverrideWaiter | null = null;
 	let nextEditorContentOverrideToken = 0;
@@ -134,7 +139,9 @@
 		if (!documentId || isLoading) {
 			return 'none';
 		}
-		return collaborationEnabled && collaboration?.provider && isYjsConnected ? 'collaboration' : 'local';
+		return collaborationEnabled && activeCollaboration?.provider && isYjsConnected
+			? 'collaboration'
+			: 'local';
 	});
 	const availableImageTargets = $derived(getDocumentImageTargetOptions(imageBedConfigs));
 	const exportImageTargetOptions = $derived(
@@ -546,7 +553,7 @@
 			isLocalChange: true
 		}
 	) {
-		const isActiveCollaborationChange = meta.viaCollaboration && isYjsConnected;
+		const isActiveCollaborationChange = meta.viaCollaboration && Boolean(activeCollaboration) && isYjsConnected;
 		if (isLoading) return;
 		if (serializeComparableContent(content) === serializeComparableContent(newContent)) {
 			return;
@@ -922,15 +929,18 @@
 		const now = Date.now();
 		if (
 			isInitializingCollaboration ||
-			(collaboration && !collaborationError) ||
+			(collaboration && collaborationDocumentId === nextDocumentId && !collaborationError) ||
 			(now - lastCollaborationAttemptAt < 10000 && reason !== 'presence')
 		) {
 			return;
 		}
 
-		if (collaborationError && collaboration) {
+		if (collaboration && collaborationDocumentId !== nextDocumentId) {
+			resetCollaborationForDocumentChange(nextDocumentId);
+		} else if (collaborationError && collaboration) {
 			yjsProvider.destroyProvider(nextDocumentId);
 			collaboration = null;
+			collaborationDocumentId = null;
 			clearCollaborationListeners();
 		}
 
@@ -938,6 +948,11 @@
 		lastCollaborationAttemptAt = now;
 		try {
 			const collaborationInstance = await initializeCollaboration(nextDocumentId);
+			if (documentId !== nextDocumentId) {
+				yjsProvider.destroyProvider(nextDocumentId);
+				return;
+			}
+
 			if (collaborationInstance.error || !collaborationInstance.provider) {
 				collaboration = null;
 				collaborationError = collaborationInstance.error || m.editor_collaboration_connect_failed();
@@ -948,11 +963,13 @@
 			}
 
 			collaboration = collaborationInstance;
+			collaborationDocumentId = nextDocumentId;
 			collaborationError = null;
 			attachCollaborationListeners(collaborationInstance);
 		} catch (collaborationInitError) {
 			console.error('[Collaboration] Failed to initialize realtime collaboration:', collaborationInitError);
 			collaboration = null;
+			collaborationDocumentId = null;
 			collaborationError =
 				collaborationInitError instanceof Error
 					? collaborationInitError.message
@@ -969,6 +986,20 @@
 		clearCollaborationContentSnapshotTimer();
 		detachCollaborationListeners?.();
 		detachCollaborationListeners = null;
+	}
+
+	function resetCollaborationForDocumentChange(nextDocumentId: string) {
+		const previousDocumentId = collaborationDocumentId;
+
+		clearCollaborationListeners();
+		if (previousDocumentId && previousDocumentId !== nextDocumentId) {
+			yjsProvider.destroyProvider(previousDocumentId);
+		}
+
+		collaboration = null;
+		collaborationDocumentId = null;
+		collaborationError = null;
+		isYjsConnected = false;
 	}
 
 	function attachCollaborationListeners(instance: ProviderInstance) {
@@ -1332,34 +1363,55 @@
 	// Load document content when ID becomes available
 	$effect(() => {
 		if (documentId && !authSignal.loading && !realtimeConfigSignal.loading) {
+			const targetDocumentId = documentId;
+			const loadSequence = ++documentLoadSequence;
 			isLoading = true;
+			settleCollaborationSaveWaiters(false);
+			resetOnlineMembers();
+			clearPresenceSocket();
+			resetCollaborationForDocumentChange(targetDocumentId);
+
+			const isCurrentLoad = () => loadSequence === documentLoadSequence && documentId === targetDocumentId;
+
 			const loadContent = async () => {
 				try {
-					console.log('[Load] Loading document for ID:', documentId);
+					console.log('[Load] Loading document for ID:', targetDocumentId);
 					// Load document details (for title) and content in parallel
 					const [details, data, configs, memberResponse] = await Promise.all([
-						getDocumentDetails(documentId),
-						getDocumentContent(documentId),
+						getDocumentDetails(targetDocumentId),
+						getDocumentContent(targetDocumentId),
 						getImageBedConfigs().catch((error) => {
 							console.error('[Load] Failed to load image bed configs:', error);
 							return [] as ImageBedConfig[];
 						}),
-						listDocumentMembers(documentId).catch(() => ({ documentId, members: [] as ShareDocumentMember[] }))
+						listDocumentMembers(targetDocumentId).catch(() => ({
+							documentId: targetDocumentId,
+							members: [] as ShareDocumentMember[]
+						}))
 					]);
 
+					if (!isCurrentLoad()) {
+						return;
+					}
+
 					if (details.myRole === 'viewer') {
-						await goto(`/view/documents/${documentId}`);
+						await goto(`/view/documents/${targetDocumentId}`);
 						return;
 					}
 
 					if (!collaborationEnabled && details.myRole !== 'owner') {
-						await goto(`/view/documents/${documentId}`);
+						await goto(`/view/documents/${targetDocumentId}`);
 						return;
 					}
 
 					const loadedContent = data.contentJson ?? EMPTY_DOC;
+					const hydratedContent = await refreshSignedImageSources(loadedContent);
+					if (!isCurrentLoad()) {
+						return;
+					}
+
 					imageBedConfigs = configs;
-					content = await refreshSignedImageSources(loadedContent);
+					content = hydratedContent;
 					// Use the title from the API
 					title = details.title ?? '';
 					manualExcerpt = details.manualExcerpt ?? '';
@@ -1367,7 +1419,7 @@
 					myRole = details.myRole ?? 'owner';
 					documentMembers = memberResponse.members;
 					publicAccess = details.publicAccess ?? 'private';
-					publicUrl = details.publicUrl ?? `/view/documents/${documentId}`;
+					publicUrl = details.publicUrl ?? `/view/documents/${targetDocumentId}`;
 					documentType = details.documentType ?? 'rich_text';
 					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
 					hasUnsavedChanges = false;
@@ -1383,42 +1435,47 @@
 					persistedCollaborationChangeSeq = 0;
 					hasManualSaveRequestInFlight = false;
 					isSaving = false;
-					settleCollaborationSaveWaiters(false);
-					resetOnlineMembers();
-					clearPresenceSocket();
-					clearCollaborationListeners();
-					if (documentId) {
-						yjsProvider.destroyProvider(documentId);
-						}
-						collaboration = null;
-						updateCollaborationIndicator();
-						console.log('[Load] Title loaded:', title);
-						isLoading = false;
+					updateCollaborationIndicator();
+					console.log('[Load] Title loaded:', title);
+					isLoading = false;
 
-						if (collaborationEnabled) {
-							void (async () => {
-								try {
-									presenceCount = await fetchCollaborationPresence(documentId);
-									updateCollaborationIndicator();
-									await connectPresenceSocket(documentId);
-									// Collaboration bootstrap stays in the background on purpose:
-									// local content must render first so a down realtime service
-									// degrades to single-user editing instead of blanking the editor.
-									await startCollaboration(documentId, 'presence');
-								} catch (presenceError) {
-									console.error('[Collaboration] Failed to fetch presence:', presenceError);
-									presenceCount = 0;
-									presenceConnected = false;
-									hasAttemptedPresence = true;
-									collaborationError = 'presence-disconnected';
-									isYjsConnected = false;
-									updateCollaborationIndicator();
+					if (collaborationEnabled) {
+						void (async () => {
+							try {
+								presenceCount = await fetchCollaborationPresence(targetDocumentId);
+								if (!isCurrentLoad()) {
+									return;
 								}
-							})();
-						}
+								updateCollaborationIndicator();
+								await connectPresenceSocket(targetDocumentId);
+								if (!isCurrentLoad()) {
+									return;
+								}
+								// Collaboration bootstrap stays in the background on purpose:
+								// local content must render first so a down realtime service
+								// degrades to single-user editing instead of blanking the editor.
+								await startCollaboration(targetDocumentId, 'presence');
+							} catch (presenceError) {
+								if (!isCurrentLoad()) {
+									return;
+								}
+								console.error('[Collaboration] Failed to fetch presence:', presenceError);
+								presenceCount = 0;
+								presenceConnected = false;
+								hasAttemptedPresence = true;
+								collaborationError = 'presence-disconnected';
+								isYjsConnected = false;
+								updateCollaborationIndicator();
+							}
+						})();
+					}
 				} catch (error) {
+					if (!isCurrentLoad()) {
+						return;
+					}
 					console.error('[Load] Failed to load document:', error);
 					collaboration = null;
+					collaborationDocumentId = null;
 					collaborationIndicator = null;
 					isYjsConnected = false;
 					clearPresenceSocket();
@@ -1430,7 +1487,7 @@
 					);
 					goto('/workspace');
 				} finally {
-					if (isLoading) {
+					if (isCurrentLoad() && isLoading) {
 						isLoading = false;
 					}
 				}
@@ -1451,7 +1508,10 @@
 		settleCollaborationSaveWaiters(false);
 		clearPresenceSocket();
 		clearCollaborationListeners();
-		if (documentId) {
+		if (collaborationDocumentId) {
+			yjsProvider.destroyProvider(collaborationDocumentId);
+		}
+		if (documentId && documentId !== collaborationDocumentId) {
 			yjsProvider.destroyProvider(documentId);
 		}
 	});
@@ -1565,7 +1625,7 @@
 						currentImageTargetId={preferredImageTargetId}
 						currentImageTargetLabel={currentImageTargetLabel}
 						imageTargetOptions={availableImageTargets}
-						{collaboration}
+						collaboration={activeCollaboration}
 						{isUpdatingImageTarget}
 						{isSaving}
 						{hasUnsavedChanges}
