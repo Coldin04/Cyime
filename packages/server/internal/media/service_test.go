@@ -39,10 +39,15 @@ func setupMediaTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedBlob(t *testing.T, db *gorm.DB, objectKey string, mimeType string, size int64, hash string) models.BlobObject {
+func seedBlob(t *testing.T, db *gorm.DB, objectKey string, mimeType string, size int64, hash string, ownerIDs ...uuid.UUID) models.BlobObject {
 	t.Helper()
+	ownerID := uuid.Nil
+	if len(ownerIDs) > 0 {
+		ownerID = ownerIDs[0]
+	}
 	blob := models.BlobObject{
 		ID:              uuid.New(),
+		OwnerUserID:     ownerID,
 		SHA256:          hash,
 		Size:            size,
 		MimeType:        mimeType,
@@ -212,6 +217,65 @@ func TestUploadDocumentAsset_DeduplicatesByHashAndSize(t *testing.T) {
 	}
 }
 
+func TestUploadDocumentAsset_DoesNotDeduplicateAcrossOwners(t *testing.T) {
+	db := setupMediaTestDB(t)
+	victimID := uuid.New()
+	attackerID := uuid.New()
+	victimDocID := seedOwnedDocument(t, db, victimID)
+	attackerDocID := seedOwnedDocument(t, db, attackerID)
+	content := []byte("same-private-content")
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+
+	victimHeader := makeFileHeader(t, "file", "private.mp4", content)
+	victimUpload, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: victimDocID,
+		UserID:     victimID,
+		FileHeader: victimHeader,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("victim upload: %v", err)
+	}
+
+	attackerHeader := makeFileHeader(t, "file", "guess.mp4", content)
+	attackerUpload, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: attackerDocID,
+		UserID:     attackerID,
+		FileHeader: attackerHeader,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("attacker upload: %v", err)
+	}
+
+	if victimUpload.Asset.BlobID == attackerUpload.Asset.BlobID {
+		t.Fatalf("expected identical uploads by different owners to use separate blobs, got %s", attackerUpload.Asset.BlobID)
+	}
+
+	var victimBlob, attackerBlob models.BlobObject
+	if err := db.First(&victimBlob, "id = ?", victimUpload.Asset.BlobID).Error; err != nil {
+		t.Fatalf("load victim blob: %v", err)
+	}
+	if err := db.First(&attackerBlob, "id = ?", attackerUpload.Asset.BlobID).Error; err != nil {
+		t.Fatalf("load attacker blob: %v", err)
+	}
+	if victimBlob.OwnerUserID != victimID {
+		t.Fatalf("expected victim blob owner %s, got %s", victimID, victimBlob.OwnerUserID)
+	}
+	if attackerBlob.OwnerUserID != attackerID {
+		t.Fatalf("expected attacker blob owner %s, got %s", attackerID, attackerBlob.OwnerUserID)
+	}
+	if !strings.HasPrefix(attackerBlob.ObjectKey, attackerID.String()+"/") {
+		t.Fatalf("expected attacker object key to be generated under attacker prefix, got %q", attackerBlob.ObjectKey)
+	}
+	if strings.HasPrefix(attackerBlob.ObjectKey, victimID.String()+"/") {
+		t.Fatalf("attacker blob leaked victim object key prefix: %q", attackerBlob.ObjectKey)
+	}
+}
+
 func TestUploadDocumentAsset_RevivesSoftDeletedBlobOnUniqueConflict(t *testing.T) {
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
@@ -219,7 +283,7 @@ func TestUploadDocumentAsset_RevivesSoftDeletedBlobOnUniqueConflict(t *testing.T
 	content := []byte("same-content")
 	hash := computeFileHash(content)
 
-	blob := seedBlob(t, db, "owner/old.png", "image/png", int64(len(content)), hash)
+	blob := seedBlob(t, db, "owner/old.png", "image/png", int64(len(content)), hash, userID)
 	if err := db.Model(&models.BlobObject{}).
 		Where("id = ?", blob.ID).
 		Updates(map[string]any{

@@ -607,9 +607,12 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			}
 
 			userProfile = UserProfile{
-				Subject:       strings.TrimSpace(googleUser.ID),
-				Email:         strings.TrimSpace(googleUser.Email),
-				EmailVerified: googleUser.VerifiedEmail,
+				Subject: strings.TrimSpace(googleUser.ID),
+				Email:   strings.TrimSpace(googleUser.Email),
+				// Preserve the existing trust contract for Google OAuth userinfo:
+				// once Google returns an email address for the account, treat it as
+				// trusted rather than downgrading based on this endpoint's flag.
+				EmailVerified: strings.TrimSpace(googleUser.Email) != "",
 				Name:          strings.TrimSpace(googleUser.Name),
 				Picture:       strings.TrimSpace(googleUser.Picture),
 			}

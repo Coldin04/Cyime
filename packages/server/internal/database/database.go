@@ -114,6 +114,16 @@ func Connect() {
 		}
 	}
 
+	// The blob deduplication key used to be global on (sha256, size). Drop that
+	// legacy index before AutoMigrate creates the owner-scoped replacement so
+	// different users can store identical private files without sharing physical
+	// blob metadata.
+	if DB.Migrator().HasTable(&models.BlobObject{}) && DB.Migrator().HasIndex(&models.BlobObject{}, "idx_blob_hash_size") {
+		if err := DB.Migrator().DropIndex(&models.BlobObject{}, "idx_blob_hash_size"); err != nil {
+			log.Fatalf("Failed to drop legacy blob hash index: %v", err)
+		}
+	}
+
 	// Auto-migrate the schema
 	err = DB.AutoMigrate(
 		&models.User{},

@@ -599,7 +599,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 		visibility = "private"
 	}
 
-	blob, err := findBlobByHash(fileHash, req.FileHeader.Size)
+	blob, err := findBlobByHash(document.OwnerUserID, fileHash, req.FileHeader.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -618,6 +618,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 
 		blob = &models.BlobObject{
 			ID:              uuid.New(),
+			OwnerUserID:     document.OwnerUserID,
 			SHA256:          fileHash,
 			Size:            req.FileHeader.Size,
 			MimeType:        contentType,
@@ -628,11 +629,12 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 			Status:          "ready",
 		}
 		if err := database.DB.Create(blob).Error; err != nil {
-			if !isUniqueConstraintError(err, "blob_objects.sha256", "blob_objects.size") {
+			if !isUniqueConstraintError(err, "blob_objects.owner_user_id", "blob_objects.sha256", "blob_objects.size") &&
+				!isUniqueConstraintError(err, "idx_blob_owner_hash_size") {
 				return nil, err
 			}
 			log.Printf("[media.upload.service] blob create raced for hash=%s size=%d, checking existing rows", fileHash, req.FileHeader.Size)
-			blob, err = findBlobByHash(fileHash, req.FileHeader.Size)
+			blob, err = findBlobByHash(document.OwnerUserID, fileHash, req.FileHeader.Size)
 			if err != nil {
 				return nil, err
 			}
@@ -649,7 +651,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 					var softDeleted models.BlobObject
 					unscopedErr := tx.
 						Unscoped().
-						Where("sha256 = ? AND size = ?", fileHash, req.FileHeader.Size).
+						Where("owner_user_id = ? AND sha256 = ? AND size = ?", document.OwnerUserID, fileHash, req.FileHeader.Size).
 						First(&softDeleted).Error
 					if unscopedErr != nil {
 						return unscopedErr
@@ -657,7 +659,7 @@ func UploadDocumentAsset(ctx context.Context, req UploadAssetRequest) (*UploadAs
 
 					now := time.Now()
 					if err := tx.Unscoped().Model(&models.BlobObject{}).
-						Where("id = ? AND sha256 = ? AND size = ?", softDeleted.ID, fileHash, req.FileHeader.Size).
+						Where("id = ? AND owner_user_id = ? AND sha256 = ? AND size = ?", softDeleted.ID, document.OwnerUserID, fileHash, req.FileHeader.Size).
 						Updates(map[string]any{
 							"deleted_at":           nil,
 							"status":               "ready",
@@ -862,10 +864,12 @@ func computeFileHash(fileBytes []byte) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-func findBlobByHash(fileHash string, fileSize int64) (*models.BlobObject, error) {
+func findBlobByHash(ownerUserID uuid.UUID, fileHash string, fileSize int64) (*models.BlobObject, error) {
 	var blob models.BlobObject
 	result := database.DB.
-		Where("sha256 = ? AND size = ? AND deleted_at IS NULL", fileHash, fileSize).
+		Joins("LEFT JOIN assets ON assets.blob_id = blob_objects.id AND assets.owner_user_id = ? AND assets.deleted_at IS NULL", ownerUserID).
+		Where("blob_objects.sha256 = ? AND blob_objects.size = ? AND blob_objects.deleted_at IS NULL", fileHash, fileSize).
+		Where("blob_objects.owner_user_id = ? OR assets.id IS NOT NULL", ownerUserID).
 		First(&blob)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {

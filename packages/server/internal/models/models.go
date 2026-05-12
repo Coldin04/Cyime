@@ -345,8 +345,9 @@ func (b *BlobObject) BeforeCreate(tx *gorm.DB) (err error) {
 // BlobObject represents one deduplicated physical object in object storage.
 type BlobObject struct {
 	ID                 uuid.UUID `gorm:"type:uuid;primary_key"`
-	SHA256             string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_blob_hash_size"`
-	Size               int64     `gorm:"not null;uniqueIndex:idx_blob_hash_size"`
+	OwnerUserID        uuid.UUID `gorm:"type:uuid;not null;default:'00000000-0000-0000-0000-000000000000';index:idx_blob_owner;uniqueIndex:idx_blob_owner_hash_size"`
+	SHA256             string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_blob_owner_hash_size"`
+	Size               int64     `gorm:"not null;uniqueIndex:idx_blob_owner_hash_size"`
 	MimeType           string    `gorm:"type:varchar(100);not null"`
 	StorageProvider    string    `gorm:"type:varchar(50);not null;default:'r2'"`
 	Bucket             string    `gorm:"type:varchar(255)"`
