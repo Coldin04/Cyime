@@ -39,10 +39,15 @@ func setupMediaTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedBlob(t *testing.T, db *gorm.DB, objectKey string, mimeType string, size int64, hash string) models.BlobObject {
+func seedBlob(t *testing.T, db *gorm.DB, objectKey string, mimeType string, size int64, hash string, ownerIDs ...uuid.UUID) models.BlobObject {
 	t.Helper()
+	ownerID := uuid.Nil
+	if len(ownerIDs) > 0 {
+		ownerID = ownerIDs[0]
+	}
 	blob := models.BlobObject{
 		ID:              uuid.New(),
+		OwnerUserID:     ownerID,
 		SHA256:          hash,
 		Size:            size,
 		MimeType:        mimeType,
@@ -212,6 +217,65 @@ func TestUploadDocumentAsset_DeduplicatesByHashAndSize(t *testing.T) {
 	}
 }
 
+func TestUploadDocumentAsset_DoesNotDeduplicateAcrossOwners(t *testing.T) {
+	db := setupMediaTestDB(t)
+	victimID := uuid.New()
+	attackerID := uuid.New()
+	victimDocID := seedOwnedDocument(t, db, victimID)
+	attackerDocID := seedOwnedDocument(t, db, attackerID)
+	content := []byte("same-private-content")
+
+	t.Setenv("MEDIA_STORAGE_PROVIDER", "local")
+	t.Setenv("MEDIA_LOCAL_ROOT_DIR", t.TempDir())
+	storageProvider = nil
+
+	victimHeader := makeFileHeader(t, "file", "private.mp4", content)
+	victimUpload, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: victimDocID,
+		UserID:     victimID,
+		FileHeader: victimHeader,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("victim upload: %v", err)
+	}
+
+	attackerHeader := makeFileHeader(t, "file", "guess.mp4", content)
+	attackerUpload, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+		DocumentID: attackerDocID,
+		UserID:     attackerID,
+		FileHeader: attackerHeader,
+		Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("attacker upload: %v", err)
+	}
+
+	if victimUpload.Asset.BlobID == attackerUpload.Asset.BlobID {
+		t.Fatalf("expected identical uploads by different owners to use separate blobs, got %s", attackerUpload.Asset.BlobID)
+	}
+
+	var victimBlob, attackerBlob models.BlobObject
+	if err := db.First(&victimBlob, "id = ?", victimUpload.Asset.BlobID).Error; err != nil {
+		t.Fatalf("load victim blob: %v", err)
+	}
+	if err := db.First(&attackerBlob, "id = ?", attackerUpload.Asset.BlobID).Error; err != nil {
+		t.Fatalf("load attacker blob: %v", err)
+	}
+	if victimBlob.OwnerUserID != victimID {
+		t.Fatalf("expected victim blob owner %s, got %s", victimID, victimBlob.OwnerUserID)
+	}
+	if attackerBlob.OwnerUserID != attackerID {
+		t.Fatalf("expected attacker blob owner %s, got %s", attackerID, attackerBlob.OwnerUserID)
+	}
+	if !strings.HasPrefix(attackerBlob.ObjectKey, attackerID.String()+"/") {
+		t.Fatalf("expected attacker object key to be generated under attacker prefix, got %q", attackerBlob.ObjectKey)
+	}
+	if strings.HasPrefix(attackerBlob.ObjectKey, victimID.String()+"/") {
+		t.Fatalf("attacker blob leaked victim object key prefix: %q", attackerBlob.ObjectKey)
+	}
+}
+
 func TestUploadDocumentAsset_RevivesSoftDeletedBlobOnUniqueConflict(t *testing.T) {
 	db := setupMediaTestDB(t)
 	userID := uuid.New()
@@ -219,7 +283,7 @@ func TestUploadDocumentAsset_RevivesSoftDeletedBlobOnUniqueConflict(t *testing.T
 	content := []byte("same-content")
 	hash := computeFileHash(content)
 
-	blob := seedBlob(t, db, "owner/old.png", "image/png", int64(len(content)), hash)
+	blob := seedBlob(t, db, "owner/old.png", "image/png", int64(len(content)), hash, userID)
 	if err := db.Model(&models.BlobObject{}).
 		Where("id = ?", blob.ID).
 		Updates(map[string]any{
@@ -450,6 +514,79 @@ func TestResolveAccessibleAssetReadURL_AllowsSharedEditorBeforeAssetRefsSync(t *
 	}
 	if strings.TrimSpace(readURL) == "" {
 		t.Fatal("expected non-empty read url")
+	}
+}
+
+func TestGetAccessibleAsset_DeniesDocumentReaderForUnreferencedDocumentAsset(t *testing.T) {
+	db := setupMediaTestDB(t)
+	ownerID := uuid.New()
+	editorID := uuid.New()
+	viewerID := uuid.New()
+	docID := seedOwnedDocument(t, db, ownerID)
+	seedDocumentPermission(t, db, docID, editorID, ownerID, "editor")
+	seedDocumentPermission(t, db, docID, viewerID, ownerID, "viewer")
+
+	blob := seedBlob(t, db, "owner/unreferenced-private.png", "image/png", 19, "hash-unreferenced-private")
+	asset := models.Asset{
+		ID:             uuid.New(),
+		OwnerUserID:    ownerID,
+		DocumentID:     &docID,
+		BlobID:         blob.ID,
+		Kind:           "image",
+		Filename:       "unreferenced-private.png",
+		URL:            blob.URL,
+		Visibility:     "private",
+		Status:         "ready",
+		ReferenceCount: 0,
+		CreatedBy:      editorID,
+	}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(editorID, asset.ID); err != nil {
+		t.Fatalf("expected the uploading editor to access a ready asset before ref sync: %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(viewerID, asset.ID); !errors.Is(err, ErrAssetNotFoundOrForbidden) {
+		t.Fatalf("expected document viewer to be denied before current asset ref exists, got %v", err)
+	}
+
+	if err := db.Create(&models.DocumentAssetRef{
+		ID:          uuid.New(),
+		DocumentID:  docID,
+		AssetID:     asset.ID,
+		OwnerUserID: ownerID,
+		RefType:     mediaRefTypeEditorContent,
+	}).Error; err != nil {
+		t.Fatalf("create document asset ref: %v", err)
+	}
+	if err := db.Model(&models.Asset{}).Where("id = ?", asset.ID).Updates(map[string]any{
+		"reference_count": 1,
+		"status":          "ready",
+	}).Error; err != nil {
+		t.Fatalf("mark asset referenced: %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(viewerID, asset.ID); err != nil {
+		t.Fatalf("expected document viewer to access currently referenced asset: %v", err)
+	}
+
+	if err := db.Unscoped().Delete(&models.DocumentAssetRef{}, "asset_id = ?", asset.ID).Error; err != nil {
+		t.Fatalf("remove document asset ref: %v", err)
+	}
+	if err := db.Model(&models.Asset{}).Where("id = ?", asset.ID).Updates(map[string]any{
+		"reference_count": 0,
+		"status":          "pending_delete",
+	}).Error; err != nil {
+		t.Fatalf("mark asset unreferenced: %v", err)
+	}
+
+	if _, err := GetAccessibleAsset(viewerID, asset.ID); !errors.Is(err, ErrAssetNotFoundOrForbidden) {
+		t.Fatalf("expected document viewer to be denied after asset ref removal, got %v", err)
+	}
+	if _, err := GetAccessibleAsset(editorID, asset.ID); !errors.Is(err, ErrAssetNotFoundOrForbidden) {
+		t.Fatalf("expected uploading editor to be denied after asset ref removal, got %v", err)
 	}
 }
 

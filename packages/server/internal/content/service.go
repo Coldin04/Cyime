@@ -17,6 +17,9 @@ import (
 
 const defaultContentJSON = `{"type":"doc","content":[{"type":"paragraph"}]}`
 
+const MaxContentJSONBytes = 2 * 1024 * 1024
+const maxWorkspaceStorageBytesPerUser = 50 * 1024 * 1024
+
 const (
 	editorContentRefType = "editor_content"
 	assetStatusReady     = "ready"
@@ -109,6 +112,9 @@ func PersistCanonicalContent(
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureWorkspaceStorageWithinLimitForContentUpdate(tx, document.OwnerUserID, document.ID, contentJSON); err != nil {
+		return nil, err
+	}
 	assetIDs, err := extractAssetIDsFromContentJSON(contentJSON)
 	if err != nil {
 		return nil, err
@@ -195,6 +201,43 @@ func PersistCanonicalContent(
 		ContentVersion: contentVersion,
 		UpdatedAt:      now,
 	}, nil
+}
+
+func ensureWorkspaceStorageWithinLimitForContentUpdate(tx *gorm.DB, ownerUserID, documentID uuid.UUID, nextContentJSON string) error {
+	var folderDescriptionBytes int64
+	if err := tx.Unscoped().Model(&models.Folder{}).
+		Select("COALESCE(SUM(LENGTH(description)), 0)").
+		Where("owner_user_id = ?", ownerUserID).
+		Scan(&folderDescriptionBytes).Error; err != nil {
+		return err
+	}
+
+	var documentContentBytes int64
+	if err := tx.Raw(`
+		SELECT COALESCE(SUM(LENGTH(document_bodies.content_json)), 0)
+		FROM document_bodies
+		JOIN documents ON documents.id = document_bodies.document_id
+		WHERE documents.owner_user_id = ?
+	`, ownerUserID).Scan(&documentContentBytes).Error; err != nil {
+		return err
+	}
+
+	var currentDocumentContentBytes int64
+	if err := tx.Raw(`
+		SELECT COALESCE(LENGTH(content_json), 0)
+		FROM document_bodies
+		WHERE document_id = ?
+		LIMIT 1
+	`, documentID).Scan(&currentDocumentContentBytes).Error; err != nil {
+		return err
+	}
+
+	projectedTotal := folderDescriptionBytes + documentContentBytes - currentDocumentContentBytes + int64(len(nextContentJSON))
+	if projectedTotal > maxWorkspaceStorageBytesPerUser {
+		return ErrWorkspaceStorageQuotaExceeded
+	}
+
+	return nil
 }
 
 // CreateInitialContent creates the first content row for a document.
@@ -306,6 +349,9 @@ func PermanentDeleteContentByDocumentID(tx *gorm.DB, userID, documentID uuid.UUI
 }
 
 func normalizeContentJSON(raw []byte) (string, error) {
+	if len(raw) > MaxContentJSONBytes {
+		return "", ErrContentJSONTooLarge
+	}
 	if len(raw) == 0 {
 		return defaultContentJSON, nil
 	}

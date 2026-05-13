@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -11,8 +12,10 @@ import (
 )
 
 const (
-	presenceTTL              = 40 * time.Second
-	presenceDefaultSessionID = "default-session"
+	presenceTTL                        = 40 * time.Second
+	presenceSessionIDHeader            = "X-Presence-Session-Id"
+	presenceMaxRequestBodyBytes        = 256
+	presenceMaxSessionsPerUserDocument = 4
 )
 
 type documentPresenceHeartbeatRequest struct {
@@ -38,23 +41,45 @@ var (
 	presenceAuthCache = map[uuid.UUID]map[uuid.UUID]time.Time{}
 )
 
-func normalizeSessionID(raw string) string {
-	if raw == "" {
-		return presenceDefaultSessionID
+func parsePresenceSessionID(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fiber.NewError(fiber.StatusBadRequest, "Presence session ID is required")
 	}
-	return raw
+	if len(trimmed) > 36 {
+		return "", fiber.NewError(fiber.StatusBadRequest, "Presence session ID must be a UUID")
+	}
+
+	sessionID, err := uuid.Parse(trimmed)
+	if err != nil {
+		return "", fiber.NewError(fiber.StatusBadRequest, "Presence session ID must be a UUID")
+	}
+	return sessionID.String(), nil
 }
 
-func cleanupPresenceLocked(now time.Time) {
-	for documentID, sessions := range presenceStore {
-		for sessionID, entry := range sessions {
-			if now.Sub(entry.lastSeen) > presenceTTL {
-				delete(sessions, sessionID)
-			}
+func presenceSessionKey(userID uuid.UUID, sessionID string) string {
+	return userID.String() + ":" + sessionID
+}
+
+func countUserPresenceSessionsLocked(sessions map[string]presenceEntry, userID uuid.UUID) int {
+	count := 0
+	for _, entry := range sessions {
+		if entry.userID == userID {
+			count++
 		}
-		if len(sessions) == 0 {
-			delete(presenceStore, documentID)
+	}
+	return count
+}
+
+func cleanupDocumentPresenceLocked(documentID uuid.UUID, now time.Time) {
+	sessions := presenceStore[documentID]
+	for sessionID, entry := range sessions {
+		if now.Sub(entry.lastSeen) > presenceTTL {
+			delete(sessions, sessionID)
 		}
+	}
+	if len(sessions) == 0 {
+		delete(presenceStore, documentID)
 	}
 }
 
@@ -71,25 +96,36 @@ func countPresenceLocked(documentID uuid.UUID) (int, int) {
 	return len(sessions), len(uniqueUsers)
 }
 
-func updatePresence(documentID uuid.UUID, userID uuid.UUID, sessionID string) (int, int) {
+func updatePresence(documentID uuid.UUID, userID uuid.UUID, sessionID string) (int, int, error) {
+	validatedSessionID, err := parsePresenceSessionID(sessionID)
+	if err != nil {
+		return 0, 0, err
+	}
 	now := time.Now()
 
 	presenceMu.Lock()
 	defer presenceMu.Unlock()
 
-	cleanupPresenceLocked(now)
+	cleanupDocumentPresenceLocked(documentID, now)
 
 	sessions, exists := presenceStore[documentID]
 	if !exists {
 		sessions = map[string]presenceEntry{}
 		presenceStore[documentID] = sessions
 	}
-	sessions[normalizeSessionID(sessionID)] = presenceEntry{
+	sessionKey := presenceSessionKey(userID, validatedSessionID)
+	if _, exists := sessions[sessionKey]; !exists && countUserPresenceSessionsLocked(sessions, userID) >= presenceMaxSessionsPerUserDocument {
+		connectedCount, uniqueUserCount := countPresenceLocked(documentID)
+		return connectedCount, uniqueUserCount, fiber.NewError(fiber.StatusTooManyRequests, "Too many active presence sessions")
+	}
+
+	sessions[sessionKey] = presenceEntry{
 		userID:   userID,
 		lastSeen: now,
 	}
 
-	return countPresenceLocked(documentID)
+	connectedCount, uniqueUserCount := countPresenceLocked(documentID)
+	return connectedCount, uniqueUserCount, nil
 }
 
 func readPresence(documentID uuid.UUID) (int, int) {
@@ -98,7 +134,7 @@ func readPresence(documentID uuid.UUID) (int, int) {
 	presenceMu.Lock()
 	defer presenceMu.Unlock()
 
-	cleanupPresenceLocked(now)
+	cleanupDocumentPresenceLocked(documentID, now)
 	return countPresenceLocked(documentID)
 }
 
@@ -124,21 +160,26 @@ func canReadDocumentForPresence(userID, documentID uuid.UUID) error {
 		presenceAuthMu.Unlock()
 		return nil
 	}
-	presenceAuthMu.Unlock()
 
-	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
-		return err
-	}
-
-	presenceAuthMu.Lock()
-	cleanupPresenceAuthLocked(now)
-	documentCache = presenceAuthCache[documentID]
 	if documentCache == nil {
 		documentCache = map[uuid.UUID]time.Time{}
 		presenceAuthCache[documentID] = documentCache
 	}
-	documentCache[userID] = now.Add(presenceAuthTTL)
+	cleanupPresenceAuthLocked(now)
 	presenceAuthMu.Unlock()
+
+	_, err := acl.CanReadDocument(database.DB, userID, documentID)
+	if err != nil {
+		return err
+	}
+
+	presenceAuthMu.Lock()
+	if _, exists := presenceAuthCache[documentID]; !exists {
+		presenceAuthCache[documentID] = map[uuid.UUID]time.Time{}
+	}
+	presenceAuthCache[documentID][userID] = now.Add(presenceAuthTTL)
+	presenceAuthMu.Unlock()
+
 	return nil
 }
 
@@ -178,14 +219,42 @@ func HeartbeatDocumentPresenceHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	var req documentPresenceHeartbeatRequest
-	_ = c.BodyParser(&req)
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = c.Get("X-Presence-Session-Id", presenceDefaultSessionID)
+	if len(c.Body()) > presenceMaxRequestBodyBytes {
+		return c.Status(fiber.StatusRequestEntityTooLarge).JSON(ErrorResponse{
+			Error:   "Request Entity Too Large",
+			Message: "Presence heartbeat request body is too large",
+		})
 	}
 
-	connectedCount, uniqueUserCount := updatePresence(documentID, userID, sessionID)
+	var req documentPresenceHeartbeatRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: "Invalid presence heartbeat request body",
+			})
+		}
+	}
+
+	sessionIDRaw := req.SessionID
+	if strings.TrimSpace(sessionIDRaw) == "" {
+		sessionIDRaw = c.Get(presenceSessionIDHeader)
+	}
+	sessionID, err := parsePresenceSessionID(sessionIDRaw)
+	if err != nil {
+		return c.Status(err.(*fiber.Error).Code).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+	}
+
+	connectedCount, uniqueUserCount, err := updatePresence(documentID, userID, sessionID)
+	if err != nil {
+		return c.Status(err.(*fiber.Error).Code).JSON(ErrorResponse{
+			Error:   "Too Many Requests",
+			Message: err.Error(),
+		})
+	}
 	return c.JSON(documentPresenceResponse{
 		DocumentID:      documentID,
 		ConnectedCount:  connectedCount,

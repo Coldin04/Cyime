@@ -117,7 +117,7 @@ func TestSearchWorkspace_MatchesDocumentBodyContentJSON(t *testing.T) {
 	if err := db.Model(&models.DocumentBody{}).
 		Where("document_id = ?", docID).
 		Updates(map[string]any{
-			"content_json": `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"正文里有挂载关键字"}]}]}`,
+			"content_json": `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"这是一个用于测试挂载关键字的文档"}]}]}`,
 			"plain_text":   "这里故意不依赖 plain_text",
 		}).Error; err != nil {
 		t.Fatalf("update body content: %v", err)
@@ -136,6 +136,44 @@ func TestSearchWorkspace_MatchesDocumentBodyContentJSON(t *testing.T) {
 	}
 	if strings.HasPrefix(result.Documents[0].Excerpt, "seed") {
 		t.Fatalf("expected matched snippet instead of document opening, got %+v", result.Documents[0].Excerpt)
+	}
+}
+
+func TestSearchWorkspace_FuzzyFallbackDoesNotLoadContentJSON(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	userID := uuid.New()
+	docID := seedDocumentForWorkspace(t, db, userID, "普通标题")
+
+	largeContentJSON := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"` + strings.Repeat("a", 10000) + `"}]}]}`
+	if err := db.Model(&models.DocumentBody{}).
+		Where("document_id = ?", docID).
+		Updates(map[string]any{
+			"content_json": largeContentJSON,
+			"plain_text":   "alpha body zebra",
+		}).Error; err != nil {
+		t.Fatalf("update body content: %v", err)
+	}
+
+	rows, err := fetchAccessibleDocumentSearchRows(userID, nil, 5, false)
+	if err != nil {
+		t.Fatalf("fetch fuzzy candidates: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != docID {
+		t.Fatalf("expected seeded document candidate, got %+v", rows)
+	}
+	if rows[0].ContentJSON != "" {
+		t.Fatalf("expected unfiltered fuzzy candidate to omit content_json, got %d bytes", len(rows[0].ContentJSON))
+	}
+	if rows[0].PlainText != "alpha body zebra" {
+		t.Fatalf("expected lightweight plain_text to remain available, got %q", rows[0].PlainText)
+	}
+
+	result, err := SearchWorkspace(userID, "abz", 5)
+	if err != nil {
+		t.Fatalf("search workspace: %v", err)
+	}
+	if len(result.Documents) != 1 || result.Documents[0].ID != docID {
+		t.Fatalf("expected fuzzy fallback to still match plain_text, got %+v", result.Documents)
 	}
 }
 

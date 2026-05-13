@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { Editor } from '@tiptap/core';
+	import { Editor, Extension } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
+	import { Plugin } from '@tiptap/pm/state';
 	import Collaboration from '@tiptap/extension-collaboration';
 	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
@@ -37,6 +38,14 @@
 	import ImageSizeControls from '$lib/components/editor/ImageSizeControls.svelte';
 	import ImageInsertDialog from '$lib/components/editor/ImageInsertDialog.svelte';
 	import MathInputDialog from '$lib/components/editor/MathInputDialog.svelte';
+	import {
+		KATEX_MAX_EXPAND,
+		KATEX_MAX_SIZE,
+		MAX_MATH_LATEX_LENGTH,
+		normalizeMathLatexInput,
+		sanitizeMathContent,
+		sanitizeMathLatexAttr
+	} from '$lib/components/editor/mathValidation';
 	import TableToolbarControls from '$lib/components/editor/TableToolbarControls.svelte';
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
@@ -139,6 +148,41 @@
 		'#c2410c',
 		'#b91c1c'
 	] as const;
+
+	const MathValidation = Extension.create({
+		name: 'mathValidation',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					appendTransaction: (_transactions, _oldState, newState) => {
+						let transaction = newState.tr;
+						let changed = false;
+
+						newState.doc.descendants((node, pos) => {
+							if (node.type.name !== 'inlineMath' && node.type.name !== 'blockMath') {
+								return;
+							}
+
+							const latex = sanitizeMathLatexAttr(node.attrs?.latex);
+							if (latex === node.attrs?.latex) {
+								return;
+							}
+
+							transaction = transaction.setNodeMarkup(
+								pos,
+								undefined,
+								{ ...node.attrs, latex },
+								node.marks
+							);
+							changed = true;
+						});
+
+						return changed ? transaction : null;
+					}
+				})
+			];
+		}
+	});
 
 	function hashString(value: string): number {
 		let hash = 0;
@@ -285,7 +329,7 @@
 		if (!Array.isArray(value.content) || value.content.length === 0) {
 			return EMPTY_DOC;
 		}
-		return value;
+		return sanitizeMathContent(value);
 	}
 
 	function toTiptapContent(value: JSONContent): Content {
@@ -338,9 +382,9 @@
 			return false;
 		}
 
-		const latex = rawLatex.trim();
-		if (latex === '') {
-			toast.error('请输入 LaTeX 公式内容');
+		const latex = normalizeMathLatexInput(rawLatex);
+		if (!latex) {
+			toast.error(`请输入 1-${MAX_MATH_LATEX_LENGTH} 个字符的 LaTeX 公式内容`);
 			return false;
 		}
 
@@ -415,11 +459,12 @@
 						lines[0]?.trim() === '$$' &&
 						lines[lines.length - 1]?.trim() === '$$'
 					) {
-						const latex = lines
-							.slice(1, -1)
-							.join('\n')
-							.trim();
-						if (latex !== '') {
+						const latex = normalizeMathLatexInput(
+							lines
+								.slice(1, -1)
+								.join('\n')
+						);
+						if (latex) {
 							blockReplacements.push({
 								from: pos,
 								to: pos + node.nodeSize,
@@ -445,9 +490,9 @@
 			const inlinePattern = /(?<!\$)\$([^$\n]+?)\$(?!\$)/g;
 			for (const match of textValue.matchAll(inlinePattern)) {
 				const raw = match[0];
-				const latex = match[1]?.trim() ?? '';
+				const latex = normalizeMathLatexInput(match[1]);
 				const start = match.index ?? -1;
-				if (raw === undefined || start < 0 || latex === '') {
+				if (raw === undefined || start < 0 || !latex) {
 					continue;
 				}
 				replacements.push({
@@ -525,13 +570,13 @@
 
 		const blockMatch = trimmed.match(/^\$\$([\s\S]+)\$\$$/);
 		if (blockMatch) {
-			const latex = blockMatch[1]?.trim() ?? '';
+			const latex = normalizeMathLatexInput(blockMatch[1]);
 			return latex ? { mode: 'block', latex } : null;
 		}
 
 		const inlineMatch = trimmed.match(/^\$([^$\n]+)\$$/);
 		if (inlineMatch) {
-			const latex = inlineMatch[1]?.trim() ?? '';
+			const latex = normalizeMathLatexInput(inlineMatch[1]);
 			return latex ? { mode: 'inline', latex } : null;
 		}
 
@@ -820,18 +865,20 @@
 				autolink: true,
 				defaultProtocol: 'https'
 			}),
+			MathValidation,
 			Mathematics.configure({
 				katexOptions: {
 					throwOnError: false,
-					strict: 'ignore'
+					strict: 'ignore',
+					maxSize: KATEX_MAX_SIZE,
+					maxExpand: KATEX_MAX_EXPAND
 				},
 				...(readOnly
 					? {}
 					: {
 							blockOptions: {
 								onClick: (node, pos) => {
-									const latex =
-										typeof node.attrs?.latex === 'string' ? node.attrs.latex : '';
+									const latex = sanitizeMathLatexAttr(node.attrs?.latex);
 									openMathDialog('block', latex, pos);
 								}
 							}
@@ -1371,13 +1418,19 @@
 
 	function applyInlineMathLatex(latexInput: string) {
 		if (!editor) return;
-		const latex = latexInput.trim();
+		const trimmedLatexInput = latexInput.trim();
 
-		if (latex === '') {
+		if (trimmedLatexInput === '') {
 			if (editor.isActive('inlineMath')) {
 				editor.chain().focus().deleteInlineMath().run();
 				editorRevision += 1;
 			}
+			return;
+		}
+
+		const latex = normalizeMathLatexInput(trimmedLatexInput);
+		if (!latex) {
+			toast.error(`公式内容不能超过 ${MAX_MATH_LATEX_LENGTH} 个字符`);
 			return;
 		}
 

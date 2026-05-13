@@ -14,6 +14,7 @@ import (
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
@@ -44,6 +45,30 @@ func setupAuthTestDB(t *testing.T) *gorm.DB {
 	database.DB = db
 	tokenService = nil
 	return db
+}
+
+func TestDecryptClientSecret_RejectsPlaintext(t *testing.T) {
+	t.Setenv("APP_ENCRYPTION_KEY", "f3a4d6e7c1b2a8d9e0f1a2b3c4d5e6f70a1b2c3d")
+
+	if _, err := decryptClientSecret("plaintext-secret"); err == nil {
+		t.Fatal("expected plaintext client secret to be rejected")
+	}
+}
+
+func TestDecryptClientSecret_DecryptsEncryptedValue(t *testing.T) {
+	t.Setenv("APP_ENCRYPTION_KEY", "f3a4d6e7c1b2a8d9e0f1a2b3c4d5e6f70a1b2c3d")
+
+	encrypted, err := securevalue.EncryptString("client-secret")
+	if err != nil {
+		t.Fatalf("encrypt secret: %v", err)
+	}
+	decrypted, err := decryptClientSecret(encrypted)
+	if err != nil {
+		t.Fatalf("decrypt secret: %v", err)
+	}
+	if decrypted != "client-secret" {
+		t.Fatalf("decrypted secret = %q, want client-secret", decrypted)
+	}
 }
 
 func TestGetAuthConfig_ReturnsDisplayNameWhenConfigured(t *testing.T) {
@@ -299,7 +324,7 @@ func TestFindOrCreateUser_MergesVerifiedEmailAcrossProviders(t *testing.T) {
 	}
 }
 
-func TestFindOrCreateUser_DeniesUnverifiedEmailMerge(t *testing.T) {
+func TestFindOrCreateUser_IgnoresUnverifiedEmailForMergeAndStorage(t *testing.T) {
 	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -326,12 +351,19 @@ func TestFindOrCreateUser_DeniesUnverifiedEmailMerge(t *testing.T) {
 		Name:          "No Merge",
 	}
 
-	if _, err := findOrCreateUser(db, "oidc", profile); err == nil {
-		t.Fatalf("expected unverified email merge to fail")
+	user, err := findOrCreateUser(db, "oidc", profile)
+	if err != nil {
+		t.Fatalf("find or create user: %v", err)
+	}
+	if user.ID == existing.ID {
+		t.Fatalf("expected unverified email not to merge with existing user")
+	}
+	if user.Email != nil {
+		t.Fatalf("expected unverified email not to be stored, got %q", *user.Email)
 	}
 }
 
-func TestGetUserProfile_ParsesGoogleOAuthUserInfoAsTrusted(t *testing.T) {
+func TestGetUserProfile_ParsesGoogleOAuthUserInfo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"google-user-1","email":"person@example.com","verified_email":false,"name":"Google User","picture":"https://example.com/avatar.png"}`))
@@ -357,8 +389,8 @@ func TestGetUserProfile_ParsesGoogleOAuthUserInfoAsTrusted(t *testing.T) {
 	if profile.Email != "person@example.com" {
 		t.Fatalf("expected email person@example.com, got %q", profile.Email)
 	}
-	if !profile.EmailVerified {
-		t.Fatalf("expected google email to be trusted by default")
+	if profile.EmailVerified {
+		t.Fatalf("expected google email verification flag to be propagated")
 	}
 	if profile.Name != "Google User" {
 		t.Fatalf("expected name Google User, got %q", profile.Name)
@@ -395,7 +427,7 @@ func TestFetchGitHubPrimaryEmail_PrefersVerifiedAndMarksVerified(t *testing.T) {
 	}
 }
 
-func TestFetchGitHubPrimaryEmail_ReturnsUnverifiedWhenNoVerifiedExists(t *testing.T) {
+func TestFetchGitHubPrimaryEmail_IgnoresUnverifiedWhenNoVerifiedExists(t *testing.T) {
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			body := `[{"email":"only-unverified@example.com","primary":true,"verified":false}]`
@@ -411,10 +443,55 @@ func TestFetchGitHubPrimaryEmail_ReturnsUnverifiedWhenNoVerifiedExists(t *testin
 	if err != nil {
 		t.Fatalf("fetch github primary email: %v", err)
 	}
-	if email != "only-unverified@example.com" {
-		t.Fatalf("expected fallback email, got %q", email)
+	if email != "" {
+		t.Fatalf("expected no fallback email, got %q", email)
 	}
 	if verified {
-		t.Fatalf("expected fallback email to be marked unverified")
+		t.Fatalf("expected no verified email")
+	}
+}
+
+func TestGetUserProfile_GitHubIgnoresUnverifiedUserEmailWithoutVerifiedEmailRecord(t *testing.T) {
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.String() {
+			case "https://example.com/github/userinfo":
+				body := `{"id":123,"login":"octocat","name":"Octo Cat","email":"victim@example.com","avatar_url":"https://example.com/avatar.png"}`
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(body)),
+					Header:     make(http.Header),
+				}, nil
+			case "https://api.github.com/user/emails":
+				body := `[{"email":"victim@example.com","primary":true,"verified":false}]`
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(body)),
+					Header:     make(http.Header),
+				}, nil
+			default:
+				t.Fatalf("unexpected URL: %s", req.URL.String())
+				return nil, nil
+			}
+		}),
+	})
+
+	userInfoURL := "https://example.com/github/userinfo"
+	provider := &models.AuthProvider{
+		Name:         "github",
+		ProtocolType: "oauth2",
+		UserInfoURL:  &userInfoURL,
+		ClientID:     "test-client",
+	}
+
+	profile, err := getUserProfile(ctx, provider, &oauth2.Config{}, &oauth2.Token{AccessToken: "token"})
+	if err != nil {
+		t.Fatalf("get user profile: %v", err)
+	}
+	if profile.Email != "" {
+		t.Fatalf("expected github email to be empty without a verified email record, got %q", profile.Email)
+	}
+	if profile.EmailVerified {
+		t.Fatalf("expected github email to remain unverified")
 	}
 }

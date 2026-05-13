@@ -368,6 +368,9 @@ func findOrCreateUser(tx *gorm.DB, providerName string, userProfile *UserProfile
 	}
 
 	normalizedEmail := normalizeEmail(userProfile.Email)
+	if !userProfile.EmailVerified {
+		normalizedEmail = nil
+	}
 	var existingByEmail models.User
 	if normalizedEmail != nil {
 		queryErr := tx.Where("email = ?", *normalizedEmail).First(&existingByEmail).Error
@@ -579,13 +582,9 @@ func getUserProfile(ctx context.Context, provider *models.AuthProvider, oauth2Co
 			if userName == "" {
 				userName = ghUser.Login
 			}
-			userEmail := strings.TrimSpace(ghUser.Email)
-			verifiedEmail, emailVerified, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
+			userEmail, emailVerified, err := fetchGitHubPrimaryEmail(ctx, oauth2Config, token)
 			if err != nil {
 				return nil, err
-			}
-			if verifiedEmail != "" {
-				userEmail = verifiedEmail
 			}
 			userProfile = UserProfile{
 				Subject:       fmt.Sprintf("%d", ghUser.ID),
@@ -646,26 +645,17 @@ func fetchGitHubPrimaryEmail(ctx context.Context, oauth2Config *oauth2.Config, t
 		return "", false, fmt.Errorf("无法解析 GitHub 邮箱信息: %w", err)
 	}
 
-	anyEmail := ""
 	for _, item := range emails {
 		email := strings.TrimSpace(item.Email)
-		if email == "" {
-			continue
-		}
-		if anyEmail == "" {
-			anyEmail = email
-		}
-		if item.Primary && item.Verified {
+		if item.Primary && item.Verified && email != "" {
 			return email, true, nil
 		}
 	}
 	for _, item := range emails {
-		if item.Verified && strings.TrimSpace(item.Email) != "" {
-			return strings.TrimSpace(item.Email), true, nil
+		email := strings.TrimSpace(item.Email)
+		if item.Verified && email != "" {
+			return email, true, nil
 		}
-	}
-	if anyEmail != "" {
-		return anyEmail, false, nil
 	}
 
 	return "", false, nil
@@ -687,15 +677,7 @@ func normalizeEmail(value string) *string {
 	return &trimmed
 }
 
-// decryptClientSecret decrypts an OAuth provider's client secret, falling back to
-// treating the stored value as plaintext for historical data that was not encrypted.
+// decryptClientSecret decrypts an OAuth provider's encrypted client secret.
 func decryptClientSecret(encrypted string) (string, error) {
-	secret, err := securevalue.DecryptString(encrypted)
-	if err != nil {
-		if errors.Is(err, securevalue.ErrInvalidFormat) {
-			return encrypted, nil
-		}
-		return "", err
-	}
-	return secret, nil
+	return securevalue.DecryptString(encrypted)
 }
