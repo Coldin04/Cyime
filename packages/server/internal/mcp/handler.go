@@ -261,9 +261,9 @@ var tools = []toolDefinition{
 			"operations": objectArraySchema("Patch operations.", map[string]any{
 				"type":    enumSchema("Patch operation.", []string{"append", "prepend", "replace", "insert_after", "insert_before"}),
 				"target":  stringSchema("Optional target, for example section."),
-				"heading": stringSchema("Optional Markdown heading."),
+				"heading": stringSchema("Optional Markdown heading used to locate a section. append/prepend/replace keep this heading in place, so it stays in the document."),
 				"match":   stringSchema("Optional exact text match."),
-				"content": stringSchema("Markdown fragment."),
+				"content": stringSchema("Markdown fragment. When targeting a section via heading, provide body content only and do not repeat the heading line, otherwise the heading is duplicated."),
 			}, []string{"type", "content"}),
 		}, []string{"id", "format", "operations"}),
 		Call: callPatchMarkdownDocument,

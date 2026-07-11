@@ -23,6 +23,7 @@ var (
 	ErrTokenNameTooLong  = errors.New("token name is too long")
 	ErrInvalidExpiry     = errors.New("token expiry must be in the future")
 	ErrTokenUnauthorized = errors.New("invalid or expired API token")
+	ErrTokenExpired      = errors.New("the API token has expired")
 	ErrTokenRevoked      = errors.New("API token has been revoked")
 )
 
@@ -214,7 +215,7 @@ func Authenticate(rawToken string, ip string) (*AuthenticatedToken, error) {
 		return nil, ErrTokenRevoked
 	}
 	if row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
-		return nil, ErrTokenUnauthorized
+		return nil, ErrTokenExpired
 	}
 
 	scopes, err := DecodeScopes(row.Scopes)

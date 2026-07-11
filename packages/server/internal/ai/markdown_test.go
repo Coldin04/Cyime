@@ -85,3 +85,40 @@ func TestApplyMarkdownPatchReplaceSection(t *testing.T) {
 		t.Fatalf("section content was not replaced:\n%s", output)
 	}
 }
+
+func TestApplyMarkdownPatchReplaceSectionStripsEchoedHeading(t *testing.T) {
+	input := "## 背景\n\n旧内容\n\n## 其他\n\n保留"
+	output, err := applyMarkdownPatch(input, []PatchOperation{{
+		Type:    "replace",
+		Target:  "section",
+		Heading: "背景",
+		Content: "## 背景\n\n新内容",
+	}})
+	if err != nil {
+		t.Fatalf("applyMarkdownPatch returned error: %v", err)
+	}
+	if got := strings.Count(output, "## 背景"); got != 1 {
+		t.Fatalf("heading should appear exactly once, got %d:\n%s", got, output)
+	}
+	if !strings.Contains(output, "新内容") || strings.Contains(output, "旧内容") {
+		t.Fatalf("section body was not replaced:\n%s", output)
+	}
+}
+
+func TestApplyMarkdownPatchPrependSectionStripsEchoedHeading(t *testing.T) {
+	input := "## 背景\n\n原有内容"
+	output, err := applyMarkdownPatch(input, []PatchOperation{{
+		Type:    "prepend",
+		Heading: "背景",
+		Content: "## 背景\n\n置顶说明",
+	}})
+	if err != nil {
+		t.Fatalf("applyMarkdownPatch returned error: %v", err)
+	}
+	if got := strings.Count(output, "## 背景"); got != 1 {
+		t.Fatalf("heading should appear exactly once, got %d:\n%s", got, output)
+	}
+	if !strings.Contains(output, "置顶说明") || !strings.Contains(output, "原有内容") {
+		t.Fatalf("prepend content missing:\n%s", output)
+	}
+}

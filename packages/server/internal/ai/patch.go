@@ -118,11 +118,38 @@ func findSection(markdown string, heading string) (markdownSection, bool) {
 	return markdownSection{}, false
 }
 
+// stripRedundantHeading drops a leading Markdown heading line from content when
+// it merely repeats the heading the operation already targets. Section-scoped
+// operations keep the existing heading and only rewrite the body, so a client
+// that echoes the whole section back (heading included) would otherwise leave
+// the heading duplicated in the document.
+func stripRedundantHeading(content string, heading string) string {
+	heading = strings.TrimSpace(heading)
+	if heading == "" {
+		return content
+	}
+	trimmed := strings.TrimLeft(content, "\n")
+	firstLine := trimmed
+	if idx := strings.IndexByte(trimmed, '\n'); idx >= 0 {
+		firstLine = trimmed[:idx]
+	}
+	match := markdownHeadingPattern.FindStringSubmatch(firstLine)
+	if match == nil || strings.TrimSpace(match[2]) != heading {
+		return content
+	}
+	idx := strings.IndexByte(trimmed, '\n')
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimLeft(trimmed[idx+1:], "\n")
+}
+
 func replaceSection(markdown string, heading string, content string) (string, error) {
 	section, ok := findSection(markdown, heading)
 	if !ok {
 		return "", fmt.Errorf("heading not found")
 	}
+	content = stripRedundantHeading(content, heading)
 	return markdown[:section.contentStart] + strings.Trim(content, "\n") + "\n\n" + markdown[section.end:], nil
 }
 
@@ -132,6 +159,7 @@ func insertInSection(markdown string, heading string, content string, atStart bo
 		return "", fmt.Errorf("heading not found")
 	}
 	if atStart {
+		content = stripRedundantHeading(content, heading)
 		return markdown[:section.contentStart] + content + markdown[section.contentStart:], nil
 	}
 	return markdown[:section.end] + content + markdown[section.end:], nil
