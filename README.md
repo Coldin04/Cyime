@@ -1,3 +1,5 @@
+
+
 # Cyime
 
 🍋 Cyime —— 青柠写 轻快写作，随云流动，支持多方案图片上传的云文档
@@ -273,7 +275,7 @@ curl -sS http://127.0.0.1:5173/markdown/convert \
     ENV=DEVELOPMENT go run ./cmd/server/main.go
     ```
     后端服务将运行在 `http://localhost:8080`。
-    说明：后端启动会自动读取 `packages/server/.env`。
+    说明：后端启动会自动读取 `packages/server/.env`。首次运行 `ENV=DEVELOPMENT go run ./cmd/init/main.go` 时若缺少 `packages/server/.env`，会先生成一份；按提示修改后重新运行。
 
 3.  **启动前端服务**:
     ```bash
