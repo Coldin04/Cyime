@@ -23,9 +23,6 @@ importers:
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
-      ws:
-        specifier: ^8.14.2
-        version: 8.20.0
       yjs:
         specifier: ^13.6.30
         version: 13.6.30

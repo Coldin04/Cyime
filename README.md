@@ -14,7 +14,7 @@
 
 - 轻量云端写作：在线编辑、云端同步、公开分享和多端访问。
 - 媒体库与图床工作流：集中管理图片与附件，支持从媒体反向定位引用文档。
-- 实时协作可选：按部署需要启用或关闭协作、共享、presence 与持久化链路。
+- 实时协作可选：按部署需要启用或关闭协作、共享与持久化链路。
 - AI 融合支持：通过 Skill、MCP 与 REST Open API 接入 AI 客户端，让授权 AI 可以搜索、读取、整理和写入工作区文档，协助管理文章资产。
 
 ## 如何部署
@@ -78,21 +78,22 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 ### Server 与 Realtime
 
 - `packages/server` 是 Go API 服务。
-- `packages/realtime` 是独立的实时协作服务。
+- `packages/realtime` 是待退役的独立实时协作服务；当前编辑器已不再连接它。
 - 当前建议两者保持独立部署，避免把 WebSocket 与前端平台运行时耦合在一起。
 - 后续可以统一收敛到 Docker Compose 做一键启动。
-- 如果你不使用实时协作，建议直接不启动 `packages/realtime`。
+- 单人编辑部署不需要启动 `packages/realtime`。
+
+编辑器固定使用 `PUT /api/v1/edit/documents/:id/content` 保存规范化的 `ContentJSON`。非 owner 访问编辑页会转到只读页面，前端不再初始化 Yjs、WebSocket 或在线状态。
 
 实时协作总开关：
 
 - 使用 `COLLABORATION_ENABLED=true|false`
 - 这是服务端配置，不是前端配置
-- `packages/server` 会把该值作为 `collaborationEnabled` 通过 `/api/v1/config` 下发给前端
-- `packages/realtime` 会用同名变量决定是否接受 websocket、presence 和强制持久化请求
+- `packages/server` 会把该值作为 `collaborationEnabled` 通过 `/api/v1/config` 下发，暂时用于控制遗留共享入口
+- `packages/realtime` 会用同名变量决定是否接受 websocket 和强制持久化请求
 - 如果要完全关闭协作，必须同时在 `packages/server/.env` 和 `packages/realtime/.env` 中设置为 `false`
-- 关闭后，前端编辑页会退回单人保存链路；非 owner 访问会按“文档不存在或无权访问”处理
-- 如果还希望某个前端部署本地就完全不加载协作能力，可额外设置 `packages/web/.env` 中的 `PUBLIC_COLLABORATION_ENABLED=false`
-- 前端最终生效值为：`PUBLIC_COLLABORATION_ENABLED && 后端下发的 collaborationEnabled`
+- 编辑页始终使用单人 HTTP 保存链路，不受这个开关影响
+- `PUBLIC_COLLABORATION_ENABLED=false` 可隐藏当前前端的遗留共享入口
 - 以上两个变量统一记录在根目录 [`.env.example`](.env.example)
 - 对于单人部署，推荐做法是：
   - 不启动 `packages/realtime`
@@ -259,7 +260,7 @@ curl -sS http://127.0.0.1:5173/markdown/convert \
 
 1.  **环境准备**:
     -   确保您已安装 Go (1.22+)。
-    -   确保您已安装 Node.js (20+) 和 `pnpm`，建议使用 `22+`。
+    -   确保您已安装 Node.js 22.13+ 和 pnpm 11.25.0，建议使用 Node.js 22.17.1。
 
 2.  **启动后端服务**:
     ```bash
@@ -311,9 +312,10 @@ curl -sS http://127.0.0.1:5173/markdown/convert \
 - 实时协作开关
   - `COLLABORATION_ENABLED`：是否启用实时协作，默认 `true`
   - 需要在 `packages/server/.env` 与 `packages/realtime/.env` 保持一致
-  - 前端不会直接读取本地 env，而是读取后端 `/api/v1/config` 下发的 `collaborationEnabled`
+  - 前端编辑器不再读取此值，始终采用单人 HTTP 保存
+  - 遗留共享页面仍读取后端 `/api/v1/config` 下发的 `collaborationEnabled`
   - 可选前端附加开关：`PUBLIC_COLLABORATION_ENABLED`，默认 `true`
-  - 适用于你想让某个前端部署固定保持单人模式，不去初始化协作 UI / provider
+  - 目前仅用于控制遗留共享入口；后续删除共享模块时会一并移除
   - 这两个变量都已统一写在根目录 [`.env.example`](.env.example)
 
 - Skill / MCP Markdown 转换

@@ -6,7 +6,8 @@
 
 - 仓库根目录：`/`
 - 前端项目目录：`packages/web`
-- Node 版本：`22`（建议固定为 `22.17.1`）
+- Node 版本：`22`（建议固定为 `22.17.1`，最低 `22.13`）
+- pnpm 版本：`11.25.0`
 - Pages / EdgeOne 部署时都建议先保存配置，再重新触发一次完整部署
 
 ## 环境变量约定
@@ -29,7 +30,7 @@
 - 仓库内已提供 `packages/web/wrangler.toml`，默认包含：
   - `name = "cyimewrite-web"`
   - `pages_build_output_dir = ".svelte-kit/cloudflare"`
-  - `compatibility_date = "2026-04-04"`
+  - `compatibility_date = "2026-09-04"`
   - `compatibility_flags = ["nodejs_compat"]`
 
 ### Cloudflare 操作步骤
@@ -39,6 +40,8 @@
 3. `Build output directory` 填 `.svelte-kit/cloudflare`
 4. 在项目环境变量里填写：
 
+- `NODE_VERSION=22.17.1`
+- `PNPM_VERSION=11.25.0`
 - `PUBLIC_API_BASE_URL=https://你的后端域名`
 - `PUBLIC_AVATAR_MAX_BYTES=2097152`
 - `PUBLIC_AVATAR_OUTPUT_SIZE=512`

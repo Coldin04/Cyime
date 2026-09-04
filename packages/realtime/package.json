@@ -15,8 +15,7 @@
     "yjs": "^13.6.30",
     "jsonwebtoken": "^9.0.3",
     "axios": "^1.6.5",
-    "dotenv": "^16.3.1",
-    "ws": "^8.14.2"
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "typescript": "^5.3.3",

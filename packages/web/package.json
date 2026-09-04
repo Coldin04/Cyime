@@ -2,10 +2,10 @@
 	"name": "web",
 	"private": true,
 	"version": "0.0.1",
-	"packageManager": "pnpm@10.11.1",
+	"packageManager": "pnpm@11.25.0",
 	"type": "module",
 	"engines": {
-		"node": ">=20"
+		"node": ">=22.13"
 	},
 	"scripts": {
 		"dev": "vite dev",
@@ -28,7 +28,7 @@
 		"@inlang/cli": "^3.1.9",
 		"@inlang/paraglide-js": "^2.15.1",
 		"@sveltejs/adapter-auto": "^7.0.1",
-		"@sveltejs/adapter-cloudflare": "^7.2.8",
+		"@sveltejs/adapter-cloudflare": "^7.2.9",
 		"@sveltejs/kit": "^2.55.0",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@tailwindcss/typography": "^0.5.19",
@@ -41,7 +41,8 @@
 		"tailwindcss": "^3.4.19",
 		"typescript": "^5.9.3",
 		"unplugin-icons": "^23.0.1",
-		"vite": "^7.3.1"
+		"vite": "^7.3.1",
+		"wrangler": "^4.129.0"
 	},
 	"dependencies": {
 		"@hocuspocus/provider": "^3.4.4",
@@ -69,16 +70,5 @@
 		"svelte-sonner": "^1.0.8",
 		"y-protocols": "^1.0.7",
 		"yjs": "^13.6.30"
-	},
-	"pnpm": {
-		"overrides": {
-			"@tiptap/extension-collaboration-cursor": "3.0.0-next.6",
-			"kysely": ">=0.28.14",
-			"cookie@<0.7.0": "0.7.0",
-			"devalue@<5.6.4": "5.6.4",
-			"picomatch@<2.3.2": "2.3.2",
-			"picomatch@>=4.0.0 <4.0.4": "4.0.4",
-			"anymatch>picomatch": "4.0.4"
-		}
 	}
 }

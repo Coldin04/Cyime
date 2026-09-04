@@ -4,7 +4,7 @@
 	import { get } from 'svelte/store';
 	import RouteAuthGuard from '$lib/components/auth/RouteAuthGuard.svelte';
 	import SettingsShell from '$lib/components/settings/SettingsShell.svelte';
-	import { realtimeConfig } from '$lib/stores/realtime';
+	import { clientConfig } from '$lib/stores/clientConfig';
 	import House from '~icons/ph/house';
 	import UserCircle from '~icons/ph/user-circle';
 	import ShieldCheck from '~icons/ph/shield-check';
@@ -14,14 +14,14 @@
 	import Key from '~icons/ph/key';
 
 	let { children } = $props();
-	let realtimeConfigSignal = $state(get(realtimeConfig));
-	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
-	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => {
-		realtimeConfigSignal = state;
+	let clientConfigSignal = $state(get(clientConfig));
+	const collaborationEnabled = $derived(clientConfigSignal.config?.sharingEnabled ?? false);
+	const unsubscribeClientConfig = clientConfig.subscribe((state) => {
+		clientConfigSignal = state;
 	});
 
 	onDestroy(() => {
-		unsubscribeRealtimeConfig();
+		unsubscribeClientConfig();
 	});
 
 	const allNavItems = [

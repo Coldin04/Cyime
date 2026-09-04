@@ -10,22 +10,26 @@ function isEnvEnabled(value: string | undefined): boolean {
 	return ['1', 'true', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
 }
 
-const frontendCollaborationEnabled = isEnvEnabled(env.PUBLIC_COLLABORATION_ENABLED);
+const frontendSharingEnabled = isEnvEnabled(env.PUBLIC_COLLABORATION_ENABLED);
 
-interface RealtimeConfig {
-	collaborationEnabled: boolean;
-	realtimeWsUrl: string;
+interface ClientConfig {
+	sharingEnabled: boolean;
 	documentImageMaxBytes: number;
 }
 
-interface RealtimeStore {
-	config: RealtimeConfig | null;
+interface ClientConfigResponse {
+	collaborationEnabled: boolean;
+	documentImageMaxBytes: number;
+}
+
+interface ClientConfigStore {
+	config: ClientConfig | null;
 	loading: boolean;
 	error: string | null;
 }
 
-function createRealtimeStore() {
-	const { subscribe, set, update } = writable<RealtimeStore>({
+function createClientConfigStore() {
+	const { subscribe, set, update } = writable<ClientConfigStore>({
 		config: null,
 		loading: true,
 		error: null
@@ -48,21 +52,21 @@ function createRealtimeStore() {
 				credentials: 'include'
 			});
 			if (!response.ok) {
-				throw new Error(`Failed to fetch realtime config: ${response.statusText}`);
+				throw new Error(`Failed to fetch client config: ${response.statusText}`);
 			}
 
-			const config = (await response.json()) as RealtimeConfig;
+			const responseConfig = (await response.json()) as ClientConfigResponse;
 			set({
 				config: {
-					...config,
-					collaborationEnabled: frontendCollaborationEnabled && config.collaborationEnabled
+					sharingEnabled: frontendSharingEnabled && responseConfig.collaborationEnabled,
+					documentImageMaxBytes: responseConfig.documentImageMaxBytes
 				},
 				loading: false,
 				error: null
 			});
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-			console.error('Failed to load realtime config:', errorMessage);
+			console.error('Failed to load client config:', errorMessage);
 			set({
 				config: null,
 				loading: false,
@@ -87,4 +91,4 @@ function createRealtimeStore() {
 	};
 }
 
-export const realtimeConfig = createRealtimeStore();
+export const clientConfig = createClientConfigStore();

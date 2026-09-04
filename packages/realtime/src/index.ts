@@ -4,7 +4,6 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { WebSocketServer, WebSocket } from 'ws';
 
 dotenv.config();
 
@@ -68,28 +67,6 @@ const ACL_CACHE_MAX_ENTRIES = (() => {
 	const parsed = parseInt(process.env.ACL_CACHE_MAX_ENTRIES || '10000', 10);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 10000;
 })();
-const PRESENCE_SESSION_TTL_MS = 45_000;
-const PRESENCE_WS_MAX_PAYLOAD_BYTES = parsePositiveInteger(
-	process.env.PRESENCE_WS_MAX_PAYLOAD_BYTES,
-	4096
-);
-const PRESENCE_WS_RATE_LIMIT_WINDOW_MS = parsePositiveInteger(
-	process.env.PRESENCE_WS_RATE_LIMIT_WINDOW_MS,
-	10_000
-);
-const PRESENCE_WS_MAX_MESSAGES_PER_WINDOW = parsePositiveInteger(
-	process.env.PRESENCE_WS_MAX_MESSAGES_PER_WINDOW,
-	20
-);
-const PRESENCE_MAX_SESSIONS_PER_DOCUMENT = Math.max(
-	1,
-	parseInt(process.env.PRESENCE_MAX_SESSIONS_PER_DOCUMENT || '12', 10)
-);
-
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-	const parsed = Number.parseInt(value ?? '', 10);
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
 const aclCache = new Map<string, { acl: UserACL; expiresAt: number }>();
 
 function aclCacheKey(documentId: string, userId: string): string {
@@ -142,53 +119,6 @@ const documentCanonicalContentSnapshots = new Map<
 	string,
 	{ contentJSON: string; updatedAt: number; userId: string }
 >();
-const documentPresenceSessions = new Map<
-	string,
-	Map<string, { userId: string; lastSeenAt: number }>
->();
-const documentPresence = new Map<string, Map<string, number>>();
-const presenceSubscribers = new Map<string, Set<WebSocket>>();
-const presenceClientMeta = new WeakMap<
-	WebSocket,
-	{
-		token: string;
-		userId: string;
-		documentId?: string;
-		rateWindowStartedAt: number;
-		messageCount: number;
-	}
->();
-const presenceWebSocketServer = new WebSocketServer({
-	noServer: true,
-	maxPayload: PRESENCE_WS_MAX_PAYLOAD_BYTES
-});
-
-function getPresenceMessageString(raw: Buffer): string {
-	return raw.toString('utf8');
-}
-
-function isPresenceRateLimited(meta: { rateWindowStartedAt: number; messageCount: number }): boolean {
-	const now = Date.now();
-	if (now - meta.rateWindowStartedAt > PRESENCE_WS_RATE_LIMIT_WINDOW_MS) {
-		meta.rateWindowStartedAt = now;
-		meta.messageCount = 0;
-	}
-
-	meta.messageCount += 1;
-	return meta.messageCount > PRESENCE_WS_MAX_MESSAGES_PER_WINDOW;
-}
-
-function isPresenceSubscribeMessage(
-	message: unknown
-): message is { type: 'subscribe'; documentId: string } {
-	return (
-		typeof message === 'object' &&
-		message !== null &&
-		(message as { type?: unknown }).type === 'subscribe' &&
-		typeof (message as { documentId?: unknown }).documentId === 'string' &&
-		(message as { documentId: string }).documentId.trim().length > 0
-	);
-}
 
 function logRealtimeSave(event: string, details: Record<string, unknown> = {}): void {
 	console.debug('[RealtimeSave]', event, details);
@@ -374,8 +304,8 @@ function setCORSHeaders(request: IncomingMessage, response: ServerResponse) {
 		response.setHeader('Access-Control-Allow-Origin', '*');
 	}
 	response.setHeader('Vary', 'Origin');
-	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Presence-Session-Id');
-	response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+	response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+	response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 }
 
 function getLoadedDocumentEntry(documentId: string): [string, any] | null {
@@ -452,76 +382,6 @@ function getCollaborationSocketCount(documentId: string): number {
 	return collaborationSockets.get(documentId)?.size ?? 0;
 }
 
-function addDocumentPresence(documentId: string, userId: string) {
-	let users = documentPresence.get(documentId);
-	if (!users) {
-		users = new Map<string, number>();
-		documentPresence.set(documentId, users);
-	}
-
-	users.set(userId, (users.get(userId) ?? 0) + 1);
-}
-
-function removeDocumentPresence(documentId: string, userId: string) {
-	const users = documentPresence.get(documentId);
-	if (!users) {
-		return;
-	}
-
-	const nextCount = (users.get(userId) ?? 0) - 1;
-	if (nextCount > 0) {
-		users.set(userId, nextCount);
-		return;
-	}
-
-	users.delete(userId);
-	if (users.size === 0) {
-		documentPresence.delete(documentId);
-	}
-}
-
-function getDocumentPresenceCount(documentId: string): number {
-	return documentPresence.get(documentId)?.size ?? 0;
-}
-
-function broadcastPresence(documentId: string) {
-	const subscribers = presenceSubscribers.get(documentId);
-	if (!subscribers || subscribers.size === 0) {
-		return;
-	}
-
-	const payload = JSON.stringify({
-		type: 'presence',
-		documentId,
-		connectedCount: getDocumentPresenceCount(documentId)
-	});
-
-	for (const subscriber of subscribers) {
-		if (subscriber.readyState === WebSocket.OPEN) {
-			subscriber.send(payload);
-		}
-	}
-}
-
-function removePresenceSubscriber(socket: WebSocket) {
-	const meta = presenceClientMeta.get(socket);
-	if (!meta?.documentId) {
-		return;
-	}
-
-	removeDocumentPresence(meta.documentId, meta.userId);
-	broadcastPresence(meta.documentId);
-
-	const subscribers = presenceSubscribers.get(meta.documentId);
-	if (!subscribers) {
-		return;
-	}
-
-	subscribers.delete(socket);
-	if (subscribers.size === 0) {
-		presenceSubscribers.delete(meta.documentId);
-	}
-}
 
 function getTrackedYjsVersion(documentId: string, fallback = 0): number {
 	return documentYjsVersions.get(documentId) ?? fallback;
@@ -555,69 +415,6 @@ function clearTrackedCanonicalContentSnapshot(documentId: string): void {
 	documentCanonicalContentSnapshots.delete(documentId);
 }
 
-function pruneExpiredPresenceSessions(documentId: string, now = Date.now()): void {
-	const sessions = documentPresenceSessions.get(documentId);
-	if (!sessions) {
-		return;
-	}
-
-	for (const [sessionId, session] of sessions) {
-		if (now-session.lastSeenAt >= PRESENCE_SESSION_TTL_MS) {
-			sessions.delete(sessionId);
-		}
-	}
-
-	if (sessions.size === 0) {
-		documentPresenceSessions.delete(documentId);
-	}
-}
-
-function upsertPresenceSession(
-	documentId: string,
-	sessionId: string,
-	userId: string,
-	now = Date.now()
-): { connectedCount: number; accepted: boolean } {
-	let sessions = documentPresenceSessions.get(documentId);
-	if (!sessions) {
-		sessions = new Map<string, { userId: string; lastSeenAt: number }>();
-		documentPresenceSessions.set(documentId, sessions);
-	}
-
-	pruneExpiredPresenceSessions(documentId, now);
-	if (!sessions.has(sessionId) && sessions.size >= PRESENCE_MAX_SESSIONS_PER_DOCUMENT) {
-		return {
-			connectedCount: sessions.size,
-			accepted: false
-		};
-	}
-
-	sessions.set(sessionId, { userId, lastSeenAt: now });
-	return {
-		connectedCount: sessions.size,
-		accepted: true
-	};
-}
-
-function removePresenceSession(documentId: string, sessionId: string): number {
-	const sessions = documentPresenceSessions.get(documentId);
-	if (!sessions) {
-		return 0;
-	}
-
-	sessions.delete(sessionId);
-	if (sessions.size === 0) {
-		documentPresenceSessions.delete(documentId);
-		return 0;
-	}
-
-	return sessions.size;
-}
-
-function getActivePresenceSessionCount(documentId: string, now = Date.now()): number {
-	pruneExpiredPresenceSessions(documentId, now);
-	return documentPresenceSessions.get(documentId)?.size ?? 0;
-}
 
 const server = new Server({
 	port: PORT,
@@ -625,19 +422,6 @@ const server = new Server({
 	timeout: 30000,
 	debounce: REALTIME_SAVE_DEBOUNCE_MS,
 	maxDebounce: REALTIME_SAVE_MAX_DEBOUNCE_MS,
-	async onUpgrade(data: any) {
-		const request = data.request as IncomingMessage;
-		const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-		if (requestURL.pathname !== '/api/v1/realtime/presence/ws') {
-			return;
-		}
-
-		presenceWebSocketServer.handleUpgrade(data.request, data.socket, data.head, (ws: WebSocket) => {
-			presenceWebSocketServer.emit('connection', ws, data.request);
-		});
-
-		throw null;
-	},
 
 	// 认证 - 从 WebSocket URL 或 token 字段提取 JWT
 	async onAuthenticate(data: any) {
@@ -955,9 +739,8 @@ const server = new Server({
 			throw null;
 		}
 
-		const isPresenceRequest = requestURL.pathname === '/api/v1/realtime/presence';
 		const isPersistNowRequest = requestURL.pathname === '/api/v1/realtime/persist-now';
-		if (!isPresenceRequest && !isPersistNowRequest) {
+		if (!isPersistNowRequest) {
 			return;
 		}
 
@@ -990,177 +773,48 @@ const server = new Server({
 			throw null;
 		}
 
-		if (isPersistNowRequest) {
-			if (request.method !== 'POST') {
-				response.writeHead(405, { 'Content-Type': 'application/json' });
-				response.end(JSON.stringify({ error: 'Method not allowed' }));
-				throw null;
-			}
-			if (!acl.canEdit) {
-				response.writeHead(403, { 'Content-Type': 'application/json' });
-				response.end(JSON.stringify({ error: 'Forbidden' }));
-				throw null;
-			}
-
-			const context: RealtimeContext = {
-				userId: payload.sub,
-				token,
-				documentId,
-				acl,
-				yjsVersion: getTrackedYjsVersion(documentId)
-			};
-
-			try {
-				logRealtimeSave('manual-save-http-request', {
-					documentId,
-					userId: payload.sub
-				});
-				await triggerImmediateDocumentPersist(documentId, context, request.headers, requestURL.searchParams);
-				response.writeHead(200, { 'Content-Type': 'application/json' });
-				response.end(JSON.stringify({ ok: true, documentId }));
-			} catch (error) {
-				console.error(`[DOC:${documentId}] Failed to force immediate persist:`, error);
-				response.writeHead(409, { 'Content-Type': 'application/json' });
-				response.end(
-					JSON.stringify({
-						error: error instanceof Error ? error.message : 'Failed to persist document immediately',
-						details: error instanceof Error ? error.stack ?? null : null,
-						documentId
-					})
-				);
-			}
+		if (request.method !== 'POST') {
+			response.writeHead(405, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Method not allowed' }));
+			throw null;
+		}
+		if (!acl.canEdit) {
+			response.writeHead(403, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ error: 'Forbidden' }));
 			throw null;
 		}
 
-		const sessionIdHeader = request.headers['x-presence-session-id'];
-		const sessionId =
-			typeof sessionIdHeader === 'string'
-				? sessionIdHeader.trim()
-				: Array.isArray(sessionIdHeader)
-					? (sessionIdHeader[0] ?? '').trim()
-					: '';
+		const context: RealtimeContext = {
+			userId: payload.sub,
+			token,
+			documentId,
+			acl,
+			yjsVersion: getTrackedYjsVersion(documentId)
+		};
 
-		if (request.method === 'PUT' && sessionId) {
-			const { connectedCount, accepted } = upsertPresenceSession(documentId, sessionId, payload.sub);
-			if (!accepted) {
-				response.writeHead(429, { 'Content-Type': 'application/json' });
-				response.end(
-					JSON.stringify({
-						error: 'Too many active sessions for document',
-						documentId,
-						connectedCount,
-						maxSessions: PRESENCE_MAX_SESSIONS_PER_DOCUMENT
-					})
-				);
-				throw null;
-			}
+		try {
+			logRealtimeSave('manual-save-http-request', {
+				documentId,
+				userId: payload.sub
+			});
+			await triggerImmediateDocumentPersist(documentId, context, request.headers, requestURL.searchParams);
 			response.writeHead(200, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify({ ok: true, documentId }));
+		} catch (error) {
+			console.error(`[DOC:${documentId}] Failed to force immediate persist:`, error);
+			response.writeHead(409, { 'Content-Type': 'application/json' });
 			response.end(
 				JSON.stringify({
-					documentId,
-					connectedCount,
-					hasCollaboration: getCollaborationSocketCount(documentId) > 0
+					error: error instanceof Error ? error.message : 'Failed to persist document immediately',
+					details: error instanceof Error ? error.stack ?? null : null,
+					documentId
 				})
 			);
-			throw null;
 		}
-
-		if (request.method === 'DELETE' && sessionId) {
-			const connectedCount = removePresenceSession(documentId, sessionId);
-			response.writeHead(200, { 'Content-Type': 'application/json' });
-			response.end(
-				JSON.stringify({
-					documentId,
-					connectedCount,
-					hasCollaboration: getCollaborationSocketCount(documentId) > 0
-				})
-			);
-			throw null;
-		}
-
-		response.writeHead(200, { 'Content-Type': 'application/json' });
-		response.end(
-			JSON.stringify({
-				documentId,
-				connectedCount: getActivePresenceSessionCount(documentId),
-				hasCollaboration: getCollaborationSocketCount(documentId) > 0
-			})
-		);
 		throw null;
 	}
 });
 
-presenceWebSocketServer.on('connection', (socket: WebSocket, request: IncomingMessage) => {
-	const requestURL = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-	const token = requestURL.searchParams.get('token')?.trim() ?? '';
-	const payload = token ? verifyJWT(token) : null;
-
-	if (!payload?.sub) {
-		socket.close(4401, 'unauthorized');
-		return;
-	}
-
-	presenceClientMeta.set(socket, {
-		token,
-		userId: payload.sub,
-		rateWindowStartedAt: Date.now(),
-		messageCount: 0
-	});
-
-	socket.on('error', (error) => {
-		console.warn('[Presence] WebSocket error:', error instanceof Error ? error.message : error);
-	});
-
-	socket.on('message', async (raw: Buffer) => {
-		try {
-			const meta = presenceClientMeta.get(socket);
-			if (!meta?.token) {
-				socket.close(4401, 'unauthorized');
-				return;
-			}
-
-			if (isPresenceRateLimited(meta)) {
-				socket.close(4408, 'rate limit exceeded');
-				return;
-			}
-
-			if (raw.byteLength > PRESENCE_WS_MAX_PAYLOAD_BYTES) {
-				socket.close(1009, 'message too large');
-				return;
-			}
-
-			const message = JSON.parse(getPresenceMessageString(raw)) as unknown;
-			if (!isPresenceSubscribeMessage(message)) {
-				return;
-			}
-
-			const documentId = normalizeDocumentId(message.documentId);
-			const acl = await getUserACL(documentId, meta.token);
-			if (!acl?.canRead) {
-				socket.close(4403, 'forbidden');
-				return;
-			}
-
-			removePresenceSubscriber(socket);
-
-			let subscribers = presenceSubscribers.get(documentId);
-			if (!subscribers) {
-				subscribers = new Set<WebSocket>();
-				presenceSubscribers.set(documentId, subscribers);
-			}
-			subscribers.add(socket);
-			presenceClientMeta.set(socket, { ...meta, documentId });
-			addDocumentPresence(documentId, meta.userId);
-			broadcastPresence(documentId);
-		} catch (error) {
-			console.error('[Presence] Failed to handle message:', error);
-		}
-	});
-
-	socket.on('close', () => {
-		removePresenceSubscriber(socket);
-	});
-});
 
 server
 	.listen()

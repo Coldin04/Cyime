@@ -4,8 +4,6 @@
 	import { Editor, Extension } from '@tiptap/core';
 	import type { Content, JSONContent } from '@tiptap/core';
 	import { Plugin } from '@tiptap/pm/state';
-	import Collaboration from '@tiptap/extension-collaboration';
-	import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 	import Link from '@tiptap/extension-link';
 	import Mathematics from '@tiptap/extension-mathematics';
 	import { Markdown } from '@tiptap/markdown';
@@ -56,12 +54,10 @@
 	import { pasteDocumentImage, type EditorAPIError } from '$lib/api/editor';
 	import type { DocumentImageTargetOption } from '$lib/components/editor/documentImageTargets';
 	import type { ExportAction } from '$lib/export/exportActions';
-	import { auth } from '$lib/stores/auth';
-	import { realtimeConfig } from '$lib/stores/realtime';
+	import { clientConfig } from '$lib/stores/clientConfig';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import ImageSquare from '~icons/ph/image-square';
-	import type { ProviderInstance } from '$lib/utils/yjsProvider';
 
 	interface Props {
 		documentId: string;
@@ -73,20 +69,12 @@
 		currentImageTargetId?: string;
 		currentImageTargetLabel?: string;
 		imageTargetOptions?: DocumentImageTargetOption[];
-		collaboration?: ProviderInstance | null;
 		readOnly?: boolean;
 		isUpdatingImageTarget?: boolean;
 		isSaving?: boolean;
 		hasUnsavedChanges?: boolean;
-		onContentChange?: (
-			content: JSONContent,
-			meta?: {
-				viaCollaboration: boolean;
-				isLocalChange: boolean;
-			}
-		) => void;
+		onContentChange?: (content: JSONContent) => void;
 		onImageTargetChange?: (targetId: string) => void | Promise<unknown>;
-		hydrateManagedContent?: (content: JSONContent) => Promise<JSONContent>;
 		onSave?: () => void | Promise<unknown>;
 		onExportAction?: (action: ExportAction) => void | Promise<unknown>;
 	}
@@ -98,14 +86,12 @@
 		currentImageTargetId = 'managed-r2',
 		currentImageTargetLabel = '',
 		imageTargetOptions = [],
-		collaboration = null,
 		readOnly = false,
 		isUpdatingImageTarget = false,
 		isSaving = false,
 		hasUnsavedChanges = false,
 		onContentChange,
 		onImageTargetChange,
-		hydrateManagedContent,
 		onSave,
 		onExportAction
 	}: Props = $props();
@@ -125,8 +111,6 @@
 	let mathDialogMode = $state<'inline' | 'block'>('inline');
 	let mathDialogValue = $state('');
 	let editingMathPosition = $state<number | null>(null);
-	let hasSeededCollaborationContent = false;
-	let hasHydratedManagedImages = false;
 	let isNormalizingMathInput = false;
 	let lastAppliedExternalContentOverrideToken = 0;
 	const imageUploadToastId = 'editor-image-upload';
@@ -141,19 +125,6 @@
 	const imageUploadAccept = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif';
 	const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 	const externalImagePathPattern = /\.(avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/i;
-	const LOCAL_CURSOR_COLOR = '#06b6d4';
-	const remoteCursorPalette = [
-		'#2563eb',
-		'#9333ea',
-		'#ea580c',
-		'#dc2626',
-		'#1d4ed8',
-		'#be123c',
-		'#0891b2',
-		'#7c3aed',
-		'#c2410c',
-		'#b91c1c'
-	] as const;
 	const MathValidation = Extension.create({
 		name: 'mathValidation',
 		addProseMirrorPlugins() {
@@ -188,58 +159,6 @@
 			];
 		}
 	});
-
-	function hashString(value: string): number {
-		let hash = 0;
-		for (let index = 0; index < value.length; index += 1) {
-			hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-		}
-		return hash;
-	}
-
-	function getCollaborationUser() {
-		const authState = $auth;
-		const id = authState.user?.id ?? collaboration?.provider?.awareness?.clientID?.toString() ?? 'unknown';
-		const name =
-			authState.user?.displayName?.trim() ||
-			authState.user?.email?.trim() ||
-			`协作者 ${id.slice(0, 6)}`;
-		const color = LOCAL_CURSOR_COLOR;
-
-		return { id, name, color };
-	}
-
-	function getRemoteCursorColor(userId: string) {
-		return remoteCursorPalette[hashString(userId) % remoteCursorPalette.length];
-	}
-
-	function renderCollaborationCursor(
-		user: { id?: string; name?: string; color?: string },
-		localUserId: string
-	) {
-		const cursor = document.createElement('span');
-		cursor.classList.add('collaboration-cursor__caret');
-		const isLocal = user.id === localUserId;
-		const effectiveColor = isLocal
-			? LOCAL_CURSOR_COLOR
-			: (user.color ?? getRemoteCursorColor(user.id ?? user.name ?? 'remote-user'));
-		cursor.style.setProperty('--user-color', effectiveColor);
-
-		const label = document.createElement('span');
-		label.classList.add('collaboration-cursor__label', 'cw-cursor-label');
-
-		const dot = document.createElement('span');
-		dot.classList.add('cw-cursor-dot');
-		dot.style.backgroundColor = effectiveColor;
-
-		const text = document.createElement('span');
-		text.classList.add('cw-cursor-name');
-		text.textContent = user.name || '协作者';
-
-		label.append(dot, text);
-		cursor.append(label);
-		return cursor;
-	}
 
 	function sanitizePastedHTML(html: string): string {
 		const parser = new DOMParser();
@@ -364,10 +283,6 @@
 
 	function serializeDoc(value: JSONContent): string {
 		return JSON.stringify(normalizeDoc(value));
-	}
-
-	function hasMeaningfulContent(value: JSONContent): boolean {
-		return serializeDoc(value) !== serializeDoc(EMPTY_DOC);
 	}
 
 	function isSupportedImageFile(file: File): boolean {
@@ -703,7 +618,7 @@
 	}
 
 	function getDocumentImageMaxBytes(): number | null {
-		const value = get(realtimeConfig).config?.documentImageMaxBytes;
+		const value = get(clientConfig).config?.documentImageMaxBytes;
 		return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 	}
 
@@ -858,11 +773,7 @@
 		}
 	}
 
-	let editorCleanup: (() => void) | null = null;
-
 	function destroyEditor() {
-		editorCleanup?.();
-		editorCleanup = null;
 		editor?.destroy();
 		editor = null;
 	}
@@ -873,15 +784,13 @@
 		}
 
 		lastSyncedContent = serializeDoc(content);
-		const collaborationUser = getCollaborationUser();
 		const extensions: any[] = [
 			StarterKit.configure({
 				heading: {
 					levels: [...headingLevels]
 				},
 				codeBlock: false,
-				link: false,
-				...(collaboration?.doc ? { undoRedo: false } : {})
+				link: false
 			}),
 			createCodeBlockLowlightExtension(),
 			createMermaidPreviewExtension(),
@@ -937,20 +846,6 @@
 				: [])
 		];
 
-		if (collaboration?.doc) {
-			collaboration.provider?.setAwarenessField('user', collaborationUser);
-			extensions.push(
-				Collaboration.configure({
-					document: collaboration.doc
-				}),
-				CollaborationCursor.configure({
-					provider: collaboration.provider,
-					user: collaborationUser,
-					render: (user) => renderCollaborationCursor(user, collaborationUser.id)
-				})
-			);
-		}
-
 		const editorRootClass = [
 			'tiptap',
 			'min-h-full',
@@ -962,8 +857,7 @@
 			'outline-none',
 			'dark:text-zinc-100',
 			'sm:px-8',
-			'lg:px-[14%]',
-			collaboration?.doc ? 'cw-collab-mode' : ''
+			'lg:px-[14%]'
 		]
 			.filter(Boolean)
 			.join(' ');
@@ -972,7 +866,7 @@
 			element: editorElement,
 			editable: !readOnly,
 			extensions,
-			content: collaboration?.doc ? undefined : toTiptapContent(content),
+			content: toTiptapContent(content),
 			editorProps: {
 				transformPastedHTML: (html) => sanitizePastedHTML(html),
 				handleDOMEvents: {
@@ -1077,10 +971,7 @@
 				}
 				const nextContent = editor.getJSON();
 				lastSyncedContent = serializeDoc(nextContent);
-				onContentChange?.(nextContent, {
-					viaCollaboration: Boolean(collaboration?.provider),
-					isLocalChange: collaboration?.provider ? collaboration.provider.hasUnsyncedChanges : true
-				});
+				onContentChange?.(nextContent);
 				editorRevision += 1;
 			},
 			onSelectionUpdate: () => {
@@ -1089,63 +980,9 @@
 		});
 
 		editor = editorInstance;
-
-		const reconcileCollaborationContent = async () => {
-			if (editor !== editorInstance || !collaboration?.doc) {
-				return;
-			}
-
-			if (!hasSeededCollaborationContent) {
-				hasSeededCollaborationContent = true;
-				const currentDoc = normalizeDoc(editorInstance.getJSON());
-				if (!hasMeaningfulContent(currentDoc) && hasMeaningfulContent(content)) {
-					lastSyncedContent = serializeDoc(content);
-					editorInstance.commands.setContent(toTiptapContent(content), { emitUpdate: false });
-				}
-			}
-
-			if (hasHydratedManagedImages || !hydrateManagedContent) {
-				return;
-			}
-
-			hasHydratedManagedImages = true;
-			const currentDoc = normalizeDoc(editorInstance.getJSON());
-			const hydrated = await hydrateManagedContent(currentDoc);
-			if (editor !== editorInstance || serializeDoc(hydrated) === serializeDoc(currentDoc)) {
-				return;
-			}
-
-			lastSyncedContent = serializeDoc(hydrated);
-			editorInstance.commands.setContent(toTiptapContent(hydrated), { emitUpdate: false });
-		};
-
-		const handleSynced = ({ state }: { state: boolean }) => {
-			if (state) {
-				void reconcileCollaborationContent();
-			}
-		};
-
-		const provider = collaboration?.provider;
-		if (provider) {
-			provider.on('synced', handleSynced);
-			if (provider.synced) {
-				void reconcileCollaborationContent();
-			}
-		} else if (collaboration?.doc) {
-			void reconcileCollaborationContent();
-		}
-
-		editorCleanup = () => {
-			provider?.off('synced', handleSynced);
-		};
-	}
-
-	function getCollaborationKey() {
-		return collaboration?.doc ? `collab:${documentId}` : `local:${documentId}`;
 	}
 
 	onMount(() => {
-		previousCollaborationKey = getCollaborationKey();
 		createEditor();
 
 		return () => {
@@ -1153,40 +990,8 @@
 		};
 	});
 
-	// Handle collaboration mode changes by recreating the editor
-	let previousCollaborationKey = '';
-
 	$effect(() => {
-		const currentKey = getCollaborationKey();
-		if (currentKey === previousCollaborationKey || !editorElement) {
-			previousCollaborationKey = currentKey;
-			return;
-		}
-
-		// Save current content before destroying the editor
-		if (editor) {
-			const currentContent = editor.getJSON();
-			if (serializeDoc(currentContent) !== lastSyncedContent) {
-				lastSyncedContent = serializeDoc(currentContent);
-				onContentChange?.(currentContent, {
-					viaCollaboration: Boolean(collaboration?.provider),
-					isLocalChange: collaboration?.provider ? collaboration.provider.hasUnsyncedChanges : true
-				});
-			}
-		}
-
-		// Destroy old editor
-		destroyEditor();
-		hasSeededCollaborationContent = false;
-		hasHydratedManagedImages = false;
-		previousCollaborationKey = currentKey;
-
-		// Recreate editor with new collaboration state
-		createEditor();
-	});
-
-	$effect(() => {
-		if (!editor || collaboration?.doc) {
+		if (!editor) {
 			return;
 		}
 

@@ -24,6 +24,52 @@ func newContentTestApp(userID uuid.UUID) *fiber.App {
 	return app
 }
 
+func TestContentHandlers_OwnerHTTPSaveRoundTrip(t *testing.T) {
+	t.Setenv("COLLABORATION_ENABLED", "false")
+
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+	app := newContentTestApp(ownerID)
+
+	wantContent := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"saved over HTTP"}]}]}`
+	updateBody := bytes.NewBufferString(`{"contentJson":` + wantContent + `}`)
+	updateReq := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", updateBody)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp, err := app.Test(updateReq, -1)
+	if err != nil {
+		t.Fatalf("update request failed: %v", err)
+	}
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected update status 200, got %d", updateResp.StatusCode)
+	}
+
+	var updateResult UpdateContentResult
+	if err := json.NewDecoder(updateResp.Body).Decode(&updateResult); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if !updateResult.Success || updateResult.ContentVersion != 2 {
+		t.Fatalf("unexpected update response: %+v", updateResult)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/documents/"+docID.String()+"/content", nil)
+	getResp, err := app.Test(getReq, -1)
+	if err != nil {
+		t.Fatalf("get request failed: %v", err)
+	}
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected get status 200, got %d", getResp.StatusCode)
+	}
+
+	var getResult GetContentResult
+	if err := json.NewDecoder(getResp.Body).Decode(&getResult); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if string(getResult.ContentJSON) != wantContent || getResult.ContentVersion != 2 {
+		t.Fatalf("unexpected persisted content: %+v", getResult)
+	}
+}
+
 func TestGetContentHandler_CrossUserDenied(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
