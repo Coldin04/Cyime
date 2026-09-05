@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -31,11 +32,13 @@ func TestContentHandlers_OwnerHTTPSaveRoundTrip(t *testing.T) {
 	ownerID := uuid.New()
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 	app := newContentTestApp(ownerID)
+	leaseToken := claimContentLease(t, db, ownerID, docID)
 
 	wantContent := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"saved over HTTP"}]}]}`
-	updateBody := bytes.NewBufferString(`{"contentJson":` + wantContent + `}`)
+	updateBody := bytes.NewBufferString(`{"contentJson":` + wantContent + `,"expectedContentVersion":1}`)
 	updateReq := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.Header.Set(editlease.HeaderName, leaseToken)
 	updateResp, err := app.Test(updateReq, -1)
 	if err != nil {
 		t.Fatalf("update request failed: %v", err)
@@ -70,6 +73,50 @@ func TestContentHandlers_OwnerHTTPSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateContentHandler_RejectsStaleContentVersion(t *testing.T) {
+	db := setupContentTestDB(t)
+	ownerID := uuid.New()
+	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
+	app := newContentTestApp(ownerID)
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+
+	requestUpdate := func(text string) *http.Response {
+		t.Helper()
+		body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"` + text + `"}]}]},"expectedContentVersion":1}`)
+		req := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(editlease.HeaderName, leaseToken)
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("update request: %v", err)
+		}
+		return resp
+	}
+
+	if response := requestUpdate("first"); response.StatusCode != http.StatusOK {
+		t.Fatalf("first update status = %d", response.StatusCode)
+	}
+	staleResponse := requestUpdate("stale")
+	if staleResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("stale update status = %d", staleResponse.StatusCode)
+	}
+	var payload ErrorResponse
+	if err := json.NewDecoder(staleResponse.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode stale response: %v", err)
+	}
+	if payload.Code != "CONTENT_VERSION_CONFLICT" || payload.CurrentContentVersion == nil || *payload.CurrentContentVersion != 2 {
+		t.Fatalf("unexpected stale response: %+v", payload)
+	}
+
+	var body models.DocumentBody
+	if err := db.First(&body, "document_id = ?", docID).Error; err != nil {
+		t.Fatalf("load document body: %v", err)
+	}
+	if strings.Contains(body.ContentJSON, "stale") {
+		t.Fatalf("stale content overwrote persisted body: %s", body.ContentJSON)
+	}
+}
+
 func TestGetContentHandler_CrossUserDenied(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
@@ -95,7 +142,7 @@ func TestUpdateContentHandler_CrossUserDeniedAndDataUnchanged(t *testing.T) {
 	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`)
 
 	app := newContentTestApp(attackerID)
-	body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]}}`)
+	body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]},"expectedContentVersion":1}`)
 	req := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req, -1)
@@ -136,9 +183,11 @@ func TestUpdateContentHandler_WorkspaceQuotaExceeded(t *testing.T) {
 	}
 
 	app := newContentTestApp(ownerID)
-	body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"this update should exceed workspace quota"}]}]}}`)
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+	body := bytes.NewBufferString(`{"contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"this update should exceed workspace quota"}]}]},"expectedContentVersion":1}`)
 	req := httptest.NewRequest(http.MethodPut, "/documents/"+docID.String()+"/content", body)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(editlease.HeaderName, leaseToken)
 	resp, err := app.Test(req, -1)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

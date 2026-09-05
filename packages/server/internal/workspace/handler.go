@@ -714,6 +714,47 @@ func RemoveDocumentMemberHandler(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
+func TransferDocumentOwnershipHandler(c *fiber.Ctx) error {
+	if !config.GetCollaborationEnabled() {
+		return collaborationDisabledResponse(c)
+	}
+
+	userIDRaw, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(ErrorResponse{Error: "Unauthorized", Message: "Invalid user context"})
+	}
+	userID, err := uuid.Parse(userIDRaw)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Invalid User ID", Message: "User ID format is invalid"})
+	}
+	documentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: "Invalid document id"})
+	}
+	var request TransferDocumentOwnershipRequest
+	if err := c.BodyParser(&request); err != nil || request.TargetUserID == uuid.Nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: "Invalid transfer target"})
+	}
+
+	result, err := TransferDocumentOwnership(userID, documentID, request.TargetUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
+		case errors.Is(err, ErrOwnershipTransferManagedAssets):
+			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{Error: "Transfer Blocked", Message: err.Error()})
+		case errors.Is(err, ErrOwnershipTransferSelf),
+			errors.Is(err, ErrOwnershipTransferTarget),
+			errors.Is(err, ErrDocumentQuotaExceeded),
+			errors.Is(err, ErrWorkspaceStorageQuotaExceeded):
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{Error: "Bad Request", Message: err.Error()})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{Error: "Internal Server Error", Message: err.Error()})
+		}
+	}
+	return c.JSON(result)
+}
+
 func ListNotificationsHandler(c *fiber.Ctx) error {
 	userIDStr, ok := c.Locals("userId").(string)
 	if !ok {

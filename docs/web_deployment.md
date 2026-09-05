@@ -1,6 +1,6 @@
 # Web 部署说明
 
-当前前端只部署 `packages/web`，后端与 realtime 独立部署。
+当前前端只部署 `packages/web`，Go 后端独立部署；项目不再包含 realtime 服务。
 
 ## 通用设置
 

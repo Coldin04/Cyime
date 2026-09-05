@@ -13,16 +13,35 @@ import (
 	"g.co1d.in/Coldin04/Cyime/server/internal/config"
 	"g.co1d.in/Coldin04/Cyime/server/internal/content"
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/mcp"
 	"g.co1d.in/Coldin04/Cyime/server/internal/media"
 	"g.co1d.in/Coldin04/Cyime/server/internal/middleware"
 	"g.co1d.in/Coldin04/Cyime/server/internal/securevalue"
 	"g.co1d.in/Coldin04/Cyime/server/internal/user"
 	"g.co1d.in/Coldin04/Cyime/server/internal/workspace"
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
+
+// corsAllowedOrigins returns the browser origins allowed to talk to this API,
+// shared by the CORS middleware and the edit-lease WebSocket upgrade (which
+// has no preflight/CORS handling of its own, so origin checking has to be
+// done explicitly to prevent cross-site WebSocket hijacking).
+func corsAllowedOrigins() []string {
+	raw := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if raw == "" {
+		// Default for local development
+		return []string{"http://localhost:5173"}
+	}
+	origins := strings.Split(raw, ",")
+	for i := range origins {
+		origins[i] = strings.TrimSpace(origins[i])
+	}
+	return origins
+}
 
 func main() {
 	_ = config.LoadDotEnv(".env")
@@ -50,12 +69,7 @@ func main() {
 	// Add flexible CORS middleware
 	app.Use(cors.New(cors.Config{
 		AllowOriginsFunc: func(origin string) bool {
-			allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
-			if allowedOrigins == "" {
-				// Default for local development
-				return origin == "http://localhost:5173"
-			}
-			for _, allowed := range strings.Split(allowedOrigins, ",") {
+			for _, allowed := range corsAllowedOrigins() {
 				if origin == allowed {
 					return true
 				}
@@ -137,15 +151,16 @@ func main() {
 	workspaceRoutes.Post("/trash/restore", workspace.RestoreTrashHandler)
 	workspaceRoutes.Delete("/trash", workspace.PermanentDeleteHandler)
 	// Update document title
-	workspaceRoutes.Put("/documents/:id/title", workspace.UpdateDocumentTitleHandler)
-	workspaceRoutes.Put("/documents/:id/excerpt", workspace.UpdateDocumentExcerptHandler)
-	workspaceRoutes.Put("/documents/:id/image-target", workspace.UpdateDocumentImageTargetHandler)
-	workspaceRoutes.Put("/documents/:id/public-access", workspace.UpdateDocumentPublicAccessHandler)
+	workspaceRoutes.Put("/documents/:id/title", editlease.RequireMutation(), workspace.UpdateDocumentTitleHandler)
+	workspaceRoutes.Put("/documents/:id/excerpt", editlease.RequireMutation(), workspace.UpdateDocumentExcerptHandler)
+	workspaceRoutes.Put("/documents/:id/image-target", editlease.RequireMutation(), workspace.UpdateDocumentImageTargetHandler)
+	workspaceRoutes.Put("/documents/:id/public-access", editlease.RequireMutation(), workspace.UpdateDocumentPublicAccessHandler)
 	workspaceRoutes.Get("/documents/:id/shares", workspace.ListDocumentMembersHandler)
 	workspaceRoutes.Post("/documents/:id/shares", workspace.ShareDocumentHandler)
 	workspaceRoutes.Post("/documents/:id/invites", workspace.InviteDocumentByEmailHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/me", workspace.LeaveSharedDocumentHandler)
 	workspaceRoutes.Delete("/documents/:id/shares/:userId", workspace.RemoveDocumentMemberHandler)
+	workspaceRoutes.Post("/documents/:id/transfer", workspace.TransferDocumentOwnershipHandler)
 	workspaceRoutes.Post("/document-invites/:id/accept", workspace.AcceptDocumentInviteHandler)
 	workspaceRoutes.Post("/document-invites/:id/decline", workspace.DeclineDocumentInviteHandler)
 	// Update folder name
@@ -158,20 +173,31 @@ func main() {
 	workspaceRoutes.Post("/files/batch-move", workspace.BatchMoveHandler)
 	// Copy file or folder
 	workspaceRoutes.Post("/files/:id/copy", workspace.CopyFileHandler)
-	// ACL endpoint for realtime collaboration
+	// ACL endpoint for shared document access
 	workspaceRoutes.Get("/documents/:id/acl", workspace.GetDocumentACLHandler)
-
-	// Realtime routes for Yjs state management
-	realtimeRoutes := api.Group("/realtime", middleware.Protected())
-	realtimeRoutes.Get("/documents/:id/state", workspace.GetYjsStateHandler)
-	realtimeRoutes.Put("/documents/:id/state", workspace.UpdateYjsStateHandler)
 
 	// Edit routes (protected) - for document content management
 	editRoutes := api.Group("/edit/documents", middleware.Protected())
+	editRoutes.Post("/:id/lease", editlease.ClaimHandler)
+	editRoutes.Put("/:id/lease", editlease.RenewHandler)
+	editRoutes.Delete("/:id/lease", editlease.ReleaseHandler)
 	editRoutes.Get("/:id/content", content.GetContentHandler)
 	editRoutes.Put("/:id/content", content.UpdateContentHandler)
-	editRoutes.Post("/:id/assets", media.UploadDocumentAssetHandler)
-	editRoutes.Post("/:id/paste-image", media.UploadDocumentImageHandler)
+	editRoutes.Post("/:id/assets", editlease.RequireMutation(), media.UploadDocumentAssetHandler)
+	editRoutes.Post("/:id/paste-image", editlease.RequireMutation(), media.UploadDocumentImageHandler)
+
+	// Edit-lease change notifications. Deliberately NOT registered under
+	// "/edit/documents" — that prefix already carries middleware.Protected()
+	// via editRoutes above (fiber.Group's middleware is a Use() bound to the
+	// path prefix, so anything else registered under the same prefix would
+	// inherit it), and a WebSocket upgrade request can't carry an
+	// Authorization header. EventsHandler authenticates itself with a
+	// first-message frame instead, once the connection is already open.
+	api.Get(
+		"/edit-lease/documents/:id/events",
+		editlease.EventsUpgrade,
+		websocket.New(editlease.EventsHandler, websocket.Config{Origins: corsAllowedOrigins()}),
+	)
 
 	// Media read routes:
 	// - URL exchange is protected by JWT.

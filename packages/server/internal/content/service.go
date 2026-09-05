@@ -10,6 +10,7 @@ import (
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/acl"
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -47,14 +48,6 @@ type UpdateContentResult struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-// DocumentBodyPatch carries optional extra fields that should be written
-// alongside canonical content during a single transactional save.
-type DocumentBodyPatch struct {
-	YjsState       *string
-	YjsStateVector *string
-	YjsVersion     *int64
-}
-
 // GetContent retrieves the current content of a document.
 func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, error) {
 	if _, err := acl.CanReadDocument(database.DB, userID, documentID); err != nil {
@@ -82,15 +75,28 @@ func GetContent(userID uuid.UUID, documentID uuid.UUID) (*GetContentResult, erro
 }
 
 // UpdateContent updates the current content of a document in place.
-func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte) (*UpdateContentResult, error) {
+func UpdateContent(
+	userID uuid.UUID,
+	documentID uuid.UUID,
+	contentJSONRaw []byte,
+	leaseToken string,
+	expectedContentVersion int64,
+) (*UpdateContentResult, error) {
+	if expectedContentVersion <= 0 {
+		return nil, ErrInvalidContentVersion
+	}
+
 	var result *UpdateContentResult
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		document, err := acl.CanEditDocument(tx, userID, documentID)
+		document, err := editlease.New(tx).Authorize(userID, documentID, leaseToken)
 		if err != nil {
-			return ErrDocumentNotFoundOrUnauthorized
+			if errors.Is(err, acl.ErrDocumentNotFoundOrForbidden) {
+				return ErrDocumentNotFoundOrUnauthorized
+			}
+			return err
 		}
 
-		result, err = PersistCanonicalContent(tx, document, userID, contentJSONRaw, nil)
+		result, err = PersistCanonicalContent(tx, document, userID, contentJSONRaw, &expectedContentVersion)
 		return err
 	})
 	if err != nil {
@@ -99,14 +105,13 @@ func UpdateContent(userID uuid.UUID, documentID uuid.UUID, contentJSONRaw []byte
 	return result, nil
 }
 
-// PersistCanonicalContent updates the canonical JSON-backed document state and
-// any optional companion fields in a single transaction.
+// PersistCanonicalContent updates the canonical JSON-backed document state.
 func PersistCanonicalContent(
 	tx *gorm.DB,
 	document *models.Document,
 	userID uuid.UUID,
 	contentJSONRaw []byte,
-	patch *DocumentBodyPatch,
+	expectedContentVersion *int64,
 ) (*UpdateContentResult, error) {
 	contentJSON, err := normalizeContentJSON(contentJSONRaw)
 	if err != nil {
@@ -130,50 +135,39 @@ func PersistCanonicalContent(
 		"content_version": gorm.Expr("content_version + 1"),
 		"updated_at":      now,
 	}
-	if patch != nil {
-		if patch.YjsState != nil {
-			bodyUpdates["yjs_state"] = *patch.YjsState
-		}
-		if patch.YjsStateVector != nil {
-			bodyUpdates["yjs_state_vector"] = *patch.YjsStateVector
-		}
-		if patch.YjsVersion != nil {
-			bodyUpdates["yjs_version"] = *patch.YjsVersion
-		}
-	}
-
 	var contentVersion int64
-	result := tx.Model(&models.DocumentBody{}).
-		Where("document_id = ?", document.ID).
-		Updates(bodyUpdates)
+	query := tx.Model(&models.DocumentBody{}).Where("document_id = ?", document.ID)
+	if expectedContentVersion != nil {
+		query = query.Where("content_version = ?", *expectedContentVersion)
+	}
+	result := query.Updates(bodyUpdates)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
+		if expectedContentVersion != nil {
+			var body models.DocumentBody
+			err := tx.Select("content_version").Where("document_id = ?", document.ID).Take(&body).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+			return nil, &ContentVersionConflictError{CurrentVersion: body.ContentVersion}
+		}
 		contentRecord := &models.DocumentBody{
 			ID:             uuid.New(),
 			DocumentID:     document.ID,
 			ContentJSON:    contentJSON,
 			PlainText:      plainText,
 			ContentVersion: 1,
-			YjsVersion:     1,
 			UpdatedBy:      userID,
-		}
-		if patch != nil {
-			if patch.YjsState != nil {
-				contentRecord.YjsState = *patch.YjsState
-			}
-			if patch.YjsStateVector != nil {
-				contentRecord.YjsStateVector = *patch.YjsStateVector
-			}
-			if patch.YjsVersion != nil {
-				contentRecord.YjsVersion = *patch.YjsVersion
-			}
 		}
 		if err := tx.Create(contentRecord).Error; err != nil {
 			return nil, err
 		}
 		contentVersion = contentRecord.ContentVersion
+	}
+	if expectedContentVersion != nil {
+		contentVersion = *expectedContentVersion + 1
 	}
 
 	if contentVersion == 0 {

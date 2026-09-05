@@ -415,7 +415,7 @@ func TestGetAssetContentHandler_PrivateAssetUsesACLWithoutQueryToken(t *testing.
 	}
 }
 
-func TestListSharedAssetsHandler_ReturnsSharedEditorAssetsOnly(t *testing.T) {
+func TestListSharedAssetsHandler_ReturnsNoAssetsForLegacySharedRoles(t *testing.T) {
 	db := setupMediaTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
@@ -464,11 +464,8 @@ func TestListSharedAssetsHandler_ReturnsSharedEditorAssetsOnly(t *testing.T) {
 	if err := json.NewDecoder(editorResp.Body).Decode(&editorPayload); err != nil {
 		t.Fatalf("decode editor response: %v", err)
 	}
-	if len(editorPayload.Items) != 1 || editorPayload.Items[0].ID != asset.ID {
-		t.Fatalf("unexpected editor shared assets: %+v", editorPayload.Items)
-	}
-	if editorPayload.Items[0].DocumentCount != 1 || len(editorPayload.Items[0].Documents) != 1 {
-		t.Fatalf("expected document linkage in shared asset payload: %+v", editorPayload.Items[0])
+	if len(editorPayload.Items) != 0 {
+		t.Fatalf("legacy editor should not receive shared editable assets: %+v", editorPayload.Items)
 	}
 
 	viewerApp := newMediaTestApp(viewerID)

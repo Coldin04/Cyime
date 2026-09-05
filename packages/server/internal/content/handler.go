@@ -4,19 +4,23 @@ import (
 	"encoding/json"
 	"errors"
 
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
 // ErrorResponse represents a standard error response.
 type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
+	Error                 string `json:"error"`
+	Message               string `json:"message"`
+	Code                  string `json:"code,omitempty"`
+	CurrentContentVersion *int64 `json:"currentContentVersion,omitempty"`
 }
 
 // UpdateContentRequest represents the request body for updating content.
 type UpdateContentRequest struct {
-	ContentJSON json.RawMessage `json:"contentJson"`
+	ContentJSON            json.RawMessage `json:"contentJson"`
+	ExpectedContentVersion int64           `json:"expectedContentVersion"`
 }
 
 // GetContentHandler handles GET /api/v1/edit/documents/:id/content.
@@ -100,15 +104,35 @@ func UpdateContentHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	result, err := UpdateContent(userID, documentID, req.ContentJSON)
+	result, err := UpdateContent(
+		userID,
+		documentID,
+		req.ContentJSON,
+		c.Get(editlease.HeaderName),
+		req.ExpectedContentVersion,
+	)
 	if err != nil {
+		var versionConflict *ContentVersionConflictError
 		switch {
 		case errors.Is(err, ErrDocumentNotFoundOrUnauthorized):
 			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
 				Error:   "Not Found",
 				Message: err.Error(),
 			})
-		case errors.Is(err, ErrInvalidContentJSON), errors.Is(err, ErrContentJSONTooLarge), errors.Is(err, ErrInvalidContentAssetReferences):
+		case errors.Is(err, editlease.ErrLeaseInvalid):
+			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
+				Error:   "Edit Lease Invalid",
+				Message: err.Error(),
+				Code:    "EDIT_LEASE_INVALID",
+			})
+		case errors.As(err, &versionConflict):
+			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
+				Error:                 "Content Version Conflict",
+				Message:               err.Error(),
+				Code:                  "CONTENT_VERSION_CONFLICT",
+				CurrentContentVersion: &versionConflict.CurrentVersion,
+			})
+		case errors.Is(err, ErrInvalidContentJSON), errors.Is(err, ErrContentJSONTooLarge), errors.Is(err, ErrInvalidContentAssetReferences), errors.Is(err, ErrInvalidContentVersion):
 			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 				Error:   "Bad Request",
 				Message: err.Error(),

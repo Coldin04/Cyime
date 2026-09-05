@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/content"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/workspace"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -199,7 +200,7 @@ func RenameFileHandler(c *fiber.Ctx) error {
 
 	switch fileType {
 	case "document":
-		err = workspace.UpdateDocumentTitle(userID, fileID, req.Name)
+		err = RenameDocument(userID, fileID, req.Name)
 	case "folder":
 		err = workspace.UpdateFolderName(userID, fileID, req.Name)
 	}
@@ -343,6 +344,8 @@ func contentError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{Error: "Not Found", Message: err.Error()})
 	case errors.Is(err, ErrVersionConflict):
 		return c.Status(fiber.StatusConflict).JSON(ErrorResponse{Error: "Conflict", Message: err.Error()})
+	case errors.Is(err, editlease.ErrLeaseHeld), errors.Is(err, editlease.ErrLeaseInvalid):
+		return c.Status(fiber.StatusLocked).JSON(ErrorResponse{Error: "Edit Locked", Message: err.Error()})
 	case errors.Is(err, ErrMarkdownConverterUnavailable):
 		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{Error: "Markdown Converter Unavailable", Message: err.Error()})
 	case errors.Is(err, ErrMarkdownConversionFailed):
@@ -372,6 +375,8 @@ func workspaceError(c *fiber.Ctx, err error) error {
 		return badRequest(c, err)
 	case errors.Is(err, ErrMarkdownConverterUnavailable):
 		return c.Status(fiber.StatusBadGateway).JSON(ErrorResponse{Error: "Markdown Converter Unavailable", Message: err.Error()})
+	case errors.Is(err, editlease.ErrLeaseHeld), errors.Is(err, editlease.ErrLeaseInvalid):
+		return c.Status(fiber.StatusLocked).JSON(ErrorResponse{Error: "Edit Locked", Message: err.Error()})
 	case errors.Is(err, workspace.ErrFolderNotFound),
 		errors.Is(err, workspace.ErrParentFolderNotFound),
 		errors.Is(err, workspace.ErrDocumentNotFoundOrUnauthorized),

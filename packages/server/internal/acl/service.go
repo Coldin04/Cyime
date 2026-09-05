@@ -91,7 +91,7 @@ func CanReadDocument(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Documen
 }
 
 func CanEditDocument(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, error) {
-	document, _, err := AuthorizeDocumentAction(tx, userID, documentID, ActionEdit)
+	document, _, err := CanAccessDocumentOwnerOnly(tx, userID, documentID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,11 +99,18 @@ func CanEditDocument(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Documen
 }
 
 func CanManageDocumentMembers(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, string, error) {
-	return AuthorizeDocumentAction(tx, userID, documentID, ActionManageMembers)
+	return CanAccessDocumentOwnerOnly(tx, userID, documentID)
 }
 
 func CanAccessDocumentOwnerOnly(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, string, error) {
-	return AuthorizeDocumentAction(tx, userID, documentID, ActionOwnerOnly)
+	var document models.Document
+	if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", documentID, userID).First(&document).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", ErrDocumentNotFoundOrForbidden
+		}
+		return nil, "", err
+	}
+	return &document, RoleOwner, nil
 }
 
 func CanAccessDocumentOwnerOnlyUnscoped(tx *gorm.DB, userID, documentID uuid.UUID) (*models.Document, error) {
@@ -125,15 +132,9 @@ func RoleAllowsAction(role, action string) bool {
 	case ActionRead:
 		return role == RoleOwner || role == RoleCollaborator || role == RoleEditor || role == RoleViewer
 	case ActionEdit:
-		if !config.GetCollaborationEnabled() {
-			return role == RoleOwner
-		}
-		return role == RoleOwner || role == RoleCollaborator || role == RoleEditor
+		return role == RoleOwner
 	case ActionManageMembers:
-		if !config.GetCollaborationEnabled() {
-			return false
-		}
-		return role == RoleOwner || role == RoleCollaborator
+		return role == RoleOwner
 	case ActionOwnerOnly:
 		return role == RoleOwner
 	default:
@@ -149,15 +150,9 @@ func AllowedRolesForAction(action string) []string {
 		}
 		return []string{RoleViewer, RoleEditor, RoleCollaborator, RoleOwner}
 	case ActionEdit:
-		if !config.GetCollaborationEnabled() {
-			return []string{RoleOwner}
-		}
-		return []string{RoleEditor, RoleCollaborator, RoleOwner}
+		return []string{RoleOwner}
 	case ActionManageMembers:
-		if !config.GetCollaborationEnabled() {
-			return []string{}
-		}
-		return []string{RoleCollaborator, RoleOwner}
+		return []string{RoleOwner}
 	case ActionOwnerOnly:
 		return []string{RoleOwner}
 	default:
