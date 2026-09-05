@@ -62,7 +62,7 @@ let {
 
 let title = $state('');
 let excerpt = $state('');
-const canEditDocumentMeta = $derived(myRole === 'owner' || myRole === 'collaborator');
+const canEditDocumentMeta = $derived(myRole === 'owner');
 const canOpenDocumentSettings = $derived(canEditDocumentMeta);
 let isSearchOpen = $state(false);
 const searchShortcutLabel = $derived(

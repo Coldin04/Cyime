@@ -11,21 +11,41 @@
 	import ExportPrivateImagesDialog from '$lib/components/editor/ExportPrivateImagesDialog.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ModalDialog from '$lib/components/common/ModalDialog.svelte';
+	import VersionConflictDialog from '$lib/components/editor/VersionConflictDialog.svelte';
 	import {
 		defaultAutoSaveEnabled,
 		defaultAutoSaveIntervalSeconds,
 		readAutoSaveEnabled,
 		readAutoSaveIntervalSeconds
 	} from '$lib/components/editor/autoSave';
+	import {
+		buildMergeChunks,
+		buildMergedContent,
+		countConflicts,
+		type ConflictResolution,
+		type MergeChunk
+	} from '$lib/components/editor/blockMerge';
+	import {
+		clearConflictDraft,
+		loadConflictDraft,
+		saveConflictDraft
+	} from '$lib/components/editor/conflictDraft';
 	import { auth } from '$lib/stores/auth';
 	import { apiFetch } from '$lib/api';
 	import { resolveApiUrl } from '$lib/config/api';
 	import {
+		acquireDocumentEditLease,
 		getDocumentContent,
 		pasteDocumentImage,
 		resolveAssetReadURLs,
+		renewDocumentEditLease,
+		type EditorAPIError,
 		updateDocumentContent
 	} from '$lib/api/editor';
+	import { getEditTabId } from '$lib/components/editor/editDevice';
+	import { subscribeToLeaseClaimedElsewhere } from '$lib/components/editor/leaseBroadcast';
+	import { subscribeToLeaseEvents } from '$lib/components/editor/leaseSocket';
+	import { copyToClipboard, exportMarkdown } from '$lib/export/documentExport';
 	import {
 		createDocument,
 		getDocumentDetails,
@@ -90,6 +110,25 @@
 	let autoSaveEnabled = $state(defaultAutoSaveEnabled);
 	let autoSaveIntervalSeconds = $state(defaultAutoSaveIntervalSeconds);
 	let editorContentOverride = $state<{ token: number; content: JSONContent } | null>(null);
+	let editLeaseToken = $state('');
+	let contentVersion = $state(0);
+	let leaseIssue = $state<'held' | 'lost' | 'version-conflict' | null>(null);
+	let isResolvingLease = $state(false);
+	// Snapshot of the content as it existed on the server the last time we
+	// loaded or successfully saved. Used as the common ancestor for a 3-way
+	// merge when a save conflicts with a newer server version, so we never
+	// have to choose between "keep local" or "discard local" wholesale.
+	let baseContent = $state<JSONContent>(EMPTY_DOC);
+	let baseContentVersion = $state(0);
+	type VersionConflictState = {
+		status: 'loading' | 'ready' | 'saving';
+		cloudContentJson: JSONContent;
+		cloudContentVersion: number;
+		cloudUpdatedAt: string | null;
+		chunks: MergeChunk[];
+		resolutions: Record<string, ConflictResolution>;
+	};
+	let versionConflictState = $state<VersionConflictState | null>(null);
 	type SaveReason = 'manual' | 'auto' | 'leave' | 'export';
 	type EditorOverrideWaiter = {
 		expectedSerializedContent: string;
@@ -534,20 +573,38 @@
 		if (!documentId || isLoading || isSaving || !hasUnsavedChanges) {
 			return !hasUnsavedChanges;
 		}
+		if (!editLeaseToken || contentVersion <= 0 || leaseIssue) {
+			return false;
+		}
 
 		isSaving = true;
 		logSaveDebug('local-save-start', { reason });
 		try {
 			const contentSnapshot = normalizeManagedImagesForSave(content);
 			const serializedSnapshot = JSON.stringify(contentSnapshot);
-			await updateDocumentContent(documentId, contentSnapshot);
+			const result = await updateDocumentContent(
+				documentId,
+				contentSnapshot,
+				editLeaseToken,
+				contentVersion
+			);
+			contentVersion = result.contentVersion;
 			lastSaved = new Date();
 			hasUnsavedChanges = serializeComparableContent(content) !== serializedSnapshot;
+			baseContent = cloneContentJson(contentSnapshot);
+			baseContentVersion = result.contentVersion;
 			logSaveDebug('local-save-success', { reason });
 			return !hasUnsavedChanges;
 		} catch (error) {
 			console.error('[Save] Failed to save content:', error);
 			logSaveDebug('local-save-failed', { reason, error: error instanceof Error ? error.message : String(error) });
+			const apiError = error as EditorAPIError;
+			if (apiError.code === 'EDIT_LEASE_INVALID') {
+				editLeaseToken = '';
+				leaseIssue = 'lost';
+			} else if (apiError.code === 'CONTENT_VERSION_CONFLICT') {
+				enterVersionConflict();
+			}
 			if (reason === 'manual') {
 				toast.error(m.editor_save_failed());
 			}
@@ -555,6 +612,143 @@
 		} finally {
 			isSaving = false;
 		}
+	}
+
+	function enterVersionConflict() {
+		if (documentId) {
+			saveConflictDraft(documentId, {
+				baseContentVersion,
+				baseContentJson: baseContent,
+				localContentJson: content,
+				savedAt: new Date().toISOString()
+			});
+		}
+		leaseIssue = 'version-conflict';
+		void openVersionConflictResolution();
+	}
+
+	async function openVersionConflictResolution() {
+		if (!documentId) return;
+		versionConflictState = {
+			status: 'loading',
+			cloudContentJson: EMPTY_DOC,
+			cloudContentVersion: contentVersion,
+			cloudUpdatedAt: null,
+			chunks: [],
+			resolutions: {}
+		};
+		try {
+			const cloud = await getDocumentContent(documentId);
+			const chunks = buildMergeChunks(baseContent, content, cloud.contentJson ?? EMPTY_DOC);
+			if (countConflicts(chunks) === 0) {
+				// Nothing genuinely overlaps — merge and save without making the
+				// user look at a dialog for changes that don't need a decision.
+				const merged = buildMergedContent(chunks, {});
+				await applyResolvedMerge(merged, cloud.contentVersion, { silent: true });
+				return;
+			}
+			versionConflictState = {
+				status: 'ready',
+				cloudContentJson: cloud.contentJson ?? EMPTY_DOC,
+				cloudContentVersion: cloud.contentVersion,
+				cloudUpdatedAt: cloud.updatedAt,
+				chunks,
+				resolutions: {}
+			};
+		} catch (error) {
+			console.error('[Conflict] Failed to load latest cloud version:', error);
+			toast.error(m.editor_version_conflict_load_failed());
+			versionConflictState = null;
+		}
+	}
+
+	function handleConflictResolutionChange(id: string, resolution: ConflictResolution) {
+		if (!versionConflictState) return;
+		versionConflictState.resolutions = { ...versionConflictState.resolutions, [id]: resolution };
+	}
+
+	async function applyResolvedMerge(
+		merged: JSONContent,
+		expectedContentVersion: number,
+		options: { silent?: boolean } = {}
+	) {
+		if (!documentId || !editLeaseToken) return;
+		if (versionConflictState) versionConflictState.status = 'saving';
+		try {
+			const result = await updateDocumentContent(documentId, merged, editLeaseToken, expectedContentVersion);
+			await applyEditorContentOverride(merged);
+			contentVersion = result.contentVersion;
+			baseContent = cloneContentJson(merged);
+			baseContentVersion = result.contentVersion;
+			hasUnsavedChanges = false;
+			lastSaved = new Date();
+			if (documentId) clearConflictDraft(documentId);
+			leaseIssue = null;
+			versionConflictState = null;
+			toast.success(options.silent ? m.editor_version_conflict_auto_merged() : m.editor_version_conflict_apply_success());
+		} catch (error) {
+			console.error('[Conflict] Failed to save merged content:', error);
+			const apiError = error as EditorAPIError;
+			if (apiError.code === 'CONTENT_VERSION_CONFLICT') {
+				// Someone saved again while we were merging — refresh the cloud
+				// side and let the user re-check, instead of failing outright.
+				await openVersionConflictResolution();
+				return;
+			}
+			toast.error(m.editor_version_conflict_apply_failed());
+			if (versionConflictState) versionConflictState.status = 'ready';
+		}
+	}
+
+	function handleApplyMerge() {
+		if (!versionConflictState) return;
+		const merged = buildMergedContent(versionConflictState.chunks, versionConflictState.resolutions);
+		return applyResolvedMerge(merged, versionConflictState.cloudContentVersion);
+	}
+
+	async function handleDiscardLocalDraft() {
+		const state = versionConflictState;
+		if (!documentId || !state) return;
+		state.status = 'saving';
+		const cloudContentJson = state.cloudContentJson;
+		try {
+			await applyEditorContentOverride(cloudContentJson);
+			contentVersion = state.cloudContentVersion;
+			baseContent = cloneContentJson(cloudContentJson);
+			baseContentVersion = state.cloudContentVersion;
+			hasUnsavedChanges = false;
+			clearConflictDraft(documentId);
+			leaseIssue = null;
+			versionConflictState = null;
+			toast.success(m.editor_version_conflict_discard_success());
+		} catch (error) {
+			console.error('[Conflict] Failed to discard local draft:', error);
+			toast.error(m.editor_version_conflict_apply_failed());
+			state.status = 'ready';
+		}
+	}
+
+	async function handleExportLocalDraft() {
+		try {
+			const markdown = exportMarkdown(content);
+			const copied = await copyToClipboard(markdown);
+			if (!copied) throw new Error('copy_failed');
+			toast.success(m.editor_version_conflict_export_draft_success());
+		} catch (error) {
+			console.error('[Conflict] Failed to export local draft:', error);
+			toast.error(m.editor_version_conflict_export_draft_failed());
+		}
+	}
+
+	async function handleVersionConflictReturnWorkspace() {
+		// The local draft was already persisted to localStorage as soon as the
+		// conflict was detected, so leaving without deciding is safe — the
+		// resolution dialog reopens automatically next time this document loads.
+		// Bypass the unsaved-changes leave guard so it doesn't stack a second
+		// "save before leaving?" prompt on top of this one.
+		bypassLeaveGuard = true;
+		await goto('/workspace');
+		bypassLeaveGuard = false;
 	}
 
 	async function requestDocumentSave(reason: SaveReason = 'manual'): Promise<boolean> {
@@ -591,77 +785,125 @@
 		}
 	}
 
-	// Load document content when ID becomes available
+	async function loadDocumentForEditing(targetDocumentId: string, loadSequence: number) {
+		const isCurrentLoad = () =>
+			loadSequence === documentLoadSequence && documentId === targetDocumentId;
+
+		try {
+			console.log('[Load] Loading document for ID:', targetDocumentId);
+			const details = await getDocumentDetails(targetDocumentId);
+			if (!isCurrentLoad()) return;
+
+			if (details.myRole !== 'owner') {
+				await goto(`/view/documents/${targetDocumentId}`);
+				return;
+			}
+
+			title = details.title ?? '';
+			manualExcerpt = details.manualExcerpt ?? '';
+			folderId = details.folderId ?? null;
+			myRole = details.myRole ?? 'owner';
+			publicAccess = details.publicAccess ?? 'private';
+			publicUrl = details.publicUrl ?? `/view/documents/${targetDocumentId}`;
+			documentType = details.documentType ?? 'rich_text';
+			preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
+
+			let grant;
+			try {
+				grant = await acquireDocumentEditLease(targetDocumentId, getEditTabId());
+			} catch (error) {
+				if ((error as EditorAPIError).code === 'EDIT_LEASE_HELD') {
+					leaseIssue = 'held';
+					isLoading = false;
+					return;
+				}
+				throw error;
+			}
+			if (!isCurrentLoad()) {
+				return;
+			}
+			editLeaseToken = grant.leaseToken;
+			leaseIssue = null;
+
+			const [data, configs] = await Promise.all([
+				getDocumentContent(targetDocumentId),
+				getImageBedConfigs().catch((error) => {
+					console.error('[Load] Failed to load image bed configs:', error);
+					return [] as ImageBedConfig[];
+				})
+			]);
+
+			const loadedContent = data.contentJson ?? EMPTY_DOC;
+			const hydratedContent = await refreshSignedImageSources(loadedContent);
+			if (!isCurrentLoad()) return;
+
+			imageBedConfigs = configs;
+			content = hydratedContent;
+			contentVersion = data.contentVersion;
+			baseContent = cloneContentJson(hydratedContent);
+			baseContentVersion = data.contentVersion;
+			hasUnsavedChanges = false;
+			lastSaved = null;
+			isSaving = false;
+			isLoading = false;
+
+			// If a previous session left this device with an unresolved version
+			// conflict (e.g. the user closed the tab instead of choosing local vs.
+			// cloud), restore that local draft now instead of silently discarding
+			// it — this is the missing recovery path the reload-only flow lacked.
+			const leftoverDraft = loadConflictDraft(targetDocumentId);
+			if (leftoverDraft) {
+				content = leftoverDraft.localContentJson;
+				baseContent = leftoverDraft.baseContentJson;
+				baseContentVersion = leftoverDraft.baseContentVersion;
+				hasUnsavedChanges = true;
+				toast.info(m.editor_version_conflict_draft_restored());
+				enterVersionConflict();
+			}
+		} catch (error) {
+			if (!isCurrentLoad()) return;
+			console.error('[Load] Failed to load document:', error);
+			toast.error(
+				error instanceof Error && error.message.trim() !== '' ? error.message : m.editor_load_failed()
+			);
+			await goto('/workspace');
+		} finally {
+			if (isCurrentLoad() && isLoading) {
+				isLoading = false;
+			}
+		}
+	}
+
+	async function resolveLeaseIssue() {
+		if (!documentId || isResolvingLease) return;
+
+		const issueBeingResolved = leaseIssue;
+		isResolvingLease = true;
+		try {
+			const grant = await acquireDocumentEditLease(documentId, getEditTabId(), true);
+			editLeaseToken = grant.leaseToken;
+			leaseIssue = null;
+			if (issueBeingResolved === 'held') {
+				window.location.reload();
+			}
+		} catch (error) {
+			console.error('[Lease] Failed to take over editing:', error);
+			toast.error(m.editor_lease_takeover_failed());
+		} finally {
+			isResolvingLease = false;
+		}
+	}
+
+	function openReaderMode() {
+		if (documentId) void goto(`/view/documents/${documentId}`);
+	}
+
 	$effect(() => {
 		if (documentId && !authSignal.loading) {
 			const targetDocumentId = documentId;
 			const loadSequence = ++documentLoadSequence;
 			isLoading = true;
-
-			const isCurrentLoad = () => loadSequence === documentLoadSequence && documentId === targetDocumentId;
-
-			const loadContent = async () => {
-				try {
-					console.log('[Load] Loading document for ID:', targetDocumentId);
-					// Load document details (for title) and content in parallel
-					const [details, data, configs] = await Promise.all([
-						getDocumentDetails(targetDocumentId),
-						getDocumentContent(targetDocumentId),
-						getImageBedConfigs().catch((error) => {
-							console.error('[Load] Failed to load image bed configs:', error);
-							return [] as ImageBedConfig[];
-						})
-					]);
-
-					if (!isCurrentLoad()) {
-						return;
-					}
-
-					if (details.myRole !== 'owner') {
-						await goto(`/view/documents/${targetDocumentId}`);
-						return;
-					}
-
-					const loadedContent = data.contentJson ?? EMPTY_DOC;
-					const hydratedContent = await refreshSignedImageSources(loadedContent);
-					if (!isCurrentLoad()) {
-						return;
-					}
-
-					imageBedConfigs = configs;
-					content = hydratedContent;
-					// Use the title from the API
-					title = details.title ?? '';
-					manualExcerpt = details.manualExcerpt ?? '';
-					folderId = details.folderId ?? null;
-					myRole = details.myRole ?? 'owner';
-					publicAccess = details.publicAccess ?? 'private';
-					publicUrl = details.publicUrl ?? `/view/documents/${targetDocumentId}`;
-					documentType = details.documentType ?? 'rich_text';
-					preferredImageTargetId = details.preferredImageTargetId ?? 'managed-r2';
-					hasUnsavedChanges = false;
-					lastSaved = null;
-					isSaving = false;
-					console.log('[Load] Title loaded:', title);
-					isLoading = false;
-				} catch (error) {
-					if (!isCurrentLoad()) {
-						return;
-					}
-					console.error('[Load] Failed to load document:', error);
-					toast.error(
-						error instanceof Error && error.message.trim() !== ''
-							? error.message
-							: '加载文档失败'
-					);
-					goto('/workspace');
-				} finally {
-					if (isCurrentLoad() && isLoading) {
-						isLoading = false;
-					}
-				}
-			};
-			loadContent();
+			void loadDocumentForEditing(targetDocumentId, loadSequence);
 		}
 	});
 
@@ -669,6 +911,51 @@
 		unsubscribePage();
 		unsubscribeAuth();
 		settleEditorContentOverrideWaiter(false);
+	});
+
+	$effect(() => {
+		if (!browser || !documentId || !editLeaseToken || leaseIssue) return;
+		const targetDocumentId = documentId;
+		const token = editLeaseToken;
+		// If another tab or session claims or takes over this document's
+		// lease, find out immediately instead of waiting for our next renewal
+		// heartbeat (up to 20s later) to fail against the server.
+		const invalidate = () => {
+			if (editLeaseToken === token) {
+				editLeaseToken = '';
+				leaseIssue = 'lost';
+			}
+		};
+		// Same-browser tabs: instant, zero network cost.
+		const unsubscribeBroadcast = subscribeToLeaseClaimedElsewhere(targetDocumentId, token, invalidate);
+		// Any other device/browser: instant via the server push channel,
+		// falling back to the 20s poll below if it can't connect.
+		const unsubscribeSocket = subscribeToLeaseEvents(targetDocumentId, token, invalidate);
+		return () => {
+			unsubscribeBroadcast();
+			unsubscribeSocket();
+		};
+	});
+
+	$effect(() => {
+		if (!browser || !documentId || !editLeaseToken || leaseIssue) return;
+		const targetDocumentId = documentId;
+		const token = editLeaseToken;
+		const timer = window.setInterval(() => {
+			void renewDocumentEditLease(targetDocumentId, token)
+				.then(() => undefined)
+				.catch((error) => {
+					console.error('[Lease] Failed to renew edit lease:', error);
+					if (
+						editLeaseToken === token &&
+						(error as EditorAPIError).code === 'EDIT_LEASE_INVALID'
+					) {
+						editLeaseToken = '';
+						leaseIssue = 'lost';
+					}
+				});
+		}, 20_000);
+		return () => window.clearInterval(timer);
 	});
 
 	$effect(() => {
@@ -682,7 +969,7 @@
 	});
 
 	$effect(() => {
-		if (!browser || !documentId || isLoading || !autoSaveEnabled) {
+		if (!browser || !documentId || isLoading || !autoSaveEnabled || !editLeaseToken || leaseIssue) {
 			return;
 		}
 
@@ -731,7 +1018,7 @@
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-zinc-900">
-	{#if documentId}
+	{#if documentId && editLeaseToken && !leaseIssue}
 			<EditorTopBar
 				{documentId}
 				initialTitle={title}
@@ -759,7 +1046,7 @@
 	<!-- Editor -->
 	<main class="flex-1 overflow-hidden">
 		<div class="h-full w-full">
-			{#if browser && !isLoading}
+			{#if browser && !isLoading && editLeaseToken && !leaseIssue}
 				{#if documentType === 'table'}
 					<div class="prose dark:prose-invert p-6">
 						<p>{m.edit_document_editor_under_construction()}</p>
@@ -781,14 +1068,50 @@
 						onContentChange={handleContentChange}
 					/>
 				{/if}
-			{:else}
+			{:else if isLoading}
 				<div class="prose dark:prose-invert">
 					<p>{m.workspace_loading()}</p>
+				</div>
+			{:else}
+				<div class="flex h-full items-center justify-center p-6">
+					<p class="max-w-md text-center text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+						{leaseIssue === 'version-conflict'
+							? m.editor_version_conflict_panel()
+							: m.editor_lease_locked_panel()}
+					</p>
 				</div>
 			{/if}
 		</div>
 	</main>
 </div>
+
+<ConfirmDialog
+	open={leaseIssue === 'held' || leaseIssue === 'lost'}
+	title={leaseIssue === 'held' ? m.editor_lease_locked_title() : m.editor_lease_lost_title()}
+	message={leaseIssue === 'held' ? m.editor_lease_held_message() : m.editor_lease_lost_message()}
+	confirmText={m.editor_lease_takeover_action()}
+	secondaryText={m.editor_open_reader_action()}
+	cancelText={m.editor_return_workspace_action()}
+	confirmVariant="primary"
+	loading={isResolvingLease}
+	onCancel={() => void goto('/workspace')}
+	onSecondary={openReaderMode}
+	onConfirm={resolveLeaseIssue}
+/>
+
+<VersionConflictDialog
+	open={leaseIssue === 'version-conflict' && versionConflictState !== null}
+	status={versionConflictState?.status ?? 'loading'}
+	cloudUpdatedAt={versionConflictState?.cloudUpdatedAt ?? null}
+	chunks={versionConflictState?.chunks ?? []}
+	resolutions={versionConflictState?.resolutions ?? {}}
+	onResolutionChange={handleConflictResolutionChange}
+	onApply={handleApplyMerge}
+	onDiscardLocal={handleDiscardLocalDraft}
+	onExportDraft={handleExportLocalDraft}
+	onReturnWorkspace={handleVersionConflictReturnWorkspace}
+	onOpenReader={openReaderMode}
+/>
 
 <ConfirmDialog
 	open={isLeaveConfirmOpen}

@@ -1,4 +1,5 @@
 import { apiFetch } from '$lib/api';
+import { ensureDocumentEditLease } from '$lib/api/editor';
 
 export type FileItem = {
 	id: string;
@@ -73,6 +74,12 @@ export type ShareDocumentMember = {
 export type ShareDocumentResponse = {
 	documentId: string;
 	members: ShareDocumentMember[];
+};
+
+export type TransferDocumentOwnershipResponse = {
+	documentId: string;
+	previousOwnerId: string;
+	newOwnerId: string;
 };
 
 export type NotificationItem = {
@@ -538,7 +545,7 @@ export async function listDocumentMembers(documentId: string): Promise<ShareDocu
 export async function inviteDocumentByEmail(
 	documentId: string,
 	email: string,
-	role: 'viewer' | 'editor' | 'collaborator'
+	role: 'viewer'
 ): Promise<ShareDocumentResponse> {
 	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/invites`, {
 		method: 'POST',
@@ -572,22 +579,21 @@ export async function removeDocumentMember(
 	return response.json();
 }
 
-export async function updateDocumentMemberRole(
+export async function transferDocumentOwnership(
 	documentId: string,
-	userId: string,
-	role: 'viewer' | 'editor' | 'collaborator'
-): Promise<ShareDocumentResponse> {
-	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/shares`, {
+	targetUserId: string
+): Promise<TransferDocumentOwnershipResponse> {
+	const response = await apiFetch(`/api/v1/workspace/documents/${documentId}/transfer`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
 		},
-		body: JSON.stringify({ userId, role })
+		body: JSON.stringify({ targetUserId })
 	});
 
 	if (!response.ok) {
 		const error = await response.json();
-		throw new Error(error.message || 'Failed to update member role');
+		throw new Error(error.message || 'Failed to transfer document ownership');
 	}
 
 	return response.json();
@@ -669,10 +675,12 @@ export async function clearNotifications(): Promise<{ success: boolean; clearedC
  * Update document title
  */
 export async function updateDocumentTitle(id: string, title: string): Promise<{ success: boolean }> {
+	const grant = await ensureDocumentEditLease(id);
 	const response = await apiFetch(`/api/v1/workspace/documents/${id}/title`, {
 		method: 'PUT',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			'X-Cyime-Edit-Lease': grant.leaseToken
 		},
 		body: JSON.stringify({ title })
 	});
@@ -689,10 +697,12 @@ export async function updateDocumentExcerpt(
 	id: string,
 	excerpt: string
 ): Promise<{ success: boolean; excerpt: string; manualExcerpt: string }> {
+	const grant = await ensureDocumentEditLease(id);
 	const response = await apiFetch(`/api/v1/workspace/documents/${id}/excerpt`, {
 		method: 'PUT',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			'X-Cyime-Edit-Lease': grant.leaseToken
 		},
 		body: JSON.stringify({ excerpt })
 	});
@@ -709,10 +719,12 @@ export async function updateDocumentImageTarget(
 	id: string,
 	preferredImageTargetId: string
 ): Promise<UpdateDocumentImageTargetResponse> {
+	const grant = await ensureDocumentEditLease(id);
 	const response = await apiFetch(`/api/v1/workspace/documents/${id}/image-target`, {
 		method: 'PUT',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			'X-Cyime-Edit-Lease': grant.leaseToken
 		},
 		body: JSON.stringify({ preferredImageTargetId })
 	});
@@ -729,10 +741,12 @@ export async function updateDocumentPublicAccess(
 	id: string,
 	publicAccess: 'private' | 'authenticated' | 'public' | string
 ): Promise<{ success: boolean; publicAccess: string; publicUrl: string }> {
+	const grant = await ensureDocumentEditLease(id);
 	const response = await apiFetch(`/api/v1/workspace/documents/${id}/public-access`, {
 		method: 'PUT',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			'X-Cyime-Edit-Lease': grant.leaseToken
 		},
 		body: JSON.stringify({ publicAccess })
 	});

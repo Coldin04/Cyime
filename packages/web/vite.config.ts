@@ -18,11 +18,6 @@ export default defineConfig({
 	],
 	server: {
 		proxy: {
-			'/api/v1/realtime/ws': {
-				target: 'ws://localhost:3001',
-				ws: true,
-				changeOrigin: true
-			},
 			'/api': {
 				target: 'http://localhost:8080',
 				changeOrigin: true

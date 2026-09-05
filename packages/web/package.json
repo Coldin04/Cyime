@@ -45,11 +45,8 @@
 		"wrangler": "^4.129.0"
 	},
 	"dependencies": {
-		"@hocuspocus/provider": "^3.4.4",
 		"@tiptap/core": "^3.20.4",
 		"@tiptap/extension-code-block-lowlight": "3.21.0",
-		"@tiptap/extension-collaboration": "^3.21.0",
-		"@tiptap/extension-collaboration-cursor": "3.0.0-next.6",
 		"@tiptap/extension-image": "^3.20.4",
 		"@tiptap/extension-link": "^3.20.4",
 		"@tiptap/extension-mathematics": "^3.21.0",
@@ -61,14 +58,11 @@
 		"@tiptap/markdown": "3.21.0",
 		"@tiptap/pm": "^3.20.4",
 		"@tiptap/starter-kit": "^3.20.4",
-		"@tiptap/y-tiptap": "^3.0.2",
 		"katex": "^0.16.44",
 		"lowlight": "^3.3.0",
 		"marked": "^17.0.4",
 		"mermaid": "^11.15.0",
 		"svelte-easy-crop": "^5.0.0",
-		"svelte-sonner": "^1.0.8",
-		"y-protocols": "^1.0.7",
-		"yjs": "^13.6.30"
+		"svelte-sonner": "^1.0.8"
 	}
 }

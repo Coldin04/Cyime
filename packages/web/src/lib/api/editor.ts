@@ -1,4 +1,11 @@
 import { apiFetch } from '$lib/api';
+import {
+	clearStoredEditLeaseToken,
+	getEditTabId,
+	getStoredEditLeaseToken,
+	storeEditLeaseToken
+} from '$lib/components/editor/editDevice';
+import { broadcastLeaseClaimed } from '$lib/components/editor/leaseBroadcast';
 import type { JSONContent } from '@tiptap/core';
 
 export type DocumentContent = {
@@ -61,7 +68,34 @@ export type UploadDocumentImageResponse = {
 export type EditorAPIError = Error & {
 	code?: string;
 	status?: number;
+	expiresAt?: string;
+	currentContentVersion?: number;
 };
+
+export type EditLeaseGrant = {
+	leaseToken: string;
+	expiresAt: string;
+};
+
+type EditorErrorBody = {
+	message?: string;
+	code?: string;
+	expiresAt?: string;
+	currentContentVersion?: number;
+};
+
+async function createEditorAPIError(
+	response: Response,
+	fallbackMessage: string
+): Promise<EditorAPIError> {
+	const body = await parseJSONResponse<EditorErrorBody>(response, fallbackMessage);
+	const error = new Error(body.message || fallbackMessage) as EditorAPIError;
+	error.code = body.code;
+	error.status = response.status;
+	error.expiresAt = body.expiresAt;
+	error.currentContentVersion = body.currentContentVersion;
+	return error;
+}
 
 async function parseJSONResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
 	const raw = await response.text();
@@ -115,22 +149,21 @@ export async function getPublicDocumentContent(documentId: string): Promise<Docu
 
 export async function updateDocumentContent(
 	documentId: string,
-	contentJson: JSONContent
+	contentJson: JSONContent,
+	leaseToken: string,
+	expectedContentVersion: number
 ): Promise<UpdateContentResponse> {
 	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/content`, {
 		method: 'PUT',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			'X-Cyime-Edit-Lease': leaseToken
 		},
-		body: JSON.stringify({ contentJson })
+		body: JSON.stringify({ contentJson, expectedContentVersion })
 	});
 
 	if (!response.ok) {
-		const error = await parseJSONResponse<{ message?: string }>(
-			response,
-			'Failed to update document content'
-		);
-		throw new Error(error.message || 'Failed to update document content');
+		throw await createEditorAPIError(response, 'Failed to update document content');
 	}
 
 	return parseJSONResponse<UpdateContentResponse>(
@@ -139,17 +172,85 @@ export async function updateDocumentContent(
 	);
 }
 
+export async function acquireDocumentEditLease(
+	documentId: string,
+	deviceId: string,
+	takeOver = false
+): Promise<EditLeaseGrant> {
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/lease`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			deviceId,
+			leaseToken: getStoredEditLeaseToken(documentId) || deviceId,
+			takeOver
+		})
+	});
+	if (!response.ok) {
+		throw await createEditorAPIError(response, 'Failed to acquire document edit lease');
+	}
+	const grant = await parseJSONResponse<EditLeaseGrant>(
+		response,
+		'Failed to parse edit lease response'
+	);
+	storeEditLeaseToken(documentId, grant.leaseToken);
+	// Same-browser tabs learn about a (re)claim instantly instead of waiting
+	// for their next ~20s renewal heartbeat to fail against the server.
+	broadcastLeaseClaimed(documentId, grant.leaseToken);
+	return grant;
+}
+
+export function ensureDocumentEditLease(documentId: string): Promise<EditLeaseGrant> {
+	return acquireDocumentEditLease(documentId, getEditTabId());
+}
+
+export async function renewDocumentEditLease(
+	documentId: string,
+	leaseToken: string
+): Promise<EditLeaseGrant> {
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/lease`, {
+		method: 'PUT',
+		headers: { 'X-Cyime-Edit-Lease': leaseToken }
+	});
+	if (!response.ok) {
+		throw await createEditorAPIError(response, 'Failed to renew document edit lease');
+	}
+	const grant = await parseJSONResponse<EditLeaseGrant>(
+		response,
+		'Failed to parse edit lease response'
+	);
+	storeEditLeaseToken(documentId, grant.leaseToken);
+	return grant;
+}
+
+export async function releaseDocumentEditLease(
+	documentId: string,
+	leaseToken: string
+): Promise<void> {
+	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/lease`, {
+		method: 'DELETE',
+		headers: { 'X-Cyime-Edit-Lease': leaseToken },
+		keepalive: true
+	});
+	if (!response.ok) {
+		throw await createEditorAPIError(response, 'Failed to release document edit lease');
+	}
+	clearStoredEditLeaseToken(documentId, leaseToken);
+}
+
 export async function uploadDocumentAsset(
 	documentId: string,
 	file: File,
 	visibility: 'private' | 'public' = 'private'
 ): Promise<UploadAssetResponse> {
+	const grant = await ensureDocumentEditLease(documentId);
 	const formData = new FormData();
 	formData.append('file', file);
 	formData.append('visibility', visibility);
 
 	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/assets`, {
 		method: 'POST',
+		headers: { 'X-Cyime-Edit-Lease': grant.leaseToken },
 		body: formData
 	});
 
@@ -168,6 +269,7 @@ export async function pasteDocumentImage(
 		targetId?: string;
 	} = {}
 ): Promise<UploadDocumentImageResponse> {
+	const grant = await ensureDocumentEditLease(documentId);
 	const formData = new FormData();
 	formData.append('file', file);
 	if (options.targetId && options.targetId.trim() !== '') {
@@ -176,6 +278,7 @@ export async function pasteDocumentImage(
 
 	const response = await apiFetch(`/api/v1/edit/documents/${documentId}/paste-image`, {
 		method: 'POST',
+		headers: { 'X-Cyime-Edit-Lease': grant.leaseToken },
 		body: formData
 	});
 
