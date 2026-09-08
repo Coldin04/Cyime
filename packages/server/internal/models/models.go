@@ -293,24 +293,27 @@ func (dbd *DocumentBody) BeforeCreate(tx *gorm.DB) (err error) {
 }
 
 // DocumentBody stores current canonical editor content for a document.
-//
-// YjsVersion is an optimistic-concurrency token bumped on every successful
-// PUT /api/v1/realtime/documents/:id/state. Writers must echo the version
-// they last observed; mismatches are rejected as 409 Conflict so a stale
-// or malicious client cannot blindly overwrite a fresher CRDT state.
 type DocumentBody struct {
 	ID             uuid.UUID      `gorm:"type:uuid;primary_key"`
 	DocumentID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex"`
 	ContentJSON    string         `gorm:"type:text;not null"`
 	PlainText      string         `gorm:"type:text;not null;default:''"`
 	ContentVersion int64          `gorm:"not null;default:1"`
-	YjsState       string         `gorm:"type:text"`
-	YjsStateVector string         `gorm:"type:text"`
-	YjsVersion     int64          `gorm:"not null;default:1"`
 	UpdatedBy      uuid.UUID      `gorm:"not null"`
 	CreatedAt      time.Time      `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time      `gorm:"autoUpdateTime"`
 	DeletedAt      gorm.DeletedAt `gorm:"index"`
+}
+
+// DocumentEditLease stores the single active editor session for a document.
+type DocumentEditLease struct {
+	DocumentID   uuid.UUID `gorm:"type:uuid;primaryKey"`
+	OwnerUserID  uuid.UUID `gorm:"type:uuid;not null;index"`
+	DeviceIDHash string    `gorm:"type:varchar(64);not null"`
+	TokenHash    string    `gorm:"type:varchar(64);not null"`
+	ExpiresAt    time.Time `gorm:"not null;index"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
 }
 
 // BeforeCreate will set a UUID rather than relying on the database to generate it.
@@ -555,6 +558,10 @@ func (Document) TableName() string {
 
 func (DocumentBody) TableName() string {
 	return "document_bodies"
+}
+
+func (DocumentEditLease) TableName() string {
+	return "document_edit_leases"
 }
 
 func (DocumentPermission) TableName() string {

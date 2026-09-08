@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
@@ -27,6 +28,7 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 		&models.Document{},
 		&models.Folder{},
 		&models.DocumentBody{},
+		&models.DocumentEditLease{},
 		&models.DocumentPermission{},
 		&models.BlobObject{},
 		&models.Asset{},
@@ -39,6 +41,15 @@ func setupContentTestDB(t *testing.T) *gorm.DB {
 
 	database.DB = db
 	return db
+}
+
+func claimContentLease(t *testing.T, db *gorm.DB, ownerID, documentID uuid.UUID) string {
+	t.Helper()
+	grant, err := editlease.New(db).Claim(ownerID, documentID, "test-device-"+uuid.NewString(), "", true)
+	if err != nil {
+		t.Fatalf("claim edit lease: %v", err)
+	}
+	return grant.Token
 }
 
 func seedContentPermission(t *testing.T, db *gorm.DB, documentID, userID, createdBy uuid.UUID, role string) {
@@ -138,7 +149,7 @@ func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	attackerID := uuid.New()
 	docID, contentID := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"before"}]}]}`)
 
-	if _, err := UpdateContent(attackerID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]}`)); err == nil {
+	if _, err := UpdateContent(attackerID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hacked"}]}]}`), "", 1); err == nil {
 		t.Fatal("expected cross-user update content to fail")
 	}
 
@@ -155,41 +166,16 @@ func TestUpdateContent_DeniesCrossUserAccessAndKeepsData(t *testing.T) {
 	}
 }
 
-func TestUpdateContent_AllowsEditorPermission(t *testing.T) {
+func TestUpdateContent_DeniesLegacyEditorPermission(t *testing.T) {
 	db := setupContentTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 	seedContentPermission(t, db, docID, editorID, ownerID, "editor")
 
-	blob := seedContentBlob(t, db, "owner/shared.png", "image/png", 12, "hash-shared")
-	asset := models.Asset{
-		ID:             uuid.New(),
-		OwnerUserID:    ownerID,
-		BlobID:         blob.ID,
-		Kind:           "image",
-		Filename:       "shared.png",
-		URL:            blob.URL,
-		Visibility:     "private",
-		Status:         "ready",
-		ReferenceCount: 0,
-		CreatedBy:      ownerID,
-	}
-	if err := db.Create(&asset).Error; err != nil {
-		t.Fatalf("create asset: %v", err)
-	}
-
-	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, asset.ID))
-	if _, err := UpdateContent(editorID, docID, payload); err != nil {
-		t.Fatalf("expected shared editor update to succeed, got %v", err)
-	}
-
-	var ref models.DocumentAssetRef
-	if err := db.First(&ref, "document_id = ? AND asset_id = ?", docID, asset.ID).Error; err != nil {
-		t.Fatalf("load ref: %v", err)
-	}
-	if ref.OwnerUserID != ownerID {
-		t.Fatalf("expected ref owner to stay document owner, got %s", ref.OwnerUserID)
+	payload := []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"blocked"}]}]}`)
+	if _, err := UpdateContent(editorID, docID, payload, "", 1); err == nil {
+		t.Fatal("expected legacy editor permission to be read-only")
 	}
 }
 
@@ -202,7 +188,7 @@ func TestUpdateContent_DeniesEditorWhenCollaborationDisabled(t *testing.T) {
 	docID, _ := seedDocumentForContent(t, db, ownerID, "owner-doc", `{"type":"doc","content":[{"type":"paragraph"}]}`)
 	seedContentPermission(t, db, docID, editorID, ownerID, "editor")
 
-	if _, err := UpdateContent(editorID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"blocked"}]}]}`)); err == nil {
+	if _, err := UpdateContent(editorID, docID, []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"blocked"}]}]}`), "", 1); err == nil {
 		t.Fatal("expected editor update to fail when collaboration is disabled")
 	}
 }
@@ -246,7 +232,8 @@ func TestUpdateContent_SyncsDocumentAssetRefsAndAssetState(t *testing.T) {
 	}
 
 	firstPayload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"src":"http://localhost/api/v1/media/assets/%s/content?token=x","assetId":"%s"}}]}`, assetA.ID, assetA.ID))
-	if _, err := UpdateContent(ownerID, docID, firstPayload); err != nil {
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+	if _, err := UpdateContent(ownerID, docID, firstPayload, leaseToken, 1); err != nil {
 		t.Fatalf("first update: %v", err)
 	}
 
@@ -267,7 +254,7 @@ func TestUpdateContent_SyncsDocumentAssetRefsAndAssetState(t *testing.T) {
 	}
 
 	secondPayload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"src":"http://localhost/api/v1/media/assets/%s/content","assetId":"%s"}}]}`, assetB.ID, assetB.ID))
-	if _, err := UpdateContent(ownerID, docID, secondPayload); err != nil {
+	if _, err := UpdateContent(ownerID, docID, secondPayload, leaseToken, 2); err != nil {
 		t.Fatalf("second update: %v", err)
 	}
 
@@ -318,7 +305,8 @@ func TestUpdateContent_RejectsForeignAssetReference(t *testing.T) {
 	}
 
 	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, foreignAsset.ID))
-	if _, err := UpdateContent(ownerID, docID, payload); err == nil || err.Error() != "content references invalid assets" {
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+	if _, err := UpdateContent(ownerID, docID, payload, leaseToken, 1); err == nil || err.Error() != "content references invalid assets" {
 		t.Fatalf("expected invalid asset error, got: %v", err)
 	}
 }
@@ -342,7 +330,8 @@ func TestUpdateContent_RejectsWhenWorkspaceStorageQuotaWouldBeExceeded(t *testin
 	}
 
 	payload := []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"this update should exceed workspace quota"}]}]}`)
-	if _, err := UpdateContent(ownerID, docID, payload); !errors.Is(err, ErrWorkspaceStorageQuotaExceeded) {
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+	if _, err := UpdateContent(ownerID, docID, payload, leaseToken, 1); !errors.Is(err, ErrWorkspaceStorageQuotaExceeded) {
 		t.Fatalf("expected workspace quota error, got: %v", err)
 	}
 
@@ -379,7 +368,8 @@ func TestDeleteAndRestoreContent_ReconcilesDocumentAssetRefs(t *testing.T) {
 	}
 
 	payload := []byte(fmt.Sprintf(`{"type":"doc","content":[{"type":"image","attrs":{"assetId":"%s"}}]}`, asset.ID))
-	if _, err := UpdateContent(ownerID, docID, payload); err != nil {
+	leaseToken := claimContentLease(t, db, ownerID, docID)
+	if _, err := UpdateContent(ownerID, docID, payload, leaseToken, 1); err != nil {
 		t.Fatalf("update content: %v", err)
 	}
 

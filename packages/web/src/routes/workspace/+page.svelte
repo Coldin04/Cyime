@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
@@ -20,7 +20,7 @@
 		batchDeleteFiles,
 		type FileItem
 	} from '$lib/api/workspace';
-	import { realtimeConfig } from '$lib/stores/realtime';
+	import { clientConfig } from '$lib/stores/clientConfig';
 	import { breadcrumbItems, workspaceContext } from '$lib/stores/workspace';
 	import * as m from '$paraglide/messages';
 	import { toast } from 'svelte-sonner';
@@ -35,9 +35,15 @@
 	let refreshTrigger = $state(0);
 	let isMoveDialogOpen = $state(false);
 	let isCopyDialogOpen = $state(false);
-	let realtimeConfigSignal = $state(get(realtimeConfig));
-	realtimeConfig.subscribe((state) => (realtimeConfigSignal = state));
-	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
+	let clientConfigSignal = $state(get(clientConfig));
+	const unsubscribeClientConfig = clientConfig.subscribe((state) => {
+		clientConfigSignal = state;
+	});
+	const collaborationEnabled = $derived(clientConfigSignal.config?.sharingEnabled ?? false);
+
+	onDestroy(() => {
+		unsubscribeClientConfig();
+	});
 
 	// Use local state for selected items to avoid store overhead during rapid selection
 	let bulkMode = $state(false);

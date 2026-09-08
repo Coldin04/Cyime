@@ -1,11 +1,13 @@
 package ai
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
@@ -28,6 +30,7 @@ func setupAIServiceTestDB(t *testing.T) *gorm.DB {
 		&models.Document{},
 		&models.Folder{},
 		&models.DocumentBody{},
+		&models.DocumentEditLease{},
 		&models.DocumentPermission{},
 		&models.BlobObject{},
 		&models.Asset{},
@@ -126,5 +129,30 @@ func TestUpdateMarkdownContentWritesMarkdown(t *testing.T) {
 	}
 	if body.ContentVersion != 2 {
 		t.Fatalf("stored content_version = %d, want 2", body.ContentVersion)
+	}
+}
+
+func TestUpdateMarkdownContentRejectsActiveBrowserLease(t *testing.T) {
+	db := setupAIServiceTestDB(t)
+	ownerID := uuid.New()
+	docID := seedAIMarkdownDocument(t, db, ownerID, "notes", "# Before\n\nold", 1)
+
+	grant, err := editlease.New(db).Claim(ownerID, docID, "browser-device", "", false)
+	if err != nil {
+		t.Fatalf("claim browser lease: %v", err)
+	}
+	if _, err := UpdateMarkdownContent(ownerID, docID, "# Overwritten"); !errors.Is(err, editlease.ErrLeaseHeld) {
+		t.Fatalf("AI update should be locked, got %v", err)
+	}
+	if _, err := editlease.New(db).Authorize(ownerID, docID, grant.Token); err != nil {
+		t.Fatalf("browser lease should remain valid: %v", err)
+	}
+
+	stored, err := GetMarkdownContent(ownerID, docID)
+	if err != nil {
+		t.Fatalf("load unchanged content: %v", err)
+	}
+	if !strings.Contains(stored.Content, "# Before") {
+		t.Fatalf("locked AI write changed content: %s", stored.Content)
 	}
 }

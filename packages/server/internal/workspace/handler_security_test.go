@@ -523,7 +523,7 @@ func TestListDocumentMembersHandler_RequiresMemberManagementAccess(t *testing.T)
 		wantStatus int
 	}{
 		{name: "owner", userID: ownerID, wantStatus: http.StatusOK},
-		{name: "collaborator", userID: collaboratorID, wantStatus: http.StatusOK},
+		{name: "collaborator", userID: collaboratorID, wantStatus: http.StatusNotFound},
 		{name: "editor", userID: editorID, wantStatus: http.StatusNotFound},
 		{name: "viewer", userID: viewerID, wantStatus: http.StatusNotFound},
 	}
@@ -551,7 +551,7 @@ func TestShareDocumentHandler_CreatesPermission(t *testing.T) {
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	app := newWorkspaceTestApp(ownerID)
-	body := bytes.NewBufferString(`{"userId":"` + targetUserID.String() + `","role":"editor"}`)
+	body := bytes.NewBufferString(`{"userId":"` + targetUserID.String() + `","role":"viewer"}`)
 	req := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/shares", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req, -1)
@@ -632,7 +632,7 @@ func TestInviteDocumentByEmailHandler_CreatesPermissionAndNotification(t *testin
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	app := newWorkspaceTestApp(ownerID)
-	body := bytes.NewBufferString(`{"email":"invitee@example.com","role":"editor"}`)
+	body := bytes.NewBufferString(`{"email":"invitee@example.com","role":"viewer"}`)
 	req := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req, -1)
@@ -717,7 +717,7 @@ func TestAcceptDocumentInviteHandler_UpdatesInviteStatusAndMarksNotificationRead
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
 	ownerApp := newWorkspaceTestApp(ownerID)
-	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"collaborator"}`)
+	inviteBody := bytes.NewBufferString(`{"email":"invitee@example.com","role":"viewer"}`)
 	inviteReq := httptest.NewRequest(http.MethodPost, "/documents/"+docID.String()+"/invites", inviteBody)
 	inviteReq.Header.Set("Content-Type", "application/json")
 	inviteResp, err := ownerApp.Test(inviteReq, -1)
@@ -763,8 +763,8 @@ func TestAcceptDocumentInviteHandler_UpdatesInviteStatusAndMarksNotificationRead
 	if err := db.Where("document_id = ? AND user_id = ? AND deleted_at IS NULL", docID, inviteeID).First(&permission).Error; err != nil {
 		t.Fatalf("load permission after accept: %v", err)
 	}
-	if permission.Role != "collaborator" {
-		t.Fatalf("expected collaborator role after accept, got %s", permission.Role)
+	if permission.Role != "viewer" {
+		t.Fatalf("expected viewer role after accept, got %s", permission.Role)
 	}
 
 	// 权限生效校验：接受后可读取该共享文档

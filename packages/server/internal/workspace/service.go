@@ -140,12 +140,10 @@ func resolveDocumentListExcerpt(autoExcerpt, manualExcerpt string) string {
 }
 
 func normalizePermissionRole(role string) string {
-	switch strings.TrimSpace(role) {
-	case acl.RoleViewer, acl.RoleEditor, acl.RoleCollaborator:
-		return strings.TrimSpace(role)
-	default:
-		return ""
+	if strings.TrimSpace(role) == acl.RoleViewer {
+		return acl.RoleViewer
 	}
+	return ""
 }
 
 func normalizePublicAccess(value string) string {
@@ -1144,9 +1142,8 @@ func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*Outgoing
 
 	managedQuery := database.DB.
 		Table("documents AS d").
-		Joins("LEFT JOIN document_permissions AS self_perms ON self_perms.document_id = d.id AND self_perms.user_id = ? AND self_perms.deleted_at IS NULL", userID).
 		Where("d.deleted_at IS NULL").
-		Where("(d.owner_user_id = ? OR self_perms.role = ?)", userID, acl.RoleCollaborator).
+		Where("d.owner_user_id = ?", userID).
 		Where(`
 			d.public_access <> ? OR EXISTS (
 				SELECT 1
@@ -1189,7 +1186,7 @@ func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*Outgoing
 			"d.preferred_image_target_id",
 			"d.folder_id",
 			"d.owner_user_id",
-			"self_perms.role AS my_role",
+			"'owner' AS my_role",
 			"d.public_access",
 			"(SELECT COUNT(1) FROM document_permissions AS member_perms WHERE member_perms.document_id = d.id AND member_perms.deleted_at IS NULL AND member_perms.user_id <> d.owner_user_id) AS shared_member_count",
 			"d.created_at",
@@ -1204,11 +1201,6 @@ func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*Outgoing
 
 	items := make([]OutgoingSharedDocumentItem, 0, len(rows))
 	for _, item := range rows {
-		myRole := item.MyRole
-		if item.OwnerUserID == userID {
-			myRole = acl.RoleOwner
-		}
-
 		items = append(items, OutgoingSharedDocumentItem{
 			DocumentID:             item.DocumentID,
 			Title:                  item.Title,
@@ -1216,7 +1208,7 @@ func ListOutgoingSharedDocuments(userID uuid.UUID, limit, offset int) (*Outgoing
 			DocumentType:           item.DocumentType,
 			PreferredImageTargetID: resolveDocumentPreferredImageTargetID(item.PreferredImageTargetID),
 			FolderID:               item.FolderID,
-			MyRole:                 myRole,
+			MyRole:                 acl.RoleOwner,
 			PublicAccess:           normalizePublicAccess(item.PublicAccess),
 			PublicURL:              buildDocumentPublicURL(item.DocumentID),
 			SharedMemberCount:      item.SharedMemberCount,

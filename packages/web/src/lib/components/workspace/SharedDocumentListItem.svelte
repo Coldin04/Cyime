@@ -3,9 +3,7 @@
 	import FileText from '~icons/ph/file-text';
 	import Table from '~icons/ph/table';
 	import DotsThreeVertical from '~icons/ph/dots-three-vertical';
-	import UsersThree from '~icons/ph/users-three';
 	import SignOut from '~icons/ph/sign-out';
-	import Pencil from '~icons/ph/pencil';
 	import Eye from '~icons/ph/eye';
 	import { goto } from '$app/navigation';
 	import { clickOutside } from '$lib/actions/clickOutside';
@@ -14,8 +12,7 @@
 
 	let {
 		doc,
-		onLeave,
-		onManageMembers
+		onLeave
 	}: {
 		doc: SharedDocumentItem;
 		onLeave: () => void;
@@ -25,25 +22,13 @@
 	let showMenu = $state(false);
 
 	function roleLabel(role: string) {
-		switch (role) {
-			case 'collaborator':
-				return m.workspace_shared_role_collaborator();
-			case 'editor':
-				return m.workspace_shared_role_editor();
-			default:
-				return m.workspace_shared_role_viewer();
-		}
+		void role;
+		return m.workspace_shared_role_viewer();
 	}
 
 	function roleClass(role: string) {
-		switch (role) {
-			case 'collaborator':
-				return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300';
-			case 'editor':
-				return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
-			default:
-				return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
-		}
+		void role;
+		return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
 	}
 
 	function formatRelativeTime(dateString: string): string {
@@ -69,11 +54,7 @@
 	}
 
 	function openDocument() {
-		const targetRoute =
-			doc.myRole === 'viewer'
-				? `/view/documents/${doc.documentId}`
-				: `/edit/documents/${doc.documentId}`;
-		goto(targetRoute);
+		goto(`/view/documents/${doc.documentId}`);
 	}
 
 	function handleClick() {
@@ -170,29 +151,9 @@
 							openDocument();
 						}}
 					>
-						{#if doc.myRole === 'viewer'}
 							<Eye class="h-4 w-4" />
 							<span>{m.common_open()}</span>
-						{:else}
-							<Pencil class="h-4 w-4" />
-							<span>{m.common_edit()}</span>
-						{/if}
-					</button>
-
-					{#if doc.myRole === 'collaborator'}
-						<button
-							type="button"
-							class="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-							role="menuitem"
-							onclick={() => {
-								closeMenu();
-								onManageMembers?.();
-							}}
-						>
-							<UsersThree class="h-4 w-4" />
-							<span>{m.workspace_shared_manage_members()}</span>
 						</button>
-					{/if}
 
 					<button
 						type="button"

@@ -12,17 +12,17 @@
 	import MediaTab from '$lib/components/user/MediaTab.svelte';
 	import ImageBedsTab from '$lib/components/user/ImageBedsTab.svelte';
 	import SharingTab from '$lib/components/user/SharingTab.svelte';
-	import { realtimeConfig } from '$lib/stores/realtime';
+	import { clientConfig } from '$lib/stores/clientConfig';
 
 	let tab = $derived($page.params.tab || 'overview');
-	let realtimeConfigSignal = $state(get(realtimeConfig));
-	const collaborationEnabled = $derived(realtimeConfigSignal.config?.collaborationEnabled ?? false);
-	const unsubscribeRealtimeConfig = realtimeConfig.subscribe((state) => {
-		realtimeConfigSignal = state;
+	let clientConfigSignal = $state(get(clientConfig));
+	const collaborationEnabled = $derived(clientConfigSignal.config?.sharingEnabled ?? false);
+	const unsubscribeClientConfig = clientConfig.subscribe((state) => {
+		clientConfigSignal = state;
 	});
 
 	onDestroy(() => {
-		unsubscribeRealtimeConfig();
+		unsubscribeClientConfig();
 	});
 
 	const titles: Record<string, any> = {
@@ -46,7 +46,7 @@
 	};
 
 	$effect(() => {
-		if (tab === 'sharing' && !realtimeConfigSignal.loading && !collaborationEnabled) {
+		if (tab === 'sharing' && !clientConfigSignal.loading && !collaborationEnabled) {
 			toast.error(m.workspace_shared_disabled());
 			void goto('/user');
 		}

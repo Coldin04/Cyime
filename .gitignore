@@ -9,6 +9,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Project-local dependency caches
+.corepack/
+.pnpm-store/
+.go/
+
 # Go
 # Binaries for programs and plugins
 *.exe

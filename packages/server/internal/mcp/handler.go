@@ -556,7 +556,7 @@ func callRenameFile(userID uuid.UUID, raw json.RawMessage) (any, error) {
 	}
 	switch fileType {
 	case "document":
-		err = workspace.UpdateDocumentTitle(userID, fileID, args.Name)
+		err = ai.RenameDocument(userID, fileID, args.Name)
 	case "folder":
 		err = workspace.UpdateFolderName(userID, fileID, args.Name)
 	}

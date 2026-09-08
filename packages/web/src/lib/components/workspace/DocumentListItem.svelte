@@ -31,9 +31,11 @@
 	} from '$lib/components/editor/documentImageTargets';
 	import { getImageBedConfigs, type ImageBedConfig } from '$lib/api/user';
 	import {
+		acquireDocumentEditLease,
 		getDocumentContent,
 		updateDocumentContent
 	} from '$lib/api/editor';
+	import { getEditTabId } from '$lib/components/editor/editDevice';
 	import type { ExportAction } from '$lib/export/exportActions';
 	import { exportActionRequiresPublicImageURLs } from '$lib/export/exportActions';
 	import { collectManagedImages } from '$lib/export/managedImages';
@@ -94,14 +96,15 @@
 	let isPreparingExport = $state(false);
 	let pendingExportAction = $state<ExportAction | null>(null);
 	let pendingExportContent = $state<JSONContent | null>(null);
+	let pendingExportContentVersion = $state(0);
 	let exportTargetId = $state('');
 	let manualCopyContent = $state('');
 	let manualCopyTitle = $state('');
 	const isMovingItem = $derived(isMoving && item.type === 'document');
 	const isCopyingItem = $derived(isCopying && item.type === 'document');
-	const canEditDocumentMeta = $derived(documentRole === 'owner' || documentRole === 'collaborator');
+	const canEditDocumentMeta = $derived(documentRole === 'owner');
 	const canManageDocumentMembers = $derived(
-		collaborationEnabled && (documentRole === 'owner' || documentRole === 'collaborator')
+		collaborationEnabled && documentRole === 'owner'
 	);
 	const availableImageTargets = $derived<DocumentImageTargetOption[]>(
 		getDocumentImageTargetOptions(imageBedConfigs)
@@ -396,6 +399,7 @@
 		isExportPrivateImagesDialogOpen = false;
 		pendingExportAction = null;
 		pendingExportContent = null;
+		pendingExportContentVersion = 0;
 		exportTargetId = '';
 	}
 
@@ -405,6 +409,7 @@
 		isExportPrivateImagesDialogOpen = false;
 		pendingExportAction = null;
 		pendingExportContent = null;
+		pendingExportContentVersion = 0;
 		exportTargetId = '';
 		const workflow = await loadDocumentExportWorkflow();
 		await workflow.performDocumentExport({
@@ -451,10 +456,13 @@
 		if (!pendingExportAction || !exportTargetId || isPreparingExport) return;
 
 		isPreparingExport = true;
+		let leaseToken = '';
 		try {
-			if (!pendingExportContent) {
+			if (!pendingExportContent || pendingExportContentVersion <= 0) {
 				throw new Error('Missing export content');
 			}
+			const grant = await acquireDocumentEditLease(item.id, getEditTabId());
+			leaseToken = grant.leaseToken;
 			const workflow = await loadDocumentExportWorkflow();
 			const exportContent = await workflow.prepareExportContentWithPublicImages({
 				documentId: item.id,
@@ -462,7 +470,12 @@
 				targetId: exportTargetId,
 				toastId: 'workspace-export-private-images'
 			});
-			await updateDocumentContent(item.id, workflow.normalizeManagedImagesForSave(exportContent));
+			await updateDocumentContent(
+				item.id,
+				workflow.normalizeManagedImagesForSave(exportContent),
+				leaseToken,
+				pendingExportContentVersion
+			);
 			const targetResult = await updateDocumentImageTarget(item.id, exportTargetId);
 			documentPreferredImageTargetId = targetResult.preferredImageTargetId;
 			onRefresh?.();
@@ -508,6 +521,7 @@
 			exportTargetId = preferredTarget?.id ?? exportImageTargetOptions[0].id;
 			pendingExportAction = action;
 			pendingExportContent = exportContent;
+			pendingExportContentVersion = contentResponse.contentVersion;
 			isExportPrivateImagesDialogOpen = true;
 		} catch (error) {
 			console.error('[Workspace Export] Failed to prepare export:', error);

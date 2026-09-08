@@ -34,6 +34,7 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 		&models.DocumentBody{},
 		&models.DocumentAssetRef{},
 		&models.DocumentPermission{},
+		&models.DocumentEditLease{},
 		&models.DocumentImageTargetPreference{},
 		&models.DocumentInvite{},
 		&models.Notification{},
@@ -45,6 +46,78 @@ func setupWorkspaceTestDB(t *testing.T) *gorm.DB {
 
 	database.DB = db
 	return db
+}
+
+func TestTransferDocumentOwnershipMovesAssetFreeDocumentAtomically(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	newOwnerID := uuid.New()
+	documentID := seedDocumentForWorkspace(t, db, ownerID, "transfer-me")
+	seedVerifiedUser(t, db, newOwnerID, "new-owner@example.com")
+	seedWorkspacePermission(t, db, documentID, newOwnerID, ownerID, acl.RoleViewer)
+	if err := db.Create(&models.DocumentEditLease{
+		DocumentID: documentID, OwnerUserID: ownerID, DeviceIDHash: "device", TokenHash: "token", ExpiresAt: time.Now().Add(time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("seed edit lease: %v", err)
+	}
+
+	result, err := TransferDocumentOwnership(ownerID, documentID, newOwnerID)
+	if err != nil {
+		t.Fatalf("transfer ownership: %v", err)
+	}
+	if result.PreviousOwnerID != ownerID || result.NewOwnerID != newOwnerID {
+		t.Fatalf("unexpected transfer result: %+v", result)
+	}
+
+	var document models.Document
+	if err := db.First(&document, "id = ?", documentID).Error; err != nil {
+		t.Fatalf("reload document: %v", err)
+	}
+	if document.OwnerUserID != newOwnerID || document.FolderID != nil {
+		t.Fatalf("document ownership was not moved cleanly: %+v", document)
+	}
+	var oldOwnerPermission models.DocumentPermission
+	if err := db.Where("document_id = ? AND user_id = ?", documentID, ownerID).Take(&oldOwnerPermission).Error; err != nil {
+		t.Fatalf("load previous owner permission: %v", err)
+	}
+	if oldOwnerPermission.Role != acl.RoleViewer {
+		t.Fatalf("previous owner role = %s", oldOwnerPermission.Role)
+	}
+	var newOwnerPermissionCount, leaseCount int64
+	if err := db.Model(&models.DocumentPermission{}).Where("document_id = ? AND user_id = ?", documentID, newOwnerID).Count(&newOwnerPermissionCount).Error; err != nil {
+		t.Fatalf("count new owner permissions: %v", err)
+	}
+	if err := db.Model(&models.DocumentEditLease{}).Where("document_id = ?", documentID).Count(&leaseCount).Error; err != nil {
+		t.Fatalf("count edit leases: %v", err)
+	}
+	if newOwnerPermissionCount != 0 || leaseCount != 0 {
+		t.Fatalf("expected target permission and active lease removed, permissions=%d leases=%d", newOwnerPermissionCount, leaseCount)
+	}
+}
+
+func TestTransferDocumentOwnershipRejectsManagedAssets(t *testing.T) {
+	db := setupWorkspaceTestDB(t)
+	ownerID := uuid.New()
+	newOwnerID := uuid.New()
+	documentID := seedDocumentForWorkspace(t, db, ownerID, "transfer-blocked")
+	seedVerifiedUser(t, db, newOwnerID, "new-owner@example.com")
+	seedWorkspacePermission(t, db, documentID, newOwnerID, ownerID, acl.RoleViewer)
+	if err := db.Create(&models.DocumentAssetRef{
+		ID: uuid.New(), DocumentID: documentID, AssetID: uuid.New(), OwnerUserID: ownerID, RefType: "editor_content",
+	}).Error; err != nil {
+		t.Fatalf("seed asset reference: %v", err)
+	}
+
+	if _, err := TransferDocumentOwnership(ownerID, documentID, newOwnerID); !errors.Is(err, ErrOwnershipTransferManagedAssets) {
+		t.Fatalf("expected managed asset transfer rejection, got %v", err)
+	}
+	var document models.Document
+	if err := db.First(&document, "id = ?", documentID).Error; err != nil {
+		t.Fatalf("reload document: %v", err)
+	}
+	if document.OwnerUserID != ownerID {
+		t.Fatalf("failed transfer changed owner to %s", document.OwnerUserID)
+	}
 }
 
 func seedVerifiedUser(t *testing.T, db *gorm.DB, userID uuid.UUID, email string) {
@@ -533,7 +606,7 @@ func TestUpdateDocumentImageTarget_DeniesCrossUserAccess(t *testing.T) {
 	}
 }
 
-func TestUpdateDocumentImageTarget_AllowsSharedEditorToSetPersonalPreference(t *testing.T) {
+func TestUpdateDocumentImageTarget_DeniesLegacySharedEditor(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
@@ -567,8 +640,8 @@ func TestUpdateDocumentImageTarget_AllowsSharedEditorToSetPersonalPreference(t *
 		t.Fatalf("create editor config: %v", err)
 	}
 
-	if err := UpdateDocumentImageTarget(editorID, docID, editorConfig.ID.String()); err != nil {
-		t.Fatalf("expected shared editor to set personal image target: %v", err)
+	if err := UpdateDocumentImageTarget(editorID, docID, editorConfig.ID.String()); err == nil {
+		t.Fatal("expected legacy shared editor image target update to fail")
 	}
 
 	var doc models.Document
@@ -579,32 +652,32 @@ func TestUpdateDocumentImageTarget_AllowsSharedEditorToSetPersonalPreference(t *
 		t.Fatalf("expected document default target unchanged, got %s", doc.PreferredImageTargetID)
 	}
 
-	var preference models.DocumentImageTargetPreference
-	if err := db.Where("document_id = ? AND user_id = ?", docID, editorID).First(&preference).Error; err != nil {
-		t.Fatalf("load personal image target preference: %v", err)
+	var preferenceCount int64
+	if err := db.Model(&models.DocumentImageTargetPreference{}).Where("document_id = ? AND user_id = ?", docID, editorID).Count(&preferenceCount).Error; err != nil {
+		t.Fatalf("count personal image target preferences: %v", err)
 	}
-	if preference.TargetID != editorConfig.ID.String() {
-		t.Fatalf("expected personal target %s, got %s", editorConfig.ID, preference.TargetID)
+	if preferenceCount != 0 {
+		t.Fatalf("expected no personal target preference, got %d", preferenceCount)
 	}
 }
 
-func TestUpdateDocumentTitle_AllowsEditor(t *testing.T) {
+func TestUpdateDocumentTitle_DeniesLegacyEditor(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 	seedWorkspacePermission(t, db, docID, editorID, ownerID, "editor")
 
-	if err := UpdateDocumentTitle(editorID, docID, "updated-by-editor"); err != nil {
-		t.Fatalf("expected editor title update success: %v", err)
+	if err := UpdateDocumentTitle(editorID, docID, "updated-by-editor"); err == nil {
+		t.Fatal("expected legacy editor title update to fail")
 	}
 
 	var doc models.Document
 	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
 		t.Fatalf("load document: %v", err)
 	}
-	if doc.Title != "updated-by-editor" {
-		t.Fatalf("expected updated title, got %s", doc.Title)
+	if doc.Title != "shared-doc" {
+		t.Fatalf("expected title to remain unchanged, got %s", doc.Title)
 	}
 }
 
@@ -620,30 +693,23 @@ func TestUpdateDocumentTitle_DeniesViewer(t *testing.T) {
 	}
 }
 
-func TestUpdateDocumentManualExcerpt_AllowsCollaborator(t *testing.T) {
+func TestUpdateDocumentManualExcerpt_DeniesLegacyCollaborator(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	collaboratorID := uuid.New()
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 	seedWorkspacePermission(t, db, docID, collaboratorID, ownerID, "collaborator")
 
-	manualExcerpt, excerpt, err := UpdateDocumentManualExcerpt(collaboratorID, docID, "手动介绍")
-	if err != nil {
-		t.Fatalf("expected collaborator manual excerpt update success: %v", err)
-	}
-	if manualExcerpt != "手动介绍" {
-		t.Fatalf("expected returned manual excerpt, got %q", manualExcerpt)
-	}
-	if excerpt != "手动介绍" {
-		t.Fatalf("expected returned excerpt to be manual text, got %q", excerpt)
+	if _, _, err := UpdateDocumentManualExcerpt(collaboratorID, docID, "手动介绍"); err == nil {
+		t.Fatal("expected legacy collaborator manual excerpt update to fail")
 	}
 
 	var doc models.Document
 	if err := db.First(&doc, "id = ?", docID).Error; err != nil {
 		t.Fatalf("load document: %v", err)
 	}
-	if doc.ManualExcerpt != "手动介绍" {
-		t.Fatalf("expected manual excerpt saved, got %q", doc.ManualExcerpt)
+	if doc.ManualExcerpt != "" {
+		t.Fatalf("expected manual excerpt to remain unchanged, got %q", doc.ManualExcerpt)
 	}
 }
 
@@ -686,14 +752,14 @@ func TestUpdateDocumentManualExcerpt_AllowsOwnerWhenCollaborationDisabled(t *tes
 	}
 }
 
-func TestShareDocument_AllowsOwnerToGrantEditor(t *testing.T) {
+func TestShareDocument_AllowsOwnerToGrantViewer(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	targetUserID := uuid.New()
 	seedVerifiedUser(t, db, targetUserID, targetUserID.String()+"@example.com")
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 
-	result, err := ShareDocument(ownerID, docID, targetUserID, "editor")
+	result, err := ShareDocument(ownerID, docID, targetUserID, "viewer")
 	if err != nil {
 		t.Fatalf("share document: %v", err)
 	}
@@ -715,7 +781,7 @@ func TestShareDocument_RevivesSoftDeletedPermission(t *testing.T) {
 	if _, err := RemoveDocumentMember(ownerID, docID, targetUserID); err != nil {
 		t.Fatalf("remove member: %v", err)
 	}
-	if _, err := ShareDocument(ownerID, docID, targetUserID, "editor"); err != nil {
+	if _, err := ShareDocument(ownerID, docID, targetUserID, "viewer"); err != nil {
 		t.Fatalf("re-share document: %v", err)
 	}
 
@@ -726,12 +792,12 @@ func TestShareDocument_RevivesSoftDeletedPermission(t *testing.T) {
 	if permission.DeletedAt.Valid {
 		t.Fatalf("expected permission revived")
 	}
-	if permission.Role != "editor" {
+	if permission.Role != "viewer" {
 		t.Fatalf("expected role updated, got %s", permission.Role)
 	}
 }
 
-func TestAcceptDocumentInviteRejectsInviteAfterInviterRevoked(t *testing.T) {
+func TestLegacyCollaboratorCannotInviteDocumentViewer(t *testing.T) {
 	db := setupWorkspaceTestDB(t)
 	ownerID := uuid.New()
 	collaboratorID := uuid.New()
@@ -741,22 +807,8 @@ func TestAcceptDocumentInviteRejectsInviteAfterInviterRevoked(t *testing.T) {
 	docID := seedDocumentForWorkspace(t, db, ownerID, "shared-doc")
 	seedWorkspacePermission(t, db, docID, collaboratorID, ownerID, acl.RoleCollaborator)
 
-	if _, err := InviteDocumentByEmail(collaboratorID, docID, "invitee@example.com", acl.RoleEditor); err != nil {
-		t.Fatalf("invite document: %v", err)
-	}
-
-	var invite models.DocumentInvite
-	if err := db.Where("document_id = ? AND inviter_user_id = ? AND invitee_user_id = ?", docID, collaboratorID, inviteeID).First(&invite).Error; err != nil {
-		t.Fatalf("load invite: %v", err)
-	}
-
-	if _, err := RemoveDocumentMember(ownerID, docID, collaboratorID); err != nil {
-		t.Fatalf("remove collaborator: %v", err)
-	}
-
-	err := AcceptDocumentInvite(inviteeID, invite.ID)
-	if !errors.Is(err, ErrInviteInvalidStatus) {
-		t.Fatalf("expected invalid invite status after inviter revocation, got %v", err)
+	if _, err := InviteDocumentByEmail(collaboratorID, docID, "invitee@example.com", acl.RoleViewer); err == nil {
+		t.Fatal("expected legacy collaborator invite to fail")
 	}
 
 	var permissionCount int64
@@ -769,13 +821,6 @@ func TestAcceptDocumentInviteRejectsInviteAfterInviterRevoked(t *testing.T) {
 		t.Fatalf("expected no invitee permission, got %d", permissionCount)
 	}
 
-	var updatedInvite models.DocumentInvite
-	if err := db.First(&updatedInvite, "id = ?", invite.ID).Error; err != nil {
-		t.Fatalf("reload invite: %v", err)
-	}
-	if updatedInvite.Status != documentInviteStatusCanceled {
-		t.Fatalf("expected invite canceled, got %s", updatedInvite.Status)
-	}
 }
 
 func TestListSharedDocuments_ReturnsPermissionedDocs(t *testing.T) {

@@ -454,7 +454,7 @@ func TestUploadDocumentAsset_RevivesSoftDeletedAssetOnUniqueConflict(t *testing.
 	}
 }
 
-func TestUploadDocumentAsset_AllowsSharedEditorAndUsesOwnerLibrary(t *testing.T) {
+func TestUploadDocumentAsset_DeniesLegacySharedEditor(t *testing.T) {
 	db := setupMediaTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
@@ -466,17 +466,14 @@ func TestUploadDocumentAsset_AllowsSharedEditorAndUsesOwnerLibrary(t *testing.T)
 	storageProvider = nil
 
 	header := makeFileHeader(t, "file", "photo.png", []byte("shared-content"))
-	result, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
+	_, err := UploadDocumentAsset(context.Background(), UploadAssetRequest{
 		DocumentID: docID,
 		UserID:     editorID,
 		FileHeader: header,
 		Visibility: "private",
 	})
-	if err != nil {
-		t.Fatalf("upload by shared editor: %v", err)
-	}
-	if result.Asset.OwnerUserID != ownerID {
-		t.Fatalf("expected asset owner to stay document owner, got %s", result.Asset.OwnerUserID)
+	if err == nil {
+		t.Fatal("expected legacy shared editor upload to fail")
 	}
 }
 
@@ -890,7 +887,7 @@ func TestListOwnedAssets_IncludesDeletedWhenRequested(t *testing.T) {
 	}
 }
 
-func TestListSharedEditableAssets_ReturnsOnlyEditorScopedManagedAssets(t *testing.T) {
+func TestListSharedEditableAssets_ReturnsNoAssetsForLegacySharedRoles(t *testing.T) {
 	db := setupMediaTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
@@ -934,11 +931,8 @@ func TestListSharedEditableAssets_ReturnsOnlyEditorScopedManagedAssets(t *testin
 	if err != nil {
 		t.Fatalf("list shared editor assets: %v", err)
 	}
-	if len(editorResult.Items) != 1 || editorResult.Items[0].ID != asset.ID {
-		t.Fatalf("unexpected editor shared assets: %+v", editorResult.Items)
-	}
-	if editorResult.Items[0].DocumentCount != 1 {
-		t.Fatalf("expected one shared document, got %+v", editorResult.Items[0])
+	if len(editorResult.Items) != 0 {
+		t.Fatalf("legacy editor should not get shared editable assets: %+v", editorResult.Items)
 	}
 
 	viewerResult, err := ListSharedEditableAssets(ListAssetsRequest{

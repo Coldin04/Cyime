@@ -52,7 +52,7 @@ func TestUploadDocumentImage_UsesManagedR2ForLegacyDocuments(t *testing.T) {
 	}
 }
 
-func TestUploadDocumentImage_FallsBackToManagedR2WhenSharedTargetBelongsToAnotherUser(t *testing.T) {
+func TestUploadDocumentImage_DeniesLegacySharedEditor(t *testing.T) {
 	db := setupMediaTestDB(t)
 	ownerID := uuid.New()
 	editorID := uuid.New()
@@ -83,23 +83,13 @@ func TestUploadDocumentImage_FallsBackToManagedR2WhenSharedTargetBelongsToAnothe
 	t.Cleanup(func() { storageProvider = nil })
 
 	header := makeFileHeader(t, "file", "shared.png", []byte("managed-fallback"))
-	result, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
+	_, err := UploadDocumentImage(context.Background(), UploadDocumentImageRequest{
 		DocumentID: docID,
 		UserID:     editorID,
 		FileHeader: header,
 	})
-	if err != nil {
-		t.Fatalf("upload document image: %v", err)
-	}
-
-	if result.TargetID != documentImageTargetManagedR2 {
-		t.Fatalf("expected managed-r2 fallback target, got %s", result.TargetID)
-	}
-	if result.Mode != documentImageModeManagedAsset {
-		t.Fatalf("expected managed asset mode, got %s", result.Mode)
-	}
-	if result.AssetID == nil {
-		t.Fatalf("expected managed fallback to return asset id")
+	if err == nil {
+		t.Fatal("expected legacy shared editor upload to fail")
 	}
 }
 

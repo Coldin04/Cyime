@@ -6,13 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"g.co1d.in/Coldin04/Cyime/server/internal/acl"
 	"g.co1d.in/Coldin04/Cyime/server/internal/content"
 	"g.co1d.in/Coldin04/Cyime/server/internal/database"
-	"g.co1d.in/Coldin04/Cyime/server/internal/models"
+	"g.co1d.in/Coldin04/Cyime/server/internal/editlease"
 	"g.co1d.in/Coldin04/Cyime/server/internal/workspace"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 var (
@@ -93,29 +91,27 @@ func updateMarkdownContent(userID uuid.UUID, documentID uuid.UUID, markdown stri
 		return nil, err
 	}
 
-	var result *content.UpdateContentResult
-	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		document, err := acl.CanEditDocument(tx, userID, documentID)
+	manager := editlease.New(database.DB)
+	grant, err := manager.Claim(userID, documentID, "api-operation-"+uuid.NewString(), "", false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = manager.Release(userID, documentID, grant.Token) }()
+
+	version := expectedVersion
+	if version == nil {
+		current, err := content.GetContent(userID, documentID)
 		if err != nil {
-			return content.ErrDocumentNotFoundOrUnauthorized
+			return nil, err
 		}
+		version = &current.ContentVersion
+	}
 
-		if expectedVersion != nil {
-			var body models.DocumentBody
-			if err := tx.Where("document_id = ?", documentID).First(&body).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return content.ErrDocumentContentNotFound
-				}
-				return err
-			}
-			if body.ContentVersion != *expectedVersion {
-				return ErrVersionConflict
-			}
-		}
-
-		result, err = content.PersistCanonicalContent(tx, document, userID, contentJSON, nil)
-		return err
-	})
+	result, err := content.UpdateContent(userID, documentID, contentJSON, grant.Token, *version)
+	var conflict *content.ContentVersionConflictError
+	if errors.As(err, &conflict) {
+		return nil, ErrVersionConflict
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +132,16 @@ func PatchMarkdownContent(userID uuid.UUID, documentID uuid.UUID, operations []P
 		return nil, err
 	}
 	return updateMarkdownContent(userID, documentID, patched, &current.Version)
+}
+
+func RenameDocument(userID, documentID uuid.UUID, title string) error {
+	manager := editlease.New(database.DB)
+	grant, err := manager.Claim(userID, documentID, "api-operation-"+uuid.NewString(), "", false)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = manager.Release(userID, documentID, grant.Token) }()
+	return workspace.UpdateDocumentTitle(userID, documentID, title)
 }
 
 func CreateMarkdownDocument(userID uuid.UUID, input CreateMarkdownDocumentInput) (*CreateMarkdownDocumentResult, error) {
