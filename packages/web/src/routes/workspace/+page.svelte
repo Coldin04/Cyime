@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import GreetingHeader from '$lib/components/workspace/GreetingHeader.svelte';
 	import Toolbar from '$lib/components/workspace/Toolbar.svelte';
@@ -36,8 +36,14 @@
 	let isMoveDialogOpen = $state(false);
 	let isCopyDialogOpen = $state(false);
 	let clientConfigSignal = $state(get(clientConfig));
-	clientConfig.subscribe((state) => (clientConfigSignal = state));
+	const unsubscribeClientConfig = clientConfig.subscribe((state) => {
+		clientConfigSignal = state;
+	});
 	const collaborationEnabled = $derived(clientConfigSignal.config?.sharingEnabled ?? false);
+
+	onDestroy(() => {
+		unsubscribeClientConfig();
+	});
 
 	// Use local state for selected items to avoid store overhead during rapid selection
 	let bulkMode = $state(false);

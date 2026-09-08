@@ -80,7 +80,7 @@ Cloudflare Pages 构建如果涉及 Node 内建模块兼容，仓库内已经提
 - `packages/server` 是 Go API 服务。
 - 独立 realtime 服务及其 Yjs 状态接口已经退役。
 - 编辑器固定使用 `PUT /api/v1/edit/documents/:id/content` 保存规范化的 `ContentJSON`。
-- 正文、编辑属性和上传统一受设备级编辑租约保护；同一设备的标签页复用令牌。
+- 正文、编辑属性和上传统一受编辑租约保护；租约令牌按浏览器标签页隔离存储（`sessionStorage`），同一标签页刷新可复用令牌，但同一设备打开多个标签页编辑同一文档需要显式接管。
 - MCP/Open API 写入使用一次性操作租约，文档正被浏览器编辑时会返回锁定错误。
 - 非 owner 访问编辑页会转到只读页面，前端不初始化 Yjs、WebSocket 或在线状态。
 
