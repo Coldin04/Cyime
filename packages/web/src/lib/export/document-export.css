@@ -1,0 +1,94 @@
+html,
+body {
+	background: var(--cy-document-page-bg);
+	margin: 0;
+	min-height: 100%;
+	-webkit-print-color-adjust: exact;
+	print-color-adjust: exact;
+}
+
+body {
+	color: var(--cy-document-text);
+}
+
+.cy-document .cy-export-mermaid {
+	page-break-inside: avoid;
+}
+
+.cy-document .cy-export-code-details {
+	background: var(--cy-document-page-bg);
+	border-top: 1px solid var(--cy-document-border);
+}
+
+.cy-document .cy-export-code-details summary {
+	color: var(--cy-document-muted);
+	cursor: pointer;
+	font-size: 0.78rem;
+	font-weight: 600;
+	padding: 0.45rem 0.75rem;
+}
+
+.cy-document .cy-export-code-details pre {
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	margin: 0;
+}
+
+@media print {
+	@page {
+		margin: 16mm;
+	}
+
+	:root,
+	:root.dark {
+		color-scheme: light;
+		--cy-document-page-bg: #ffffff;
+		--cy-document-text: #18181b;
+		--cy-document-muted: #52525b;
+		--cy-document-border: #d4d4d8;
+		--cy-document-border-strong: #d4d4d8;
+		--cy-document-surface-soft: #f4f4f5;
+		--cy-document-surface-muted: #fafafa;
+		--cy-document-code-bg: #f4f4f5;
+		--cy-document-pre-border: #cbd5e1;
+		--cy-document-pre-bg: #f8fafc;
+		--cy-document-pre-fg: #111827;
+		--cy-document-code-comment: #64748b;
+		--cy-document-code-string: #166534;
+		--cy-document-code-number: #9a3412;
+		--cy-document-code-keyword: #1d4ed8;
+		--cy-document-code-type: #0e7490;
+		--cy-document-code-title: #854d0e;
+		--cy-document-code-variable: #6b21a8;
+		--cy-document-code-operator: #374151;
+		--cy-document-quote-bg: #fafafa;
+		--cy-document-table-head: #f1f5f9;
+		--cy-document-link: #0369a1;
+		--cy-document-danger: #dc2626;
+	}
+
+	body {
+		background: #ffffff;
+	}
+
+	.cy-document {
+		padding: 0;
+	}
+
+	.cy-document pre,
+	.cy-document table,
+	.cy-document blockquote,
+	.cy-document .cy-export-mermaid {
+		break-inside: avoid;
+	}
+
+	.cy-document :where(pre, blockquote, table, th, td, .cy-export-mermaid) {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+
+	.cy-document .cy-export-code-details:not([open]) {
+		display: none;
+	}
+}

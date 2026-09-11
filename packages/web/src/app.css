@@ -1,4 +1,5 @@
 @import 'katex/dist/katex.min.css';
+@import './lib/document/document-content.css';
 @import './lib/components/editor/editor-content.css';
 
 @tailwind base;
