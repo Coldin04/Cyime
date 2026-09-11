@@ -86,7 +86,7 @@ export function exportMarkdown(contentJson: JSONContent): string {
 			.map((block) => renderInline(block.content ?? []))
 			.join('<br>')
 			.replace(/ {2}\n|\n/g, '<br>')
-			.replaceAll('|', '\\|')
+.replaceAll('\\', '\\\\').replaceAll('|', '\\|')
 			.trim();
 	}
 
