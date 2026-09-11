@@ -10,6 +10,8 @@ import { TableRow } from '@tiptap/extension-table-row';
 import katex from 'katex';
 import { common, createLowlight } from 'lowlight';
 import { CyImage } from '$lib/components/editor/CyImage';
+import documentContentCss from '$lib/document/document-content.css?raw';
+import documentExportCss from '$lib/export/document-export.css?raw';
 
 type ExportNode = {
 	type?: string;
@@ -111,20 +113,6 @@ function highlightCodeForExport(source: string, language: string): string {
 	} catch {
 		return escapeHtml(source);
 	}
-}
-
-function escapeMarkdown(value: string): string {
-	return value.replaceAll('[', '\\[').replaceAll(']', '\\]');
-}
-
-function normalizeCodeBlockLanguageInfo(value: unknown): string {
-	if (typeof value !== 'string') {
-		return '';
-	}
-	return value
-		.trim()
-		.replace(/[\s`]+/g, '')
-		.slice(0, 32);
 }
 
 function isMermaidLanguage(value: string | null | undefined): boolean {
@@ -256,9 +244,6 @@ function enhanceExportHtml(html: string): string {
 		const language = Array.from(code.classList)
 			.find((className) => className.startsWith('language-'))
 			?.slice('language-'.length);
-		if (language) {
-			pre.setAttribute('data-language', language);
-		}
 		code.innerHTML = highlightCodeForExport(code.textContent ?? '', language ?? '');
 	}
 
@@ -361,6 +346,7 @@ export async function exportHtmlDocument(options: {
 }): Promise<string> {
 	const { title, contentJson, includeKatexCssLink = true, colorMode = isDarkMode() ? 'dark' : 'light' } = options;
 	const darkMode = colorMode === 'dark';
+	const htmlClass = darkMode ? ' class="dark"' : '';
 	const generatedBody = enhanceExportHtml(renderKatexInHtml(generateHTML(contentJson, exportExtensions())));
 	const renderedBody = await renderMermaidInHtml(generatedBody, colorMode);
 	const safeTitle = title.trim() || 'Cyime Export';
@@ -369,371 +355,21 @@ export async function exportHtmlDocument(options: {
 		: '';
 
 	return `<!doctype html>
-<html lang="en">
+<html lang="en"${htmlClass}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(safeTitle)}</title>
   ${katexLink}
-  <style>
-    :root {
-      color-scheme: ${darkMode ? 'dark' : 'light'};
-      --page-bg: ${darkMode ? '#09090b' : '#ffffff'};
-      --text: ${darkMode ? '#f4f4f5' : '#18181b'};
-      --muted: ${darkMode ? '#a1a1aa' : '#71717a'};
-      --border: ${darkMode ? '#3f3f46' : '#d4d4d8'};
-      --surface: ${darkMode ? '#18181b' : '#fafafa'};
-      --surface-soft: ${darkMode ? '#27272a' : '#f4f4f5'};
-      --code-bg: ${darkMode ? '#18181b' : '#f8fafc'};
-      --code-fg: ${darkMode ? '#e5e7eb' : '#1f2937'};
-      --code-border: ${darkMode ? '#52525b' : '#cbd5e1'};
-      --code-label: ${darkMode ? '#a1a1aa' : '#64748b'};
-      --code-comment: ${darkMode ? '#a1a1aa' : '#64748b'};
-      --code-string: ${darkMode ? '#86efac' : '#15803d'};
-      --code-number: ${darkMode ? '#fdba74' : '#b45309'};
-      --code-keyword: ${darkMode ? '#93c5fd' : '#1d4ed8'};
-      --code-type: ${darkMode ? '#67e8f9' : '#0e7490'};
-      --code-title: ${darkMode ? '#fde68a' : '#a16207'};
-      --code-variable: ${darkMode ? '#c4b5fd' : '#7e22ce'};
-      --code-operator: ${darkMode ? '#e5e7eb' : '#374151'};
-      --accent: ${darkMode ? '#38bdf8' : '#0284c7'};
-      --table-head: ${darkMode ? '#27272a' : '#f4f4f5'};
-      --table-stripe: ${darkMode ? '#18181b' : '#fafafa'};
-      --danger: ${darkMode ? '#f87171' : '#dc2626'};
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 48px 20px;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: var(--text);
-      background: var(--page-bg);
-      line-height: 1.72;
-    }
-    main { max-width: 920px; margin: 0 auto; }
-    h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.55em 0 0.65em; }
-    p { margin: 0.8em 0; }
-    a { color: var(--accent); text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; }
-    img { display: block; max-width: 100%; height: auto; margin: 1rem auto; border-radius: 8px; }
-    code {
-      border-radius: 0.35rem;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.92em;
-    }
-    :not(pre) > code {
-      background: var(--surface-soft);
-      color: var(--text);
-      padding: 0.12rem 0.28rem;
-    }
-    pre {
-      position: relative;
-      overflow-x: auto;
-      margin: 1rem 0;
-      padding: 0.95rem 1rem;
-      border: 0;
-      border-left: 3px solid var(--code-border);
-      border-radius: 6px;
-      background: var(--code-bg);
-      color: var(--code-fg);
-      line-height: 1.65;
-      page-break-inside: avoid;
-    }
-    pre[data-language] { padding-top: 1.9rem; }
-    pre[data-language]::before {
-      content: attr(data-language);
-      position: absolute;
-      top: 0.45rem;
-      right: 0.65rem;
-      color: var(--code-label);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.68rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    pre code { background: transparent; color: inherit; padding: 0; }
-    .hljs-comment,
-    .hljs-quote { color: var(--code-comment); font-style: italic; }
-    .hljs-string,
-    .hljs-regexp,
-    .hljs-symbol { color: var(--code-string); }
-    .hljs-number,
-    .hljs-literal { color: var(--code-number); }
-    .hljs-keyword,
-    .hljs-meta { color: var(--code-keyword); font-weight: 650; }
-    .hljs-type,
-    .hljs-built_in { color: var(--code-type); }
-    .hljs-title,
-    .hljs-title.function_,
-    .hljs-name { color: var(--code-title); }
-    .hljs-variable,
-    .hljs-params,
-    .hljs-attr { color: var(--code-variable); }
-    .hljs-operator,
-    .hljs-punctuation { color: var(--code-operator); }
-    blockquote {
-      margin: 1.25rem 0;
-      padding: 0.85rem 1rem;
-      border-left: 3px solid var(--accent);
-      border-radius: 0 8px 8px 0;
-      background: var(--surface-soft);
-      color: var(--text);
-    }
-    .tableWrapper { overflow-x: auto; margin: 0.9rem 0; }
-    table {
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 0.88rem;
-      line-height: 1.38;
-    }
-    th, td {
-      min-width: 4.75rem;
-      border-right: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-      padding: 0.42rem 0.55rem;
-      text-align: left;
-      vertical-align: top;
-    }
-    th:last-child, td:last-child { border-right: 0; }
-    tr:last-child > th, tr:last-child > td { border-bottom: 0; }
-    th { background: var(--table-head); font-weight: 650; }
-    tbody tr:nth-child(even) td { background: var(--table-stripe); }
-    .cy-export-mermaid {
-      margin: 1.25rem 0;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--surface);
-      page-break-inside: avoid;
-    }
-    .cy-export-mermaid__chart {
-      overflow-x: auto;
-      padding: 1rem;
-      text-align: center;
-    }
-    .cy-export-mermaid__chart svg {
-      display: inline-block;
-      max-width: 100%;
-      height: auto;
-      vertical-align: middle;
-    }
-    .cy-export-mermaid__chart--error {
-      color: var(--danger);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.85rem;
-      text-align: left;
-      white-space: pre-wrap;
-    }
-    .cy-export-code-details {
-      border-top: 1px solid var(--border);
-      background: var(--page-bg);
-    }
-    .cy-export-code-details summary {
-      cursor: pointer;
-      padding: 0.45rem 0.75rem;
-      color: var(--muted);
-      font-size: 0.78rem;
-      font-weight: 650;
-    }
-    .cy-export-code-details pre {
-      margin: 0;
-      border: 0;
-      border-radius: 0;
-    }
-    @media print {
-      :root {
-        color-scheme: light;
-        --page-bg: #ffffff;
-        --text: #18181b;
-        --muted: #52525b;
-        --border: #d4d4d8;
-        --surface: #ffffff;
-        --surface-soft: #f4f4f5;
-        --code-bg: #f8fafc;
-        --code-fg: #111827;
-        --code-border: #cbd5e1;
-        --code-label: #64748b;
-        --code-comment: #64748b;
-        --code-string: #166534;
-        --code-number: #9a3412;
-        --code-keyword: #1d4ed8;
-        --code-type: #0e7490;
-        --code-title: #854d0e;
-        --code-variable: #6b21a8;
-        --code-operator: #374151;
-        --accent: #0369a1;
-        --table-head: #f1f5f9;
-        --table-stripe: #fafafa;
-      }
-      body { padding: 0; background: #ffffff; }
-      main { max-width: none; }
-      pre, table, blockquote, .cy-export-mermaid { break-inside: avoid; }
-      .tableWrapper { margin: 0.7rem 0; }
-      table { font-size: 0.82rem; line-height: 1.28; }
-      th, td { min-width: 4rem; padding: 0.32rem 0.42rem; }
-      .cy-export-code-details:not([open]) { display: none; }
-      a { color: #0369a1; }
-    }
-  </style>
+  <style>\n${documentContentCss}\n${documentExportCss}\n  </style>
 </head>
 <body>
-  <main>${renderedBody}</main>
+  <main class="cy-document">${renderedBody}</main>
 </body>
 </html>`;
 }
 
-export function exportMarkdown(contentJson: JSONContent): string {
-	const lines: string[] = [];
-
-	function renderInline(nodes: ExportNode[] = []): string {
-		let output = '';
-
-		for (const node of nodes) {
-			switch (node.type) {
-				case 'text': {
-					let text = node.text ?? '';
-					const marks = node.marks ?? [];
-					const isCode = marks.some((mark) => mark.type === 'code');
-					const isBold = marks.some((mark) => mark.type === 'bold');
-					const isItalic = marks.some((mark) => mark.type === 'italic');
-					const linkMark = marks.find((mark) => mark.type === 'link');
-
-					if (isCode) {
-						text = `\`${text.replaceAll('`', '\\`')}\``;
-					} else {
-						if (isBold) text = `**${text}**`;
-						if (isItalic) text = `*${text}*`;
-					}
-
-					if (linkMark?.attrs?.href && typeof linkMark.attrs.href === 'string') {
-						text = `[${text}](${linkMark.attrs.href})`;
-					}
-
-					output += text;
-					break;
-				}
-				case 'hardBreak':
-					output += '  \n';
-					break;
-				case 'inlineMath':
-					output += `$${typeof node.attrs?.latex === 'string' ? node.attrs.latex : ''}$`;
-					break;
-				case 'image': {
-					const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
-					const title = typeof node.attrs?.title === 'string' ? node.attrs.title : '';
-					const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : title;
-					output += `![${escapeMarkdown(alt)}](${src})`;
-					break;
-				}
-				default:
-					output += renderInline(node.content ?? []);
-			}
-		}
-
-		return output;
-	}
-
-	function renderNode(node: ExportNode | undefined, depth = 0, orderedIndex = 1) {
-		if (!node) return;
-
-		switch (node.type) {
-			case 'doc':
-				for (const child of node.content ?? []) renderNode(child, depth);
-				return;
-			case 'paragraph':
-				lines.push(renderInline(node.content ?? []));
-				lines.push('');
-				return;
-			case 'heading': {
-				const level = typeof node.attrs?.level === 'number' ? node.attrs.level : 1;
-				lines.push(`${'#'.repeat(Math.min(6, Math.max(1, level)))} ${renderInline(node.content ?? [])}`);
-				lines.push('');
-				return;
-			}
-			case 'bulletList':
-				for (const child of node.content ?? []) renderNode(child, depth + 1);
-				lines.push('');
-				return;
-			case 'orderedList': {
-				let nextIndex = 1;
-				for (const child of node.content ?? []) {
-					renderNode(child, depth + 1, nextIndex);
-					nextIndex += 1;
-				}
-				lines.push('');
-				return;
-			}
-			case 'listItem': {
-				const firstParagraph = (node.content ?? []).find((child) => child.type === 'paragraph');
-				const fallbackContent = firstParagraph?.content ?? node.content ?? [];
-				const marker = orderedIndex > 0 ? `${orderedIndex}.` : '-';
-				lines.push(`${'  '.repeat(Math.max(0, depth - 1))}${marker} ${renderInline(fallbackContent)}`);
-				for (const child of node.content ?? []) {
-					if (child.type === 'paragraph') continue;
-					renderNode(child, depth);
-				}
-				return;
-			}
-			case 'blockquote': {
-				const nestedLines: string[] = [];
-				const originalLines = lines.splice(0, lines.length);
-				for (const child of node.content ?? []) renderNode(child, depth);
-				nestedLines.push(...lines);
-				lines.splice(0, lines.length, ...originalLines);
-				for (const line of nestedLines.filter((entry) => entry !== '')) {
-					lines.push(`> ${line}`);
-				}
-				lines.push('');
-				return;
-			}
-			case 'codeBlock':
-				lines.push(`\`\`\`${normalizeCodeBlockLanguageInfo(node.attrs?.language)}`);
-				lines.push(getText(node));
-				lines.push('```');
-				lines.push('');
-				return;
-			case 'horizontalRule':
-				lines.push('---');
-				lines.push('');
-				return;
-			case 'blockMath':
-				lines.push('$$');
-				lines.push(typeof node.attrs?.latex === 'string' ? node.attrs.latex : '');
-				lines.push('$$');
-				lines.push('');
-				return;
-			case 'image': {
-				const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
-				if (src) {
-					const title = typeof node.attrs?.title === 'string' ? node.attrs.title : '';
-					const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : title;
-					lines.push(`![${escapeMarkdown(alt)}](${src})`);
-					lines.push('');
-				}
-				return;
-			}
-			default: {
-				const inline = renderInline(node.content ?? []);
-				if (inline.trim() !== '') {
-					lines.push(inline);
-					lines.push('');
-				}
-			}
-		}
-	}
-
-	renderNode(contentJson as ExportNode);
-
-	while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
-		lines.pop();
-	}
-
-	return lines.join('\n');
-}
+export { exportMarkdown } from './documentMarkdown';
 
 function escapeBBCodeText(value: string): string {
 	return value.replaceAll('[', '&#91;').replaceAll(']', '&#93;');

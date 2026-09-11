@@ -848,16 +848,10 @@
 
 		const editorRootClass = [
 			'tiptap',
+			'cy-document',
 			'min-h-full',
 			'w-full',
-			'px-4',
-			'py-6',
-			'text-base',
-			'text-zinc-800',
-			'outline-none',
-			'dark:text-zinc-100',
-			'sm:px-8',
-			'lg:px-[14%]'
+			'outline-none'
 		]
 			.filter(Boolean)
 			.join(' ');
