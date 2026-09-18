@@ -98,18 +98,28 @@ function highlightCodeForExport(source: string, language: string): string {
 	if (isMermaidLanguage(language)) {
 		return escapeHtml(source);
 	}
+	if (!source) {
+		return '';
+	}
 
 	try {
 		if (language) {
 			try {
 				const result = lowlight.highlight(language, source);
-				return renderLowlightNodes((result.children ?? []) as LowlightNode[]);
+				const rendered = renderLowlightNodes((result.children ?? []) as LowlightNode[]);
+				if (rendered) {
+					return rendered;
+				}
 			} catch {
 				// fall back to auto-detection below
 			}
 		}
+		// highlightAuto returns an empty children array (not plain text) when it
+		// can't confidently detect a language, so an empty render must fall back
+		// to the escaped source instead of leaving the code block blank.
 		const result = lowlight.highlightAuto(source);
-		return renderLowlightNodes((result.children ?? []) as LowlightNode[]);
+		const rendered = renderLowlightNodes((result.children ?? []) as LowlightNode[]);
+		return rendered || escapeHtml(source);
 	} catch {
 		return escapeHtml(source);
 	}
