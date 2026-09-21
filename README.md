@@ -1,6 +1,10 @@
 # Cyime
 
-🍋 Cyime —— 青柠写 轻快写作，随云流动，支持多方案图片上传的云文档
+🍋 Cyime —— 青柠写 轻快写作，随云流动，支持多方案图片上传的云文档。
+
+Cyime 可以一键将编写文章的媒体发布到图床，也可以支持在编写时上传到图床，只需要像粘贴文字一样粘贴图片既可完成。
+
+请注意，该项目目前来说确实已经可用，但仍然有很多地方不够完善，包括自部署的文档。如果有任何问题，欢迎联系 me@cold04.com 并说明来意，我会尽我所能来帮助你。
 
 ![Cyime Homepage Preview Light](packages/web/src/lib/assets/home_preview_light.png)
 ![Cyime Homepage Preview Dark](packages/web/src/lib/assets/home_preview_dark.png)
